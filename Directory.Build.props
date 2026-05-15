@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RepositoryUrl>https://github.com/GuanceCloud/rum-windows-sdk</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <HasGitMetadata Condition="Exists('$(MSBuildThisFileDirectory).git')">true</HasGitMetadata>
+    <EnableSourceControlManagerQueries Condition="'$(HasGitMetadata)' != 'true'">false</EnableSourceControlManagerQueries>
+    <PublishRepositoryUrl Condition="'$(HasGitMetadata)' == 'true'">true</PublishRepositoryUrl>
+    <EmbedUntrackedSources Condition="'$(HasGitMetadata)' == 'true'">true</EmbedUntrackedSources>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Authors>GuanceCloud</Authors>
+    <Company>GuanceCloud</Company>
+  </PropertyGroup>
+</Project>

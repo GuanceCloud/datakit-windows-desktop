@@ -1,0 +1,12 @@
+<Window
+    x:Class="WinUI3Sample.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border Padding="24">
+        <StackPanel Spacing="12">
+            <TextBlock Text="Guance RUM WinUI 3 Sample" FontSize="22" />
+            <Button x:Name="LoadButton" Content="Send HTTP request" Click="OnLoadClicked" />
+            <Button x:Name="ErrorButton" Content="Generate error" Click="OnErrorClicked" />
+        </StackPanel>
+    </Border>
+</Window>

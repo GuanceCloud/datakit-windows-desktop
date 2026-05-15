@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64, x86]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          $zigVersion = "0.13.0"
+          $zip = Join-Path $env:RUNNER_TEMP "zig.zip"
+          $dir = Join-Path $env:RUNNER_TEMP "zig"
+          Invoke-WebRequest -Uri "https://ziglang.org/download/$zigVersion/zig-windows-x86_64-$zigVersion.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dir
+          $zig = Join-Path $dir "zig-windows-x86_64-$zigVersion\zig.exe"
+          "ZIG=$zig" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build native ${{ matrix.arch }}
+        shell: pwsh
+        run: |
+          $args = @("-ExecutionPolicy", "Bypass", "-File", "build\native-windows-zig.ps1", "-Zig", $env:ZIG, "-TargetArch", "${{ matrix.arch }}")
+          if ("${{ matrix.arch }}" -ne "x64") {
+            $args += "-SkipSmoke"
+          }
+          powershell @args
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-win-${{ matrix.arch }}
+          path: src/Guance.Rum.NativeCore/bin/win-${{ matrix.arch }}/guance_rum_native.dll
+
+  managed:
+    runs-on: windows-latest
+    needs: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-win-x64
+          path: src/Guance.Rum.NativeCore/bin/win-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-win-arm64
+          path: src/Guance.Rum.NativeCore/bin/win-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-win-x86
+          path: src/Guance.Rum.NativeCore/bin/win-x86
+      - run: dotnet restore Guance.Rum.Windows.sln
+      - run: dotnet test tests/Guance.Rum.Windows.Tests/Guance.Rum.Windows.Tests.csproj -c Release
+      - run: dotnet build src/Guance.Rum.Windows/Guance.Rum.Windows.csproj -c Release -f net6.0
+      - run: dotnet build src/Guance.Rum.Windows/Guance.Rum.Windows.csproj -c Release -f net6.0-windows10.0.17763.0
+      - name: Pack, verify, and consumer smoke
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File build\pack.ps1 -OutputDirectory dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: managed-package
+          path: |
+            dist/*.nupkg
+            dist/*.snupkg
+            dist/release-manifest.json
