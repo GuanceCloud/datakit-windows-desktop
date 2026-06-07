@@ -19,3 +19,4 @@ build/native/
 out/
 dist/
 dist-*/
+/docs/

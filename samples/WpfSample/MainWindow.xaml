@@ -2,11 +2,151 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Guance RUM WPF Sample"
-        Width="480"
-        Height="280">
-    <StackPanel Margin="24" VerticalAlignment="Center">
-        <TextBlock Text="Guance RUM WPF Sample" FontSize="22" Margin="0,0,0,16" />
-        <Button x:Name="LoadButton" Content="Send HTTP request" Padding="12,8" Click="OnLoadClicked" />
-        <Button x:Name="ErrorButton" Content="Generate error" Padding="12,8" Margin="0,12,0,0" Click="OnErrorClicked" />
-    </StackPanel>
+        Width="920"
+        Height="680"
+        MinWidth="760"
+        MinHeight="560">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="160" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="Guance RUM WPF Sample" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="Interactive SDK examples" Margin="0,4,0,0" Foreground="#666666" />
+        </StackPanel>
+
+        <TabControl Grid.Row="1" Margin="0,14,0,12">
+            <TabItem Header="User &amp; Context">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="User ID" VerticalAlignment="Center" Margin="0,0,12,8" />
+                            <TextBox x:Name="UserIdBox" Grid.Row="0" Grid.Column="1" Text="sample-user-001" Margin="0,0,0,8" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Name" VerticalAlignment="Center" Margin="0,0,12,8" />
+                            <TextBox x:Name="UserNameBox" Grid.Row="1" Grid.Column="1" Text="WPF Sample User" Margin="0,0,0,8" />
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Email" VerticalAlignment="Center" Margin="0,0,12,8" />
+                            <TextBox x:Name="UserEmailBox" Grid.Row="2" Grid.Column="1" Text="sample@example.com" Margin="0,0,0,8" />
+                        </Grid>
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Content="Set User" Padding="14,8" Margin="0,0,8,8" Click="OnSetUserClicked" />
+                            <Button Content="Clear User" Padding="14,8" Margin="0,0,8,8" Click="OnClearUserClicked" />
+                            <Button Content="Add Global Context" Padding="14,8" Margin="0,0,8,8" Click="OnAddGlobalContextClicked" />
+                            <Button Content="Add RUM Context" Padding="14,8" Margin="0,0,8,8" Click="OnAddRumContextClicked" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="View &amp; Action">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="View" VerticalAlignment="Center" Margin="0,0,12,8" />
+                            <TextBox x:Name="ViewNameBox" Grid.Row="0" Grid.Column="1" Text="WpfManualView" Margin="0,0,0,8" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Action" VerticalAlignment="Center" Margin="0,0,12,8" />
+                            <TextBox x:Name="ActionNameBox" Grid.Row="1" Grid.Column="1" Text="SampleAction" Margin="0,0,0,8" />
+                        </Grid>
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Content="Start View" Padding="14,8" Margin="0,0,8,8" Click="OnStartViewClicked" />
+                            <Button Content="Stop View" Padding="14,8" Margin="0,0,8,8" Click="OnStopViewClicked" />
+                            <Button Content="Scoped Action" Padding="14,8" Margin="0,0,8,8" Click="OnScopedActionClicked" />
+                            <Button Content="Add Action" Padding="14,8" Margin="0,0,8,8" Click="OnAddActionClicked" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Resource">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <TextBlock Text="Resource URL" Margin="0,0,0,6" />
+                        <TextBox x:Name="ResourceUrlBox" Text="https://example.com/" Margin="0,0,0,16" />
+                        <WrapPanel>
+                            <Button Content="HTTP Success" Padding="14,8" Margin="0,0,8,8" Click="OnAutoHttpSuccessClicked" />
+                            <Button Content="HTTP Failure" Padding="14,8" Margin="0,0,8,8" Click="OnAutoHttpFailureClicked" />
+                            <Button Content="Manual Resource Success" Padding="14,8" Margin="0,0,8,8" Click="OnManualResourceSuccessClicked" />
+                            <Button Content="Manual Resource Error" Padding="14,8" Margin="0,0,8,8" Click="OnManualResourceErrorClicked" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Error &amp; LongTask">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <WrapPanel>
+                            <Button Content="Add Exception Error" Padding="14,8" Margin="0,0,8,8" Click="OnAddExceptionErrorClicked" />
+                            <Button Content="Add Custom Error" Padding="14,8" Margin="0,0,8,8" Click="OnAddCustomErrorClicked" />
+                            <Button Content="Add Long Task" Padding="14,8" Margin="0,0,8,8" Click="OnAddLongTaskClicked" />
+                            <Button Content="Block UI Thread" Padding="14,8" Margin="0,0,8,8" Click="OnBlockUiThreadClicked" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Session Replay">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <TextBlock Text="Replay Input" Margin="0,0,0,6" />
+                        <TextBox x:Name="ReplayPrivacyBox" Text="sample@example.com" Margin="0,0,0,12" />
+                        <Border x:Name="ReplayHiddenTarget" BorderBrush="#CCCCCC" BorderThickness="1" Padding="12" Margin="0,0,0,16">
+                            <TextBlock Text="Element used by hidden-element privacy calls" />
+                        </Border>
+                        <WrapPanel>
+                            <Button Content="Start Recording" Padding="14,8" Margin="0,0,8,8" Click="OnStartReplayClicked" />
+                            <Button Content="Stop Recording" Padding="14,8" Margin="0,0,8,8" Click="OnStopReplayClicked" />
+                            <Button Content="Mask Text" Padding="14,8" Margin="0,0,8,8" Click="OnMaskReplayTextClicked" />
+                            <Button Content="Allow Text" Padding="14,8" Margin="0,0,8,8" Click="OnAllowReplayTextClicked" />
+                            <Button Content="Hide Touch" Padding="14,8" Margin="0,0,8,8" Click="OnHideReplayTouchClicked" />
+                            <Button Content="Show Touch" Padding="14,8" Margin="0,0,8,8" Click="OnShowReplayTouchClicked" />
+                            <Button Content="Hide Element" Padding="14,8" Margin="0,0,8,8" Click="OnHideReplayElementClicked" />
+                            <Button Content="Show Element" Padding="14,8" Margin="0,0,8,8" Click="OnShowReplayElementClicked" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Diagnostics">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <WrapPanel>
+                            <Button Content="Flush" Padding="14,8" Margin="0,0,8,8" Click="OnFlushClicked" />
+                            <Button Content="Snapshot" Padding="14,8" Margin="0,0,8,8" Click="OnSnapshotClicked" />
+                            <Button Content="Add Listener" Padding="14,8" Margin="0,0,8,8" Click="OnAddDiagnosticListenerClicked" />
+                            <Button Content="Remove Listener" Padding="14,8" Margin="0,0,8,8" Click="OnRemoveDiagnosticListenerClicked" />
+                            <Button Content="Clear Log" Padding="14,8" Margin="0,0,8,8" Click="OnClearLogClicked" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <TextBox x:Name="SampleLogBox"
+                 Grid.Row="2"
+                 IsReadOnly="True"
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto"
+                 FontFamily="Consolas"
+                 FontSize="12" />
+    </Grid>
 </Window>

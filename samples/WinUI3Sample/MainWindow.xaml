@@ -2,11 +2,124 @@
     x:Class="WinUI3Sample.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Border Padding="24">
-        <StackPanel Spacing="12">
-            <TextBlock Text="Guance RUM WinUI 3 Sample" FontSize="22" />
-            <Button x:Name="LoadButton" Content="Send HTTP request" Click="OnLoadClicked" />
-            <Button x:Name="ErrorButton" Content="Generate error" Click="OnErrorClicked" />
-        </StackPanel>
+    <Border Padding="16">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="160" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Spacing="4">
+                <TextBlock Text="Guance RUM WinUI 3 Sample" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Interactive SDK examples" Foreground="Gray" />
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="1" Margin="0,14,0,12" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="16">
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="User &amp; Context" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="User ID" />
+                            <TextBox x:Name="UserIdBox" Text="sample-user-001" />
+                            <TextBlock Text="Name" />
+                            <TextBox x:Name="UserNameBox" Text="WinUI Sample User" />
+                            <TextBlock Text="Email" />
+                            <TextBox x:Name="UserEmailBox" Text="sample@example.com" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Set User" Click="OnSetUserClicked" />
+                                <Button Content="Clear User" Click="OnClearUserClicked" />
+                                <Button Content="Add Global Context" Click="OnAddGlobalContextClicked" />
+                                <Button Content="Add RUM Context" Click="OnAddRumContextClicked" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="View &amp; Action" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="View" />
+                            <TextBox x:Name="ViewNameBox" Text="WinUIManualView" />
+                            <TextBlock Text="Action" />
+                            <TextBox x:Name="ActionNameBox" Text="SampleAction" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Start View" Click="OnStartViewClicked" />
+                                <Button Content="Stop View" Click="OnStopViewClicked" />
+                                <Button Content="Scoped Action" Click="OnScopedActionClicked" />
+                                <Button Content="Add Action" Click="OnAddActionClicked" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Resource" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="Resource URL" />
+                            <TextBox x:Name="ResourceUrlBox" Text="https://example.com/" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="HTTP Success" Click="OnAutoHttpSuccessClicked" />
+                                <Button Content="HTTP Failure" Click="OnAutoHttpFailureClicked" />
+                                <Button Content="Manual Resource Success" Click="OnManualResourceSuccessClicked" />
+                                <Button Content="Manual Resource Error" Click="OnManualResourceErrorClicked" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Error &amp; LongTask" FontSize="16" FontWeight="SemiBold" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Add Exception Error" Click="OnAddExceptionErrorClicked" />
+                                <Button Content="Add Custom Error" Click="OnAddCustomErrorClicked" />
+                                <Button Content="Add Long Task" Click="OnAddLongTaskClicked" />
+                                <Button Content="Block UI Thread" Click="OnBlockUiThreadClicked" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Session Replay" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="Replay Input" />
+                            <TextBox x:Name="ReplayPrivacyBox" Text="sample@example.com" />
+                            <Border x:Name="ReplayHiddenTarget" BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                                <TextBlock Text="Element used by hidden-element privacy calls" />
+                            </Border>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Start Recording" Click="OnStartReplayClicked" />
+                                <Button Content="Stop Recording" Click="OnStopReplayClicked" />
+                                <Button Content="Mask Text" Click="OnMaskReplayTextClicked" />
+                                <Button Content="Allow Text" Click="OnAllowReplayTextClicked" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Hide Touch" Click="OnHideReplayTouchClicked" />
+                                <Button Content="Show Touch" Click="OnShowReplayTouchClicked" />
+                                <Button Content="Hide Element" Click="OnHideReplayElementClicked" />
+                                <Button Content="Show Element" Click="OnShowReplayElementClicked" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Diagnostics" FontSize="16" FontWeight="SemiBold" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Flush" Click="OnFlushClicked" />
+                                <Button Content="Snapshot" Click="OnSnapshotClicked" />
+                                <Button Content="Add Listener" Click="OnAddDiagnosticListenerClicked" />
+                                <Button Content="Remove Listener" Click="OnRemoveDiagnosticListenerClicked" />
+                                <Button Content="Clear Log" Click="OnClearLogClicked" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <TextBox x:Name="SampleLogBox"
+                     Grid.Row="2"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap" />
+        </Grid>
     </Border>
 </Window>
