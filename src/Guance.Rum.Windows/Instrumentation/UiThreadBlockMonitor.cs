@@ -12,7 +12,7 @@ internal sealed class UiThreadBlockMonitor : IDisposable
     private readonly TimeSpan cooldown;
     private readonly object gate = new();
     private System.Threading.Timer? timer;
-    private DateTimeOffset lastReportedAt = DateTimeOffset.MinValue;
+    private long? lastReportedAt;
     private int suppressedCount;
 
     public UiThreadBlockMonitor(RumClient client, SynchronizationContext context, TimeSpan interval, TimeSpan threshold, TimeSpan cooldown)
@@ -43,11 +43,11 @@ internal sealed class UiThreadBlockMonitor : IDisposable
             var elapsed = TimeSpan.FromSeconds((double)elapsedTicks / Stopwatch.Frequency);
             if (elapsed >= threshold)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = Clock.Timestamp();
                 int suppressed;
                 lock (gate)
                 {
-                    if (cooldown > TimeSpan.Zero && now - lastReportedAt < cooldown)
+                    if (cooldown > TimeSpan.Zero && lastReportedAt is not null && Clock.ElapsedSince(lastReportedAt.Value) < cooldown)
                     {
                         suppressedCount++;
                         return;
@@ -64,9 +64,9 @@ internal sealed class UiThreadBlockMonitor : IDisposable
                     new Dictionary<string, object?>
                     {
                         [RumConstants.LongTaskSource] = "ui_thread_block_monitor",
-                        [RumConstants.LongTaskDelay] = (long)(elapsed.TotalMilliseconds * 1_000_000),
-                        [RumConstants.LongTaskThreshold] = (long)(threshold.TotalMilliseconds * 1_000_000),
-                        [RumConstants.LongTaskCooldown] = (long)(cooldown.TotalMilliseconds * 1_000_000),
+                        [RumConstants.LongTaskDelay] = Clock.DurationNanoseconds(elapsed),
+                        [RumConstants.LongTaskThreshold] = Clock.DurationNanoseconds(threshold),
+                        [RumConstants.LongTaskCooldown] = Clock.DurationNanoseconds(cooldown),
                         [RumConstants.LongTaskSuppressedCount] = suppressed
                     });
             }

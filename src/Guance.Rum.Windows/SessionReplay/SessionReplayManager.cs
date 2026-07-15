@@ -241,17 +241,22 @@ internal sealed class SessionReplayManager : IAsyncDisposable
     private bool AddPendingNoLock(SessionReplayContext context, object record, long timestampMilliseconds, bool hasFullSnapshot, string creationReason, string? coalesceKey = null)
     {
         pendingContext = context;
+        var coalesced = false;
         if (!string.IsNullOrWhiteSpace(coalesceKey) &&
             coalescedPendingIndexes.TryGetValue(coalesceKey, out var index) &&
             index >= 0 &&
-            index < pending.Count &&
-            timestampMilliseconds - pending[index].TimestampMilliseconds <= IncrementalCoalesceWindow.TotalMilliseconds)
+            index < pending.Count)
         {
-            var estimatedBytes = EstimateRecordBytes(record);
-            pendingEstimatedBytes = Math.Max(0, pendingEstimatedBytes - pending[index].EstimatedBytes + estimatedBytes);
-            pending[index] = new TimestampedReplayRecord(record, timestampMilliseconds, coalesceKey, estimatedBytes);
+            if (IsWithinCoalesceWindow(timestampMilliseconds, pending[index].TimestampMilliseconds))
+            {
+                var estimatedBytes = EstimateRecordBytes(record);
+                pendingEstimatedBytes = Math.Max(0, pendingEstimatedBytes - pending[index].EstimatedBytes + estimatedBytes);
+                pending[index] = new TimestampedReplayRecord(record, timestampMilliseconds, coalesceKey, estimatedBytes);
+                coalesced = true;
+            }
         }
-        else
+
+        if (!coalesced)
         {
             if (!string.IsNullOrWhiteSpace(coalesceKey))
             {
@@ -270,6 +275,17 @@ internal sealed class SessionReplayManager : IAsyncDisposable
         }
 
         return pending.Count >= config.SessionReplay.SegmentRecordLimit || pendingEstimatedBytes >= config.SessionReplay.SegmentBytesLimit;
+    }
+
+    internal static bool IsWithinCoalesceWindow(long timestampMilliseconds, long previousTimestampMilliseconds)
+    {
+        if (timestampMilliseconds < previousTimestampMilliseconds)
+        {
+            return false;
+        }
+
+        var elapsedMilliseconds = (ulong)timestampMilliseconds - (ulong)previousTimestampMilliseconds;
+        return elapsedMilliseconds <= (ulong)IncrementalCoalesceWindow.TotalMilliseconds;
     }
 
     private void EnsureSessionSampling(string sessionId)

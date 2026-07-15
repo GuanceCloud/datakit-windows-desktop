@@ -75,7 +75,7 @@ public sealed class RumResourceTiming
 
     private static long ToNanoseconds(TimeSpan value)
     {
-        return (long)(value.TotalMilliseconds * 1_000_000);
+        return Clock.DurationNanoseconds(value);
     }
 
     private static string BuildPhase(TimeSpan? dns, TimeSpan? tcp, TimeSpan? ssl, TimeSpan? ttfb)

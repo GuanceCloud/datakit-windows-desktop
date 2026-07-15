@@ -235,8 +235,9 @@ public sealed class RumClient : IAsyncDisposable
     public void AddAction(string name, string type, TimeSpan duration, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
-        var action = new ActiveAction(Guid.NewGuid().ToString("N"), name, type, SnapshotView(), Clock.UnixTimeNanoseconds(), Stopwatch.StartNew(), properties);
-        TrackAction(action, (long)(duration.TotalMilliseconds * 1_000_000));
+        var durationNanoseconds = Clock.DurationNanoseconds(duration);
+        var action = new ActiveAction(Guid.NewGuid().ToString("N"), name, type, SnapshotView(), Clock.UnixTimeNanosecondsBefore(duration), Stopwatch.StartNew(), properties);
+        TrackAction(action, durationNanoseconds);
     }
 
     internal void StopAction(string actionId)
@@ -404,13 +405,14 @@ public sealed class RumClient : IAsyncDisposable
         session.Touch();
         var view = SnapshotView();
         var action = SnapshotAction();
-        var rumEvent = CreateEvent(RumConstants.MeasurementLongTask, Clock.UnixTimeNanoseconds() - (long)(duration.TotalMilliseconds * 1_000_000))
+        var durationNanoseconds = Clock.DurationNanoseconds(duration);
+        var rumEvent = CreateEvent(RumConstants.MeasurementLongTask, Clock.UnixTimeNanosecondsBefore(duration))
             .WithTag(RumConstants.ViewId, view?.Id)
             .WithTag(RumConstants.ViewName, view?.Name)
             .WithTag(RumConstants.ViewReferrer, view?.Referrer)
             .WithTag(RumConstants.ActionId, action?.Id)
             .WithTag(RumConstants.ActionName, action?.Name)
-            .WithField(RumConstants.LongTaskDuration, (long)(duration.TotalMilliseconds * 1_000_000))
+            .WithField(RumConstants.LongTaskDuration, durationNanoseconds)
             .WithField(RumConstants.LongTaskStack, stack ?? string.Empty);
 
         AddFields(rumEvent, properties);
@@ -963,7 +965,7 @@ public sealed class RumClient : IAsyncDisposable
             int number => number,
             double number => (long)number,
             float number => (long)number,
-            TimeSpan duration => (long)(duration.TotalMilliseconds * 1_000_000),
+            TimeSpan duration => Clock.DurationNanoseconds(duration),
             _ when long.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), out var parsed) => parsed,
             _ => null
         };
@@ -1104,7 +1106,8 @@ public sealed class RumClient : IAsyncDisposable
         private static readonly TimeSpan MaxDelay = TimeSpan.FromMinutes(5);
         private readonly TimeSpan baseDelay;
         private readonly object gate = new();
-        private DateTimeOffset nextAttempt = DateTimeOffset.MinValue;
+        private long retryScheduledAt;
+        private TimeSpan retryDelay;
         private int attempt;
 
         public RetryBackoff(TimeSpan baseDelay)
@@ -1116,7 +1119,7 @@ public sealed class RumClient : IAsyncDisposable
         {
             lock (gate)
             {
-                return DateTimeOffset.UtcNow >= nextAttempt;
+                return retryDelay <= TimeSpan.Zero || Clock.ElapsedSince(retryScheduledAt) >= retryDelay;
             }
         }
 
@@ -1125,7 +1128,8 @@ public sealed class RumClient : IAsyncDisposable
             lock (gate)
             {
                 attempt = 0;
-                nextAttempt = DateTimeOffset.MinValue;
+                retryScheduledAt = 0;
+                retryDelay = TimeSpan.Zero;
             }
         }
 
@@ -1136,7 +1140,8 @@ public sealed class RumClient : IAsyncDisposable
                 attempt = Math.Min(attempt + 1, 10);
                 var delayMilliseconds = Math.Min(MaxDelay.TotalMilliseconds, baseDelay.TotalMilliseconds * Math.Pow(2, attempt - 1));
                 var jitter = 0.8 + (Random.Shared.NextDouble() * 0.4);
-                nextAttempt = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(Math.Max(1, delayMilliseconds * jitter));
+                retryScheduledAt = Clock.Timestamp();
+                retryDelay = TimeSpan.FromMilliseconds(Math.Max(1, delayMilliseconds * jitter));
             }
         }
     }

@@ -20,6 +20,8 @@ struct RumEvent {
 
 std::string format_line_protocol(const RumEvent& event);
 int64_t unix_time_nanoseconds();
+int64_t monotonic_time_nanoseconds();
+bool is_within_forward_window(int64_t timestamp, int64_t previous_timestamp, int64_t window);
 std::string uuid32();
 
 } // namespace guance::rum

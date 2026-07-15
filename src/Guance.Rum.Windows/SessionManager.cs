@@ -5,7 +5,7 @@ internal sealed class SessionManager
     private static readonly TimeSpan SessionTimeout = TimeSpan.FromMinutes(30);
     private readonly object gate = new();
     private readonly SamplingController sampling;
-    private DateTimeOffset lastActivity = DateTimeOffset.UtcNow;
+    private long lastActivity = Clock.Timestamp();
 
     public SessionManager(SamplingController sampling)
     {
@@ -22,8 +22,8 @@ internal sealed class SessionManager
     {
         lock (gate)
         {
-            var now = DateTimeOffset.UtcNow;
-            if (now - lastActivity >= SessionTimeout)
+            var now = Clock.Timestamp();
+            if (Clock.ElapsedSince(lastActivity) >= SessionTimeout)
             {
                 SessionId = Guid.NewGuid().ToString("N");
                 sampling.Refresh();

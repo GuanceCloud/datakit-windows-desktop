@@ -24,6 +24,20 @@ namespace {
 constexpr int64_t kReplaySegmentFlushMilliseconds = 5000;
 constexpr int64_t kReplayCoalesceMilliseconds = 200;
 
+int64_t non_negative_duration(int64_t duration_ns) {
+    return std::max<int64_t>(duration_ns, 0);
+}
+
+int64_t elapsed_since(int64_t started_monotonic_ns) {
+    return non_negative_duration(monotonic_time_nanoseconds() - started_monotonic_ns);
+}
+
+int64_t unix_time_before(int64_t duration_ns) {
+    const auto now = unix_time_nanoseconds();
+    const auto safe_duration_ns = non_negative_duration(duration_ns);
+    return safe_duration_ns >= now ? 0 : now - safe_duration_ns;
+}
+
 std::string str_or_empty(const char* value) {
     return value == nullptr ? std::string{} : std::string(value);
 }
@@ -620,7 +634,7 @@ void RumCore::start_view(const char* name) {
             replay_pending_bytes_ = 0;
         }
         previous = active_view_;
-        active_view_ = View{uuid32(), str_or_empty(name), previous ? previous->name : std::string{}, unix_time_nanoseconds()};
+        active_view_ = View{uuid32(), str_or_empty(name), previous ? previous->name : std::string{}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
         replay_index_in_view_ = 0;
         if (session_replay_recording_) {
             capture_session_replay_snapshot();
@@ -631,7 +645,7 @@ void RumCore::start_view(const char* name) {
         event.tags["view_id"] = previous->id;
         event.tags["view_name"] = previous->name;
         event.tags["view_referrer"] = previous->referrer;
-        event.fields["time_spent"] = unix_time_nanoseconds() - previous->started_ns;
+        event.fields["time_spent"] = elapsed_since(previous->started_monotonic_ns);
         event.fields["is_active"] = false;
         event.fields["view_action_count"] = static_cast<int64_t>(previous->action_count);
         event.fields["view_resource_count"] = static_cast<int64_t>(previous->resource_count);
@@ -656,7 +670,7 @@ void RumCore::stop_view() {
     event.tags["view_id"] = view->id;
     event.tags["view_name"] = view->name;
     event.tags["view_referrer"] = view->referrer;
-    event.fields["time_spent"] = unix_time_nanoseconds() - view->started_ns;
+    event.fields["time_spent"] = elapsed_since(view->started_monotonic_ns);
     event.fields["is_active"] = false;
     event.fields["view_action_count"] = static_cast<int64_t>(view->action_count);
     event.fields["view_resource_count"] = static_cast<int64_t>(view->resource_count);
@@ -667,18 +681,19 @@ void RumCore::stop_view() {
 
 void RumCore::add_action(const char* name, const char* type, int64_t duration_ns) {
     std::lock_guard lock(mutex_);
-    Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_nanoseconds() - std::max<int64_t>(duration_ns, 0)};
+    const auto safe_duration_ns = non_negative_duration(duration_ns);
+    Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_before(safe_duration_ns), monotonic_time_nanoseconds()};
     if (active_view_) {
         action.view_id = active_view_->id;
         action.view_name = active_view_->name;
         action.view_referrer = active_view_->referrer;
     }
-    track_action(action, duration_ns);
+    track_action(action, safe_duration_ns);
 }
 
 std::string RumCore::start_action(const char* name, const char* type) {
     std::lock_guard lock(mutex_);
-    Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_nanoseconds()};
+    Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
     if (active_view_) {
         action.view_id = active_view_->id;
         action.view_name = active_view_->name;
@@ -699,7 +714,7 @@ void RumCore::stop_action(const char* action_id) {
         }
         action = it->second;
         active_actions_.erase(it);
-        track_action(action, unix_time_nanoseconds() - action.started_ns);
+        track_action(action, elapsed_since(action.started_monotonic_ns));
     }
 }
 
@@ -711,7 +726,7 @@ void RumCore::track_action(const Action& action, int64_t duration_ns) {
     event.tags["view_id"] = action.view_id;
     event.tags["view_name"] = action.view_name;
     event.tags["view_referrer"] = action.view_referrer;
-    event.fields["duration"] = std::max<int64_t>(duration_ns, 0);
+    event.fields["duration"] = non_negative_duration(duration_ns);
     event.fields["action_resource_count"] = static_cast<int64_t>(action.resource_count);
     event.fields["action_error_count"] = static_cast<int64_t>(action.error_count);
     event.fields["action_long_task_count"] = static_cast<int64_t>(action.long_task_count);
@@ -733,7 +748,7 @@ std::optional<RumCore::Action> RumCore::current_action_locked() const {
 
 std::string RumCore::start_resource(const char* url, const char* method) {
     std::lock_guard lock(mutex_);
-    Resource resource{uuid32(), str_or_empty(url), str_or_empty(method), {}, {}, {}, {}, unix_time_nanoseconds()};
+    Resource resource{uuid32(), str_or_empty(url), str_or_empty(method), {}, {}, {}, {}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
     if (active_view_) {
         resource.view_id = active_view_->id;
         resource.view_name = active_view_->name;
@@ -790,7 +805,7 @@ void RumCore::stop_resource_ext(const char* resource_id, int status_code, int64_
     event.tags["trace_id"] = str_or_empty(trace_id);
     event.tags["span_id"] = str_or_empty(span_id);
     event.tags["resource_http_protocol"] = str_or_empty(http_protocol);
-    event.fields["duration"] = unix_time_nanoseconds() - resource.started_ns;
+    event.fields["duration"] = elapsed_since(resource.started_monotonic_ns);
     if (response_size > 0) {
         event.fields["resource_size"] = response_size;
     }
@@ -837,7 +852,8 @@ void RumCore::add_error(const char* stack, const char* message, const char* erro
 
 void RumCore::add_long_task(int64_t duration_ns, const char* stack) {
     std::lock_guard lock(mutex_);
-    RumEvent event = base_event("long_task", unix_time_nanoseconds() - std::max<int64_t>(duration_ns, 0));
+    const auto safe_duration_ns = non_negative_duration(duration_ns);
+    RumEvent event = base_event("long_task", unix_time_before(safe_duration_ns));
     if (active_view_) {
         event.tags["view_id"] = active_view_->id;
         event.tags["view_name"] = active_view_->name;
@@ -852,7 +868,7 @@ void RumCore::add_long_task(int64_t duration_ns, const char* stack) {
             it->second.long_task_count++;
         }
     }
-    event.fields["duration"] = duration_ns;
+    event.fields["duration"] = safe_duration_ns;
     event.fields["long_task_stack"] = str_or_empty(stack);
     enqueue(std::move(event));
 }
@@ -1053,7 +1069,7 @@ void RumCore::add_replay_record(
     if (!coalesce_key.empty()) {
         for (auto it = replay_pending_records_.rbegin(); it != replay_pending_records_.rend(); ++it) {
             if (it->coalesce_key == coalesce_key &&
-                timestamp_ms - it->timestamp_ms <= kReplayCoalesceMilliseconds) {
+                is_within_forward_window(timestamp_ms, it->timestamp_ms, kReplayCoalesceMilliseconds)) {
                 replay_pending_bytes_ -= it->json.size();
                 it->json = std::move(record_json);
                 it->timestamp_ms = timestamp_ms;

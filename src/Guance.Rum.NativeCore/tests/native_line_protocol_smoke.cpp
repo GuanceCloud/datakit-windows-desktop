@@ -4,6 +4,14 @@
 #include <iostream>
 
 int main() {
+    const auto monotonic_started = guance::rum::monotonic_time_nanoseconds();
+    const auto monotonic_finished = guance::rum::monotonic_time_nanoseconds();
+    assert(monotonic_started >= 0);
+    assert(monotonic_finished >= monotonic_started);
+    assert(guance::rum::is_within_forward_window(1000, 900, 200));
+    assert(!guance::rum::is_within_forward_window(900, 1000, 200));
+    assert(!guance::rum::is_within_forward_window(1201, 1000, 200));
+
     guance::rum::RumEvent event;
     event.measurement = "action";
     event.tags["app_id"] = "app id";

@@ -107,6 +107,19 @@ int64_t unix_time_nanoseconds() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
 }
 
+int64_t monotonic_time_nanoseconds() {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+}
+
+bool is_within_forward_window(int64_t timestamp, int64_t previous_timestamp, int64_t window) {
+    if (timestamp < previous_timestamp || window < 0) {
+        return false;
+    }
+    const auto elapsed = static_cast<uint64_t>(timestamp) - static_cast<uint64_t>(previous_timestamp);
+    return elapsed <= static_cast<uint64_t>(window);
+}
+
 std::string uuid32() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
     static constexpr char hex[] = "0123456789abcdef";

@@ -94,6 +94,7 @@ private:
         std::string name;
         std::string referrer;
         int64_t started_ns = 0;
+        int64_t started_monotonic_ns = 0;
         int action_count = 0;
         int resource_count = 0;
         int error_count = 0;
@@ -109,6 +110,7 @@ private:
         std::string action_id;
         std::string action_name;
         int64_t started_ns = 0;
+        int64_t started_monotonic_ns = 0;
     };
 
     struct Action {
@@ -119,6 +121,7 @@ private:
         std::string view_name;
         std::string view_referrer;
         int64_t started_ns = 0;
+        int64_t started_monotonic_ns = 0;
         int resource_count = 0;
         int error_count = 0;
         int long_task_count = 0;
