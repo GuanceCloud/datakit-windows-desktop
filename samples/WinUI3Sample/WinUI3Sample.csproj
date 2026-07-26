@@ -15,7 +15,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+    <Compile Include="../Shared/SampleRumConfig.cs" Link="SampleRumConfig.cs" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.*" />
     <ProjectReference Include="../../src/Guance.Rum.Windows/Guance.Rum.Windows.csproj" />
   </ItemGroup>
 </Project>

@@ -206,7 +206,7 @@ int main() {
     config.client_token = "token value+plus";
     config.rum_app_id = "native-rum-smoke";
     config.service_name = "native-smoke";
-    config.env = "test";
+    config.env = "local";
     config.version = "0.1.0";
     config.sample_rate = 1.0;
     config.session_replay_enabled = 1;
@@ -239,7 +239,7 @@ int main() {
     assert(contains(request, "POST /v1/write/rum/replay"));
     assert(contains(request, "token=token%20value%2Bplus"));
     assert(contains(request, "Content-Type: multipart/form-data; boundary="));
-    assert(contains(request, "name=\"segment\"; filename=\"segment\""));
+    assert(contains(request, "name=\"segment\"; filename=\""));
     assert(contains(request, "name=\"source\""));
     assert(contains(request, "windows"));
     assert(contains(request, "name=\"has_full_snapshot\""));

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
@@ -258,6 +259,17 @@ public sealed class WebView2RuntimeSmokeTests
                         .Where(slot => !string.IsNullOrWhiteSpace(slot))
                         .Distinct(StringComparer.Ordinal));
                 var slotId = nativePayload;
+                var nativePayloads = payloads
+                    .Where(payload => payload.Contains("\"type\":\"webview\"", StringComparison.Ordinal))
+                    .ToArray();
+                Assert.NotEmpty(nativePayloads);
+                Assert.All(nativePayloads, payload =>
+                {
+                    var webViewWireframe = GetWebViewWireframe(payload, slotId);
+                    Assert.Equal(long.Parse(slotId), webViewWireframe.GetProperty("id").GetInt64());
+                    Assert.True(webViewWireframe.GetProperty("width").GetInt64() > 0);
+                    Assert.True(webViewWireframe.GetProperty("height").GetInt64() > 0);
+                });
 
                 Assert.Contains(payloads, payload =>
                     payload.Contains("\"type\":2", StringComparison.Ordinal) &&
@@ -397,6 +409,17 @@ public sealed class WebView2RuntimeSmokeTests
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
                 var slotId = Assert.Single(nativeSlotIds);
+                var nativePayloads = replayTransport.Payloads
+                    .Where(payload => payload.Contains("\"type\":\"webview\"", StringComparison.Ordinal))
+                    .ToArray();
+                Assert.NotEmpty(nativePayloads);
+                Assert.All(nativePayloads, payload =>
+                {
+                    var webViewWireframe = GetWebViewWireframe(payload, slotId);
+                    Assert.Equal(long.Parse(slotId), webViewWireframe.GetProperty("id").GetInt64());
+                    Assert.True(webViewWireframe.GetProperty("width").GetInt64() > 0);
+                    Assert.True(webViewWireframe.GetProperty("height").GetInt64() > 0);
+                });
                 var browserPayloads = replayTransport.Payloads
                     .Where(payload =>
                         payload.Contains("\"type\":2", StringComparison.Ordinal) &&
@@ -610,6 +633,22 @@ public sealed class WebView2RuntimeSmokeTests
         using var output = new MemoryStream();
         zlib.CopyTo(output);
         return output.ToArray();
+    }
+
+    private static JsonElement GetWebViewWireframe(string payload, string slotId)
+    {
+        using var json = JsonDocument.Parse(payload);
+        var wireframes = json.RootElement
+            .GetProperty("records")
+            .EnumerateArray()
+            .Where(record => record.GetProperty("type").GetInt32() == 10)
+            .SelectMany(record => record.GetProperty("data").GetProperty("wireframes").EnumerateArray())
+            .Where(wireframe =>
+                wireframe.GetProperty("type").GetString() == "webview" &&
+                wireframe.GetProperty("slotId").GetString() == slotId)
+            .Select(wireframe => wireframe.Clone())
+            .ToArray();
+        return Assert.Single(wireframes);
     }
 
     private static int IndexOf(byte[] source, byte[] pattern, int start = 0)

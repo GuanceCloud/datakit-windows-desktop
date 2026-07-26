@@ -447,14 +447,20 @@ internal sealed class SessionReplayManager : IAsyncDisposable
     private static List<object> BuildWireframes(SessionReplayNode root)
     {
         var wireframes = new List<object>();
-        var id = 1;
-        AddWireframe(root, wireframes, ref id);
+        var reservedWebViewIds = new HashSet<long>();
+        ReserveWebViewIds(root, reservedWebViewIds);
+        long nextId = 1;
+        AddWireframe(root, wireframes, reservedWebViewIds, ref nextId);
         return wireframes;
     }
 
-    private static void AddWireframe(SessionReplayNode node, List<object> wireframes, ref int id)
+    private static void ReserveWebViewIds(SessionReplayNode node, HashSet<long> reservedWebViewIds)
     {
-        wireframes.Add(BuildWireframe(node, ref id));
+        if (TryGetWebViewWireframeId(node, out var webViewId))
+        {
+            reservedWebViewIds.Add(webViewId);
+        }
+
         if (node.Hidden)
         {
             return;
@@ -462,15 +468,39 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
         foreach (var child in node.Children)
         {
-            AddWireframe(child, wireframes, ref id);
+            ReserveWebViewIds(child, reservedWebViewIds);
         }
     }
 
-    private static Dictionary<string, object?> BuildWireframe(SessionReplayNode node, ref int id)
+    private static void AddWireframe(
+        SessionReplayNode node,
+        List<object> wireframes,
+        HashSet<long> reservedWebViewIds,
+        ref long nextId)
     {
+        wireframes.Add(BuildWireframe(node, reservedWebViewIds, ref nextId));
+        if (node.Hidden)
+        {
+            return;
+        }
+
+        foreach (var child in node.Children)
+        {
+            AddWireframe(child, wireframes, reservedWebViewIds, ref nextId);
+        }
+    }
+
+    private static Dictionary<string, object?> BuildWireframe(
+        SessionReplayNode node,
+        HashSet<long> reservedWebViewIds,
+        ref long nextId)
+    {
+        var wireframeId = TryGetWebViewWireframeId(node, out var webViewId)
+            ? webViewId
+            : AllocateWireframeId(reservedWebViewIds, ref nextId);
         var result = new Dictionary<string, object?>
         {
-            ["id"] = id++,
+            ["id"] = wireframeId,
             ["x"] = ToReplayInt(node.X),
             ["y"] = ToReplayInt(node.Y),
             ["width"] = ToReplayInt(node.Width),
@@ -548,6 +578,24 @@ internal sealed class SessionReplayManager : IAsyncDisposable
         }
 
         return result;
+    }
+
+    private static long AllocateWireframeId(HashSet<long> reservedWebViewIds, ref long nextId)
+    {
+        while (reservedWebViewIds.Contains(nextId))
+        {
+            nextId++;
+        }
+
+        return nextId++;
+    }
+
+    private static bool TryGetWebViewWireframeId(SessionReplayNode node, out long webViewId)
+    {
+        webViewId = 0;
+        return !string.IsNullOrWhiteSpace(node.WebViewSlotId) &&
+               long.TryParse(node.WebViewSlotId, out webViewId) &&
+               webViewId > 0;
     }
 
     private static JsonElement AddWebViewSlotId(JsonElement record, string slotId)

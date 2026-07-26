@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../Shared/SampleRumConfig.cs" Link="SampleRumConfig.cs" />
     <ProjectReference Include="../../src/Guance.Rum.Windows/Guance.Rum.Windows.csproj" />
   </ItemGroup>
 </Project>

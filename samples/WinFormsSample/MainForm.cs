@@ -70,10 +70,10 @@ public sealed class MainForm : Form
     private TabPage BuildUserContextPage()
     {
         var page = CreatePage("User && Context");
-        page.Controls.Add(CreateLabeledInput("User ID", userIdBox));
-        page.Controls.Add(CreateLabeledInput("Name", userNameBox));
-        page.Controls.Add(CreateLabeledInput("Email", userEmailBox));
-        page.Controls.Add(CreateButtonPanel(
+        AddPageControl(page, CreateLabeledInput("User ID", userIdBox));
+        AddPageControl(page, CreateLabeledInput("Name", userNameBox));
+        AddPageControl(page, CreateLabeledInput("Email", userEmailBox));
+        AddPageControl(page, CreateButtonPanel(
             SampleButton("Set User", OnSetUserClicked),
             SampleButton("Clear User", OnClearUserClicked),
             SampleButton("Add Global Context", OnAddGlobalContextClicked),
@@ -84,9 +84,9 @@ public sealed class MainForm : Form
     private TabPage BuildViewActionPage()
     {
         var page = CreatePage("View && Action");
-        page.Controls.Add(CreateLabeledInput("View", viewNameBox));
-        page.Controls.Add(CreateLabeledInput("Action", actionNameBox));
-        page.Controls.Add(CreateButtonPanel(
+        AddPageControl(page, CreateLabeledInput("View", viewNameBox));
+        AddPageControl(page, CreateLabeledInput("Action", actionNameBox));
+        AddPageControl(page, CreateButtonPanel(
             SampleButton("Start View", OnStartViewClicked),
             SampleButton("Stop View", OnStopViewClicked),
             SampleButton("Scoped Action", OnScopedActionClicked),
@@ -97,8 +97,8 @@ public sealed class MainForm : Form
     private TabPage BuildResourcePage()
     {
         var page = CreatePage("Resource");
-        page.Controls.Add(CreateLabeledInput("URL", resourceUrlBox));
-        page.Controls.Add(CreateButtonPanel(
+        AddPageControl(page, CreateLabeledInput("URL", resourceUrlBox));
+        AddPageControl(page, CreateButtonPanel(
             SampleButton("HTTP Success", OnAutoHttpSuccessClicked),
             SampleButton("HTTP Failure", OnAutoHttpFailureClicked),
             SampleButton("Manual Resource Success", OnManualResourceSuccessClicked),
@@ -109,7 +109,7 @@ public sealed class MainForm : Form
     private TabPage BuildErrorLongTaskPage()
     {
         var page = CreatePage("Error && LongTask");
-        page.Controls.Add(CreateButtonPanel(
+        AddPageControl(page, CreateButtonPanel(
             SampleButton("Add Exception Error", OnAddExceptionErrorClicked),
             SampleButton("Add Custom Error", OnAddCustomErrorClicked),
             SampleButton("Add Long Task", OnAddLongTaskClicked),
@@ -120,7 +120,7 @@ public sealed class MainForm : Form
     private TabPage BuildSessionReplayPage()
     {
         var page = CreatePage("Session Replay");
-        page.Controls.Add(CreateLabeledInput("Replay Input", replayPrivacyBox));
+        AddPageControl(page, CreateLabeledInput("Replay Input", replayPrivacyBox));
         replayHiddenTarget.BorderStyle = BorderStyle.FixedSingle;
         replayHiddenTarget.Height = 48;
         replayHiddenTarget.Width = 440;
@@ -132,8 +132,8 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(12, 0, 0, 0)
         });
-        page.Controls.Add(replayHiddenTarget);
-        page.Controls.Add(CreateButtonPanel(
+        AddPageControl(page, replayHiddenTarget);
+        AddPageControl(page, CreateButtonPanel(
             SampleButton("Start Recording", OnStartReplayClicked),
             SampleButton("Stop Recording", OnStopReplayClicked),
             SampleButton("Mask Text", OnMaskReplayTextClicked),
@@ -148,7 +148,7 @@ public sealed class MainForm : Form
     private TabPage BuildDiagnosticsPage()
     {
         var page = CreatePage("Diagnostics");
-        page.Controls.Add(CreateButtonPanel(
+        AddPageControl(page, CreateButtonPanel(
             SampleButton("Flush", OnFlushClicked),
             SampleButton("Snapshot", OnSnapshotClicked),
             SampleButton("Add Listener", OnAddDiagnosticListenerClicked),
@@ -159,10 +159,25 @@ public sealed class MainForm : Form
 
     private static TabPage CreatePage(string title)
     {
-        var page = new TabPage(title);
-        page.AutoScroll = true;
-        page.Padding = new Padding(16);
+        var page = new TabPage(title) { AutoScroll = true };
+        page.Controls.Add(new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            Dock = DockStyle.Top,
+            Padding = new Padding(16)
+        });
         return page;
+    }
+
+    private static void AddPageControl(TabPage page, Control control)
+    {
+        var content = (TableLayoutPanel)page.Controls[0];
+        var row = content.RowCount++;
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        control.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        content.Controls.Add(control, 0, row);
     }
 
     private static Control CreateLabeledInput(string label, TextBox textBox)

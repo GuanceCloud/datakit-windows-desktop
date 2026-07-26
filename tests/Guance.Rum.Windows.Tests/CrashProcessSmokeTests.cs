@@ -18,16 +18,15 @@ public sealed class CrashProcessSmokeTests
         }
 
         var repoRoot = FindRepoRoot();
-        var crashSmokeDll = Path.Combine(repoRoot, "tests", "Guance.Rum.CrashSmoke", "bin", "Release", "net8.0", "Guance.Rum.CrashSmoke.dll");
+        var crashSmokeDll = Path.Combine(repoRoot, "tests", "Guance.Rum.CrashSmoke", "bin", BuildConfiguration, "net8.0", "Guance.Rum.CrashSmoke.dll");
         Assert.True(File.Exists(crashSmokeDll), $"Crash smoke app was not built: {crashSmokeDll}");
         var cacheDir = Path.Combine(Path.GetTempPath(), "guance-rum-crash-smoke", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(cacheDir);
 
-        using var listener = new HttpListener();
-        var port = GetFreePort();
-        var datakitUrl = $"http://127.0.0.1:{port}";
-        listener.Prefixes.Add(datakitUrl + "/");
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var datakitUrl = $"http://127.0.0.1:{port}";
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var requestTask = ReadRequestAsync(listener, cts.Token);
@@ -68,14 +67,50 @@ public sealed class CrashProcessSmokeTests
         Assert.Contains("guance crash smoke", body, StringComparison.Ordinal);
     }
 
-    private static async Task<string> ReadRequestAsync(HttpListener listener, CancellationToken cancellationToken)
+    private static async Task<string> ReadRequestAsync(TcpListener listener, CancellationToken cancellationToken)
     {
-        var context = await listener.GetContextAsync().WaitAsync(cancellationToken);
-        using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8);
-        var body = await reader.ReadToEndAsync();
-        context.Response.StatusCode = 202;
-        context.Response.Close();
-        return body;
+        using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+        await using var stream = client.GetStream();
+        var headerBytes = new List<byte>();
+        uint tail = 0;
+        while (tail != 0x0d0a0d0aU)
+        {
+            var value = stream.ReadByte();
+            if (value < 0)
+            {
+                throw new EndOfStreamException("HTTP request ended before the headers were complete.");
+            }
+
+            headerBytes.Add((byte)value);
+            tail = (tail << 8) | (uint)value;
+            if (headerBytes.Count > 64 * 1024)
+            {
+                throw new InvalidDataException("HTTP request headers exceeded the smoke-test limit.");
+            }
+        }
+
+        var headers = Encoding.ASCII.GetString(headerBytes.ToArray());
+        var contentLengthHeader = headers
+            .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
+        var contentLength = int.Parse(contentLengthHeader[(contentLengthHeader.IndexOf(':') + 1)..].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        var bodyBytes = new byte[contentLength];
+        var totalRead = 0;
+        while (totalRead < bodyBytes.Length)
+        {
+            var read = await stream.ReadAsync(bodyBytes.AsMemory(totalRead), cancellationToken);
+            if (read == 0)
+            {
+                throw new EndOfStreamException("HTTP request ended before the body was complete.");
+            }
+
+            totalRead += read;
+        }
+
+        var response = Encoding.ASCII.GetBytes("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(response, cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+        return Encoding.UTF8.GetString(bodyBytes);
     }
 
     private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout)
@@ -90,13 +125,6 @@ public sealed class CrashProcessSmokeTests
         {
             return false;
         }
-    }
-
-    private static int GetFreePort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string FindRepoRoot()
@@ -119,4 +147,10 @@ public sealed class CrashProcessSmokeTests
     {
         return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
     }
+
+#if DEBUG
+    private const string BuildConfiguration = "Debug";
+#else
+    private const string BuildConfiguration = "Release";
+#endif
 }

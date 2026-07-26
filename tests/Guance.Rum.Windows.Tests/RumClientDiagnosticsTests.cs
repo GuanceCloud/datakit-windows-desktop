@@ -11,6 +11,97 @@ namespace Guance.Rum.Windows.Tests;
 public sealed class RumClientDiagnosticsTests
 {
     [Fact]
+    public async Task RumEvents_UseOfficialWindowsCommonTagsAndProtectReservedContext()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                ServiceName = "desktop-service",
+                Env = "local",
+                Version = "2.3.4",
+                FlushInterval = TimeSpan.FromMinutes(5)
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddGlobalContext(RumConstants.AppId, "overridden-app");
+        client.AddRumGlobalContext(RumConstants.SdkName, "overridden-sdk");
+        client.AddAction("Anonymous", "custom", TimeSpan.FromMilliseconds(1));
+        client.SetUser("user-1", "User One", "user@example.com");
+        client.AddAction("Signed In", "custom", TimeSpan.FromMilliseconds(1));
+        await client.FlushAsync();
+
+        Assert.Equal(2, rumQueue.Items.Count);
+        var anonymousLine = rumQueue.Items[0].Line;
+        Assert.Contains("app_id=app", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("service=desktop-service", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("env=local", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("version=2.3.4", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("sdk_name=df_windows_rum_sdk", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("session_type=user", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("is_signin=F", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("userid=", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("arch=", anonymousLine, StringComparison.Ordinal);
+        Assert.Contains("locale=", anonymousLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("overridden-app", anonymousLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("overridden-sdk", anonymousLine, StringComparison.Ordinal);
+
+        var signedInLine = rumQueue.Items[1].Line;
+        Assert.Contains("is_signin=T", signedInLine, StringComparison.Ordinal);
+        Assert.Contains("userid=user-1", signedInLine, StringComparison.Ordinal);
+        Assert.Contains("user_name=User\\ One", signedInLine, StringComparison.Ordinal);
+        Assert.Contains("user_email=user@example.com", signedInLine, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AndroidReplayCompatibilityMode_UsesAndroidSdkNameForRumEvents()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                Env = "local",
+                FlushInterval = TimeSpan.FromMinutes(5),
+                SessionReplay = new RumSessionReplayConfig
+                {
+                    Enabled = true,
+                    AndroidCompatibilityMode = true
+                }
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddAction("Compatibility", "custom", TimeSpan.FromMilliseconds(1));
+        await client.FlushAsync();
+
+        var line = Assert.Single(rumQueue.Items).Line;
+        Assert.Contains("sdk_name=df_android_rum_sdk", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("sdk_name=df_windows_rum_sdk", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RumConfig_RejectsUnsupportedEnvironment()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() => new RumConfig
+        {
+            DatakitUrl = "http://127.0.0.1:9529",
+            RumAppId = "app",
+            Env = "dev"
+        }.Validate());
+
+        Assert.Contains("Env", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ResourceEvents_RedactQueryAndCarryNetworkCorrelationFields()
     {
         var rumQueue = new MemoryRumQueue();
@@ -267,11 +358,247 @@ public sealed class RumClientDiagnosticsTests
             item.Line.Contains("crash_source=\"unit\"", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task RumEvents_MarkSessionHasReplayWhenReplaySessionIsSampled()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                FlushInterval = TimeSpan.FromMinutes(5),
+                SessionReplay = new RumSessionReplayConfig
+                {
+                    Enabled = true,
+                    SampleRate = 1.0
+                }
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddAction("Save", "click", TimeSpan.FromMilliseconds(1));
+        await client.FlushAsync();
+
+        var line = Assert.Single(rumQueue.Items).Line;
+        Assert.Contains("session_has_replay=true", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RumEvents_MarkSessionHasReplayFalseWhenReplayIsDisabled()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                FlushInterval = TimeSpan.FromMinutes(5),
+                SessionReplay = new RumSessionReplayConfig
+                {
+                    Enabled = false,
+                    SampleRate = 1.0
+                }
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddAction("Save", "click", TimeSpan.FromMilliseconds(1));
+        await client.FlushAsync();
+
+        var line = Assert.Single(rumQueue.Items).Line;
+        Assert.Contains("session_has_replay=false", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ErrorEvent_MarksSessionHasReplayWhenReplayIsSampledOnError()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                FlushInterval = TimeSpan.FromMinutes(5),
+                SessionReplay = new RumSessionReplayConfig
+                {
+                    Enabled = true,
+                    SampleRate = 0.0,
+                    OnErrorSampleRate = 1.0
+                }
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddError("stack", "message", "InvalidOperationException");
+        await client.FlushAsync();
+
+        var line = Assert.Single(rumQueue.Items).Line;
+        Assert.StartsWith("error,", line, StringComparison.Ordinal);
+        Assert.Contains("session_has_replay=true", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SdkRumUploadRequest_SuppressesAutomaticResourceInstrumentation()
+    {
+        HttpRequestMessage? captured = null;
+        using var transport = new DatawayTransport(new RumConfig
+        {
+            DatakitUrl = "http://127.0.0.1:9529",
+            RumAppId = "app",
+            HttpMessageHandlerFactory = () => new CapturingHttpHandler(request => captured = request)
+        });
+
+        var result = await transport.SendAsync(
+            new[] { new QueuedRumEvent(1, "view,app_id=app count=1i 42\n", DateTimeOffset.UtcNow) },
+            CancellationToken.None);
+
+        Assert.False(result.RetryLater);
+        Assert.NotNull(captured);
+        Assert.True(captured!.Options.TryGetValue(HttpInstrumentationMarks.SuppressResourceInstrumentation, out var suppressed));
+        Assert.True(suppressed);
+    }
+
+    [Fact]
+    public async Task SdkSessionReplayUploadRequest_SuppressesAutomaticResourceInstrumentation()
+    {
+        HttpRequestMessage? captured = null;
+        using var transport = new SessionReplayTransport(new RumConfig
+        {
+            DatakitUrl = "http://127.0.0.1:9529",
+            RumAppId = "app",
+            HttpMessageHandlerFactory = () => new CapturingHttpHandler(request => captured = request)
+        });
+
+        var result = await transport.SendAsync(
+            new QueuedSessionReplaySegment(1, "application/json", Array.Empty<byte>(), DateTimeOffset.UtcNow, 0),
+            CancellationToken.None);
+
+        Assert.False(result.RetryLater);
+        Assert.NotNull(captured);
+        Assert.True(captured!.Options.TryGetValue(HttpInstrumentationMarks.SuppressResourceInstrumentation, out var suppressed));
+        Assert.True(suppressed);
+    }
+
+    [Fact]
+    public async Task FlushAsync_WaitsForPendingQueueWrites()
+    {
+        var rumQueue = new DelayedRumQueue();
+        await using var client = new RumClient(
+            CreateTestConfig(),
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddAction("Save", "custom", TimeSpan.FromMilliseconds(1));
+        var flush = client.FlushAsync();
+
+        await Task.Delay(50);
+        Assert.False(flush.IsCompleted);
+
+        rumQueue.ReleaseWrites();
+        await flush;
+
+        Assert.Single(rumQueue.Items);
+    }
+
+    [Fact]
+    public async Task FlushAsync_WaitsForAnExistingBackgroundFlush()
+    {
+        var rumQueue = new MemoryRumQueue();
+        var transport = new BlockingRumTransport();
+        await using var client = new RumClient(
+            CreateTestConfig(),
+            rumQueue,
+            transport,
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.AddAction("Save", "custom", TimeSpan.FromMilliseconds(1));
+        await transport.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var flush = client.FlushAsync();
+        await Task.Delay(50);
+        Assert.False(flush.IsCompleted);
+
+        transport.Release();
+        await flush;
+    }
+
+    [Fact]
+    public async Task WinUIInstrumentation_IgnoresLateActivationAfterWindowClosed()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            CreateTestConfig(),
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+        var window = new FakeWinUIWindow();
+
+        WinUIReflectionInstrumentation.Attach(client, window, viewName: null);
+        window.RaiseActivated();
+        window.RaiseActivated();
+        window.RaiseClosed();
+
+        var exception = Record.Exception(window.RaiseActivated);
+        await client.FlushAsync();
+
+        Assert.Null(exception);
+        Assert.Single(rumQueue.Items, item => item.Line.StartsWith("view,", StringComparison.Ordinal));
+    }
+
+    private static RumConfig CreateTestConfig() => new()
+    {
+        DatakitUrl = "http://127.0.0.1:9529",
+        RumAppId = "app",
+        ServiceName = "desktop-service",
+        Env = "local",
+        Version = "1.0.0",
+        SampleRate = 1,
+        FlushInterval = TimeSpan.FromHours(1)
+    };
+
     private sealed class InlineSynchronizationContext : SynchronizationContext
     {
         public override void Post(SendOrPostCallback d, object? state)
         {
             d(state);
+        }
+    }
+
+    private sealed class FakeWinUIWindow
+    {
+        private bool closed;
+
+        public event EventHandler? Activated;
+        public event EventHandler? Closed;
+        public event EventHandler? SizeChanged;
+
+        public string Title => closed
+            ? throw new InvalidOperationException("The WinUI window is already closed.")
+            : "Fake WinUI Window";
+
+        public object? Content => closed
+            ? throw new InvalidOperationException("The WinUI window is already closed.")
+            : null;
+
+        public void RaiseActivated() => Activated?.Invoke(this, EventArgs.Empty);
+
+        public void RaiseSizeChanged() => SizeChanged?.Invoke(this, EventArgs.Empty);
+
+        public void RaiseClosed()
+        {
+            closed = true;
+            Closed?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -283,6 +610,22 @@ public sealed class RumClientDiagnosticsTests
             {
                 Content = new StringContent("ok")
             });
+        }
+    }
+
+    private sealed class CapturingHttpHandler : HttpMessageHandler
+    {
+        private readonly Action<HttpRequestMessage> capture;
+
+        public CapturingHttpHandler(Action<HttpRequestMessage> capture)
+        {
+            this.capture = capture;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            capture(request);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
         }
     }
 
@@ -326,6 +669,35 @@ public sealed class RumClientDiagnosticsTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    private sealed class DelayedRumQueue : IRumQueue
+    {
+        private readonly TaskCompletionSource releaseWrites = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private long nextId;
+
+        public List<QueuedRumEvent> Items { get; } = new();
+
+        public async Task EnqueueAsync(string line, CancellationToken cancellationToken)
+        {
+            await releaseWrites.Task.WaitAsync(cancellationToken);
+            Items.Add(new QueuedRumEvent(++nextId, line, DateTimeOffset.UtcNow));
+        }
+
+        public Task<IReadOnlyList<QueuedRumEvent>> PeekAsync(int count, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<QueuedRumEvent>>(Items.Take(count).ToArray());
+
+        public Task DeleteAsync(IReadOnlyCollection<long> ids, CancellationToken cancellationToken)
+        {
+            Items.RemoveAll(item => ids.Contains(item.Id));
+            return Task.CompletedTask;
+        }
+
+        public Task TrimAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public void ReleaseWrites() => releaseWrites.TrySetResult();
+    }
+
     private sealed class MemoryReplayQueue : ISessionReplayQueue
     {
         public Task EnqueueAsync(string contentType, byte[] body, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -344,6 +716,27 @@ public sealed class RumClientDiagnosticsTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class BlockingRumTransport : IDatawayTransport
+    {
+        private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<SendResult> SendAsync(IReadOnlyList<QueuedRumEvent> events, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            await release.Task.WaitAsync(cancellationToken);
+            return SendResult.Success(200);
+        }
+
+        public void Release() => release.TrySetResult();
+
+        public void Dispose()
+        {
+            release.TrySetResult();
         }
     }
 

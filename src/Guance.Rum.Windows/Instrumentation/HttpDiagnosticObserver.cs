@@ -56,7 +56,7 @@ internal sealed class HttpDiagnosticObserver : IObserver<DiagnosticListener>, IO
     private void OnRequestStart(object? payload)
     {
         var request = GetProperty<HttpRequestMessage>(payload, "Request");
-        if (request is null || IsManuallyInstrumented(request))
+        if (request is null || ShouldSuppress(request))
         {
             return;
         }
@@ -93,7 +93,7 @@ internal sealed class HttpDiagnosticObserver : IObserver<DiagnosticListener>, IO
     private void OnRequestException(object? payload)
     {
         var request = GetProperty<HttpRequestMessage>(payload, "Request");
-        if (request is null || IsManuallyInstrumented(request) || !resources.TryRemove(request, out var resource))
+        if (request is null || ShouldSuppress(request) || !resources.TryRemove(request, out var resource))
         {
             return;
         }
@@ -121,6 +121,12 @@ internal sealed class HttpDiagnosticObserver : IObserver<DiagnosticListener>, IO
     private static bool IsManuallyInstrumented(HttpRequestMessage request)
     {
         return request.Options.TryGetValue(HttpInstrumentationMarks.ManualHandlerInstrumented, out var instrumented) && instrumented;
+    }
+
+    private static bool ShouldSuppress(HttpRequestMessage request)
+    {
+        return IsManuallyInstrumented(request) ||
+               (request.Options.TryGetValue(HttpInstrumentationMarks.SuppressResourceInstrumentation, out var suppressed) && suppressed);
     }
 
     private static string DetectResourceType(HttpRequestMessage request, HttpResponseMessage? response)

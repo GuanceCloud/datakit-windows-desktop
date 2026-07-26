@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iomanip>
 #include <iterator>
+#include <cmath>
 #include <random>
 #include <regex>
 #include <sstream>
@@ -61,8 +62,95 @@ std::string replay_queue_path(const std::string& configured) {
     return path.string();
 }
 
+std::optional<std::string> multipart_boundary(const std::string& content_type) {
+    const std::string marker = "boundary=";
+    const auto marker_index = content_type.find(marker);
+    if (marker_index == std::string::npos) {
+        return std::nullopt;
+    }
+
+    auto boundary = content_type.substr(marker_index + marker.size());
+    const auto separator_index = boundary.find(';');
+    if (separator_index != std::string::npos) {
+        boundary = boundary.substr(0, separator_index);
+    }
+
+    while (!boundary.empty() && std::isspace(static_cast<unsigned char>(boundary.front()))) {
+        boundary.erase(boundary.begin());
+    }
+
+    while (!boundary.empty() && std::isspace(static_cast<unsigned char>(boundary.back()))) {
+        boundary.pop_back();
+    }
+
+    if (boundary.size() >= 2 && boundary.front() == '"' && boundary.back() == '"') {
+        boundary = boundary.substr(1, boundary.size() - 2);
+    }
+
+    if (boundary.empty()) {
+        return std::nullopt;
+    }
+
+    return boundary;
+}
+
+std::optional<std::string> replay_segment_payload(const std::string& content_type, const std::string& body) {
+    const auto boundary = multipart_boundary(content_type);
+    if (!boundary) {
+        return std::nullopt;
+    }
+
+    const auto segment_part_index = body.find("name=\"segment\"");
+    if (segment_part_index == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto data_start_marker = body.find("\r\n\r\n", segment_part_index);
+    if (data_start_marker == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const auto data_start = data_start_marker + 4;
+    const auto data_end = body.find("\r\n--" + *boundary, data_start);
+    if (data_end == std::string::npos || data_end <= data_start) {
+        return std::nullopt;
+    }
+
+    return body.substr(data_start, data_end - data_start);
+}
+
 int64_t unix_time_milliseconds() {
     return unix_time_nanoseconds() / 1'000'000;
+}
+
+int replay_int(double value) {
+    if (!std::isfinite(value)) {
+        return 0;
+    }
+
+    return std::max(0, static_cast<int>(std::llround(value)));
+}
+
+bool is_hex_uuid32(const std::string& value) {
+    if (value.size() != 32) {
+        return false;
+    }
+
+    return std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return std::isxdigit(c) != 0;
+    });
+}
+
+std::string normalize_replay_id(const std::string& value) {
+    if (!is_hex_uuid32(value)) {
+        return value;
+    }
+
+    return value.substr(0, 8) + "-" +
+           value.substr(8, 4) + "-" +
+           value.substr(12, 4) + "-" +
+           value.substr(16, 4) + "-" +
+           value.substr(20);
 }
 
 std::string json_escape(const std::string& value) {
@@ -551,6 +639,15 @@ void RumCore::flush() {
             }
             const auto content_type = item.line.substr(0, separator);
             const auto body = item.line.substr(separator + 1);
+            if (config_.debug) {
+                const auto payload = replay_segment_payload(content_type, body);
+                if (payload) {
+                    std::cout << "[Guance.RUM.Native.SessionReplay] upload payload structure:\n"
+                              << *payload << std::endl;
+                } else {
+                    std::cout << "[Guance.RUM.Native.SessionReplay] upload payload structure unavailable." << std::endl;
+                }
+            }
             const auto result = send_session_replay_to_dataway(config_, content_type, body);
             record_replay_transport_result(result.delete_from_queue, result.retry_later, result.status_code, result.error_code, result.latency_ms);
             if (result.retry_later) {
@@ -913,9 +1010,11 @@ void RumCore::capture_replay_click(uintptr_t hwnd, const char* target, double x,
     }
 
     std::ostringstream record;
-    record << "{\"type\":3,\"timestamp\":" << now
-           << ",\"data\":{\"source\":\"click\",\"target\":\"" << json_escape(safe_target)
-           << "\",\"x\":" << x << ",\"y\":" << y << "}}";
+    record << "{\"type\":11,\"timestamp\":" << now
+           << ",\"data\":{\"source\":2,\"target\":\"" << json_escape(safe_target)
+           << "\",\"positions\":[{\"id\":0,\"x\":" << replay_int(x)
+           << ",\"y\":" << replay_int(y)
+           << ",\"timestamp\":" << now << "}]}}";
     add_replay_record(record.str(), false, "incremental", now, "click:" + safe_target);
 }
 
@@ -925,9 +1024,9 @@ void RumCore::capture_replay_input(uintptr_t hwnd, const char* target) {
     const bool hidden = hwnd != 0 && replay_hidden_.find(hwnd) != replay_hidden_.end() && replay_hidden_.at(hwnd);
     const auto safe_target = hidden ? std::string{"hidden"} : str_or_empty(target);
     std::ostringstream record;
-    record << "{\"type\":3,\"timestamp\":" << now
-           << ",\"data\":{\"source\":\"input\",\"target\":\"" << json_escape(safe_target)
-           << "\",\"x\":0,\"y\":0}}";
+    record << "{\"type\":11,\"timestamp\":" << now
+           << ",\"data\":{\"source\":0,\"adds\":[],\"removes\":[],\"updates\":[],\"event_type\":\"input\",\"target\":\""
+           << json_escape(safe_target) << "\",\"x\":0,\"y\":0}}";
     add_replay_record(record.str(), false, "incremental", now, "input:" + safe_target);
 }
 
@@ -936,9 +1035,9 @@ void RumCore::capture_replay_resize(uintptr_t hwnd, const char* target, double w
     std::lock_guard lock(mutex_);
     const auto now = unix_time_milliseconds();
     std::ostringstream record;
-    record << "{\"type\":3,\"timestamp\":" << now
-           << ",\"data\":{\"source\":\"resize\",\"target\":\"" << json_escape(str_or_empty(target))
-           << "\",\"width\":" << width << ",\"height\":" << height << "}}";
+    record << "{\"type\":11,\"timestamp\":" << now
+           << ",\"data\":{\"source\":4,\"target\":\"" << json_escape(str_or_empty(target))
+           << "\",\"width\":" << replay_int(width) << ",\"height\":" << replay_int(height) << "}}";
     add_replay_record(record.str(), false, "incremental", now, "resize:" + str_or_empty(target));
 }
 
@@ -982,8 +1081,8 @@ std::string RumCore::build_session_replay_snapshot_record(int64_t timestamp_ms) 
     }
 #endif
 
-    int node_id = 3;
-    std::ostringstream body_children;
+    int wireframe_id = 1;
+    std::ostringstream wireframes;
     bool has_child = false;
 #if defined(GUANCE_RUM_WINDOWS)
     for (const auto hwnd_value : windows) {
@@ -992,30 +1091,32 @@ std::string RumCore::build_session_replay_snapshot_record(int64_t timestamp_ms) 
             continue;
         }
         if (has_child) {
-            body_children << ",";
+            wireframes << ",";
         }
-        auto node = build_uia_window_node(hwnd, node_id, replay_text_privacy_, replay_hidden_);
-        if (node.empty()) {
-            node = build_hwnd_node(hwnd, node_id, replay_text_privacy_, replay_hidden_, GUANCE_RUM_REPLAY_TEXT_MASK_SENSITIVE_INPUTS);
+        RECT rect{};
+        if (GetWindowRect(hwnd, &rect)) {
+            wireframes << "{\"id\":" << wireframe_id++
+                       << ",\"type\":\"placeholder\",\"x\":" << std::max<LONG>(0, rect.left)
+                       << ",\"y\":" << std::max<LONG>(0, rect.top)
+                       << ",\"width\":" << std::max<LONG>(0, rect.right - rect.left)
+                       << ",\"height\":" << std::max<LONG>(0, rect.bottom - rect.top)
+                       << ",\"label\":\"Window\"}";
+        } else {
+            wireframes << "{\"id\":" << wireframe_id++
+                       << ",\"type\":\"placeholder\",\"x\":0,\"y\":0,\"width\":0,\"height\":0,\"label\":\"Window\"}";
         }
-        body_children << node;
         has_child = true;
     }
 #else
     (void)windows;
 #endif
-
-    std::ostringstream root;
-    root << "{\"type\":2,\"id\":1"
-         << ",\"tagName\":\"html\",\"attributes\":{\"style\":\"position:absolute;left:0px;top:0px;width:100%;height:100%;box-sizing:border-box;overflow:hidden;\"},\"childNodes\":["
-         << "{\"type\":2,\"id\":2"
-         << ",\"tagName\":\"body\",\"attributes\":{\"style\":\"position:absolute;left:0px;top:0px;width:100%;height:100%;box-sizing:border-box;overflow:hidden;\"},\"childNodes\":["
-         << body_children.str() << "]}]}";
+    if (!has_child) {
+        wireframes << "{\"id\":1,\"type\":\"placeholder\",\"x\":0,\"y\":0,\"width\":0,\"height\":0,\"label\":\"Desktop\"}";
+    }
 
     std::ostringstream record;
-    record << "{\"type\":2,\"timestamp\":" << timestamp_ms
-           << ",\"data\":{\"node\":" << root.str()
-           << ",\"initialOffset\":{\"left\":0,\"top\":0}}}";
+    record << "{\"type\":10,\"timestamp\":" << timestamp_ms
+           << ",\"data\":{\"wireframes\":[" << wireframes.str() << "]}}";
 
     return record.str();
 }
@@ -1029,25 +1130,39 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
     int64_t end_ms) {
     const auto boundary = "guance-rum-replay-" + uuid32();
     const auto view_id = active_view_ ? active_view_->id : std::string{};
+    const auto replay_app_id = normalize_replay_id(config_.rum_app_id);
+    const auto replay_session_id = normalize_replay_id(session_id_);
+    const auto replay_view_id = normalize_replay_id(view_id);
+    std::ostringstream segment;
+    segment << "{\"application\":{\"id\":\"" << json_escape(replay_app_id)
+            << "\"},\"session\":{\"id\":\"" << json_escape(replay_session_id)
+            << "\"},\"view\":{\"id\":\"" << json_escape(replay_view_id)
+            << "\"},\"start\":" << start_ms
+            << ",\"end\":" << end_ms
+            << ",\"records_count\":" << records_count
+            << ",\"index_in_view\":" << replay_index_in_view_++
+            << ",\"has_full_snapshot\":" << (has_full_snapshot ? "true" : "false")
+            << ",\"source\":\"android\",\"records\":" << records_json << "}";
+    const auto segment_json = segment.str();
     std::string body;
-    body.reserve(records_json.size() + 1024);
+    body.reserve(segment_json.size() + 1024);
     body += multipart_field(boundary, "records_count", std::to_string(records_count));
-    body += multipart_field(boundary, "index_in_view", std::to_string(replay_index_in_view_++));
-    body += multipart_field(boundary, "source", "windows");
+    body += multipart_field(boundary, "index_in_view", std::to_string(replay_index_in_view_ - 1));
+    body += multipart_field(boundary, "source", "android");
     body += multipart_field(boundary, "sdk_name", "guance-rum-windows-native");
     body += multipart_field(boundary, "sdk_version", config_.version);
     body += multipart_field(boundary, "start", std::to_string(start_ms));
     body += multipart_field(boundary, "end", std::to_string(end_ms));
     body += multipart_field(boundary, "app_id", config_.rum_app_id);
     body += multipart_field(boundary, "view_id", view_id);
-    body += multipart_field(boundary, "creation_reason", creation_reason);
+    (void)creation_reason;
     body += multipart_field(boundary, "session_id", session_id_);
     body += multipart_field(boundary, "env", config_.env);
     body += multipart_field(boundary, "service", config_.service_name);
     body += multipart_field(boundary, "version", config_.version);
-    body += multipart_field(boundary, "raw_segment_size", std::to_string(records_json.size()));
+    body += multipart_field(boundary, "raw_segment_size", std::to_string(segment_json.size()));
     body += multipart_field(boundary, "has_full_snapshot", has_full_snapshot ? "true" : "false");
-    body += multipart_file(boundary, "segment", "segment", records_json);
+    body += multipart_file(boundary, "segment", view_id.empty() ? "segment" : view_id, segment_json);
     body += "--" + boundary + "--\r\n";
     return {"multipart/form-data; boundary=" + boundary, body};
 }

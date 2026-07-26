@@ -688,7 +688,7 @@ public sealed class SessionReplayTests
         var root = new SessionReplayNode("window", 0, 0, 800, 600);
         root.Children.Add(new SessionReplayNode("iframe", 20, 30, 640, 480)
         {
-            WebViewSlotId = "42"
+            WebViewSlotId = "1"
         });
         using var browserRecord = JsonDocument.Parse(
             $$"""
@@ -701,7 +701,7 @@ public sealed class SessionReplayTests
             """);
 
         manager.CaptureFullSnapshot(context, root);
-        manager.CaptureWebViewRecord(context, "42", browserRecord.RootElement);
+        manager.CaptureWebViewRecord(context, "1", browserRecord.RootElement);
         await manager.FlushPendingRecordsAsync(CancellationToken.None);
 
         var payload = ExtractAndDecompressSegment(Assert.Single(queue.Items).Body);
@@ -716,10 +716,15 @@ public sealed class SessionReplayTests
         var browserSnapshot = Assert.Single(
             records.EnumerateArray(),
             record => record.GetProperty("type").GetInt32() == 2);
+        var rootWireframe = Assert.Single(
+            nativeSnapshot.GetProperty("data").GetProperty("wireframes").EnumerateArray(),
+            wireframe => wireframe.GetProperty("type").GetString() != "webview");
 
-        Assert.Equal("42", webViewWireframe.GetProperty("slotId").GetString());
+        Assert.Equal("1", webViewWireframe.GetProperty("slotId").GetString());
+        Assert.Equal(1, webViewWireframe.GetProperty("id").GetInt64());
+        Assert.NotEqual(1, rootWireframe.GetProperty("id").GetInt64());
         Assert.True(webViewWireframe.GetProperty("isVisible").GetBoolean());
-        Assert.Equal("42", browserSnapshot.GetProperty("slotId").GetString());
+        Assert.Equal("1", browserSnapshot.GetProperty("slotId").GetString());
         Assert.True(json.RootElement.GetProperty("has_full_snapshot").GetBoolean());
     }
 
