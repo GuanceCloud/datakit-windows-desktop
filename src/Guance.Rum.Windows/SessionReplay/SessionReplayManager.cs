@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.IO;
+using System.Text;
 using System.Text.Json;
 
 namespace Guance.Rum.Windows.SessionReplay;
@@ -35,6 +38,26 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
     public SessionReplayPrivacyOverrides PrivacyOverrides => privacyOverrides;
 
+    public bool IsRecordingEnabled
+    {
+        get
+        {
+            lock (gate)
+            {
+                return recordingEnabled;
+            }
+        }
+    }
+
+    public bool HasReplay(string sessionId)
+    {
+        lock (gate)
+        {
+            EnsureSessionSampling(sessionId);
+            return recordingEnabled && (sessionSampled || forceRecordForError);
+        }
+    }
+
     public void Start()
     {
         lock (gate)
@@ -56,41 +79,49 @@ internal sealed class SessionReplayManager : IAsyncDisposable
     public void CaptureFullSnapshot(SessionReplayContext context, SessionReplayNode root)
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var record = new Dictionary<string, object?>
+        var wireframes = BuildWireframes(root);
+        LogFullSnapshotMapping(root, wireframes);
+        var metaTimestamp = Math.Max(0, timestamp - 1);
+        var metaRecord = new Dictionary<string, object?>
         {
-            ["type"] = 2,
+            ["type"] = 4,
+            ["timestamp"] = metaTimestamp,
+            ["data"] = new Dictionary<string, object?>
+            {
+                ["width"] = ToReplayInt(root.Width),
+                ["height"] = ToReplayInt(root.Height),
+                ["href"] = string.Empty
+            }
+        };
+        var fullSnapshotRecord = new Dictionary<string, object?>
+        {
+            ["type"] = 10,
             ["timestamp"] = timestamp,
             ["data"] = new Dictionary<string, object?>
             {
-                ["node"] = BuildDocumentNode(root),
-                ["initialOffset"] = new Dictionary<string, object?> { ["left"] = 0, ["top"] = 0 }
+                ["wireframes"] = wireframes
             }
         };
 
-        AddRecord(context, record, timestamp, hasFullSnapshot: true, creationReason: "full_snapshot");
+        AddRecords(
+            context,
+            new[]
+            {
+                new PendingReplayRecord(metaRecord, metaTimestamp, HasFullSnapshot: false, CreationReason: "meta", CoalesceKey: null),
+                new PendingReplayRecord(fullSnapshotRecord, timestamp, HasFullSnapshot: true, CreationReason: "full_snapshot", CoalesceKey: null)
+            });
     }
 
     public void CaptureIncrementalEvent(SessionReplayContext context, string eventType, string? target, double x, double y, string? value = null)
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var data = new Dictionary<string, object?>
-        {
-            ["source"] = eventType,
-            ["target"] = target,
-            ["x"] = x,
-            ["y"] = y
-        };
-        if (value is not null)
-        {
-            data["value"] = value;
-        }
-
         var record = new Dictionary<string, object?>
         {
-            ["type"] = 3,
+            ["type"] = 11,
             ["timestamp"] = timestamp,
-            ["data"] = data
+            ["data"] = BuildMobileIncrementalData(eventType, target, x, y, timestamp, value)
         };
+        LogIncrementalEvent(eventType, target, x, y, value, record);
 
         var coalesceKey = eventType is "input" or "selection" or "toggle"
             ? $"{eventType}:{target}"
@@ -103,18 +134,54 @@ internal sealed class SessionReplayManager : IAsyncDisposable
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var record = new Dictionary<string, object?>
         {
-            ["type"] = 3,
+            ["type"] = 11,
             ["timestamp"] = timestamp,
             ["data"] = new Dictionary<string, object?>
             {
-                ["source"] = "resize",
+                ["source"] = 4,
                 ["target"] = target,
-                ["width"] = width,
-                ["height"] = height
+                ["width"] = ToReplayInt(width),
+                ["height"] = ToReplayInt(height)
             }
         };
+        LogIncrementalEvent("resize", target, width, height, null, record);
 
         AddRecord(context, record, timestamp, hasFullSnapshot: false, creationReason: "incremental", coalesceKey: $"resize:{target}");
+    }
+
+    public void CaptureWebViewRecord(SessionReplayContext context, string slotId, JsonElement record)
+    {
+        if (string.IsNullOrWhiteSpace(slotId) ||
+            record.ValueKind != JsonValueKind.Object ||
+            !record.TryGetProperty("timestamp", out var timestampProperty) ||
+            !timestampProperty.TryGetInt64(out var timestamp) ||
+            timestamp <= 0 ||
+            !record.TryGetProperty("type", out var typeProperty) ||
+            !typeProperty.TryGetInt32(out var type))
+        {
+            return;
+        }
+
+        var enrichedRecord = AddWebViewSlotId(record, slotId);
+        AddRecord(
+            context,
+            enrichedRecord,
+            timestamp,
+            hasFullSnapshot: type == 2,
+            creationReason: type == 2 ? "webview_full_snapshot" : "webview_incremental");
+    }
+
+    public void CaptureViewEnd(SessionReplayContext context)
+    {
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var record = new Dictionary<string, object?>
+        {
+            ["type"] = 7,
+            ["timestamp"] = timestamp,
+            ["data"] = new Dictionary<string, object?>()
+        };
+
+        AddRecord(context, record, timestamp, hasFullSnapshot: false, creationReason: "view_end");
     }
 
     public void NotifyError(SessionReplayContext context)
@@ -194,6 +261,13 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
     private void AddRecord(SessionReplayContext context, object record, long timestampMilliseconds, bool hasFullSnapshot, string creationReason, string? coalesceKey = null)
     {
+        AddRecords(
+            context,
+            new[] { new PendingReplayRecord(record, timestampMilliseconds, hasFullSnapshot, creationReason, coalesceKey) });
+    }
+
+    private void AddRecords(SessionReplayContext context, IReadOnlyList<PendingReplayRecord> records)
+    {
         var shouldFlush = false;
         var shouldFlushFirst = false;
         lock (gate)
@@ -212,20 +286,38 @@ internal sealed class SessionReplayManager : IAsyncDisposable
                 }
                 else
                 {
-                    shouldFlush = AddPendingNoLock(context, record, timestampMilliseconds, hasFullSnapshot, creationReason, coalesceKey);
+                    foreach (var record in records)
+                    {
+                        shouldFlush |= AddPendingNoLock(
+                            context,
+                            record.Record,
+                            record.TimestampMilliseconds,
+                            record.HasFullSnapshot,
+                            record.CreationReason,
+                            record.CoalesceKey);
+                    }
                 }
             }
             else if (sessionErrorSampled)
             {
-                errorBuffer.Enqueue(new BufferedReplayRecord(context, record, timestampMilliseconds, hasFullSnapshot, creationReason, coalesceKey));
-                TrimErrorBufferNoLock(timestampMilliseconds);
+                foreach (var record in records)
+                {
+                    errorBuffer.Enqueue(new BufferedReplayRecord(
+                        context,
+                        record.Record,
+                        record.TimestampMilliseconds,
+                        record.HasFullSnapshot,
+                        record.CreationReason,
+                        record.CoalesceKey));
+                }
+                TrimErrorBufferNoLock(records[^1].TimestampMilliseconds);
             }
         }
 
         if (shouldFlushFirst)
         {
             _ = FlushPendingRecordsAsync(CancellationToken.None)
-                .ContinueWith(_ => AddRecord(context, record, timestampMilliseconds, hasFullSnapshot, creationReason, coalesceKey),
+                .ContinueWith(_ => AddRecords(context, records),
                     CancellationToken.None,
                     TaskContinuationOptions.ExecuteSynchronously,
                     TaskScheduler.Default);
@@ -240,6 +332,18 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
     private bool AddPendingNoLock(SessionReplayContext context, object record, long timestampMilliseconds, bool hasFullSnapshot, string creationReason, string? coalesceKey = null)
     {
+        if (string.Equals(creationReason, "view_end", StringComparison.Ordinal) &&
+            pendingContext is not null &&
+            SameReplayContext(pendingContext, context) &&
+            pending.Count > 0)
+        {
+            timestampMilliseconds = Math.Max(timestampMilliseconds, pending.Max(item => item.TimestampMilliseconds) + 1);
+            if (record is IDictionary<string, object?> fields)
+            {
+                fields["timestamp"] = timestampMilliseconds;
+            }
+        }
+
         pendingContext = context;
         var coalesced = false;
         if (!string.IsNullOrWhiteSpace(coalesceKey) &&
@@ -340,63 +444,247 @@ internal sealed class SessionReplayManager : IAsyncDisposable
         }
     }
 
-    private static Dictionary<string, object?> BuildDocumentNode(SessionReplayNode root)
+    private static List<object> BuildWireframes(SessionReplayNode root)
     {
-        var body = new SessionReplayNode("body", 0, 0, root.Width, root.Height);
-        body.Children.Add(root);
-        var html = new SessionReplayNode("html", 0, 0, root.Width, root.Height);
-        html.Children.Add(body);
+        var wireframes = new List<object>();
         var id = 1;
-        return BuildNode(html, ref id);
+        AddWireframe(root, wireframes, ref id);
+        return wireframes;
     }
 
-    private static Dictionary<string, object?> BuildNode(SessionReplayNode node, ref int id)
+    private static void AddWireframe(SessionReplayNode node, List<object> wireframes, ref int id)
     {
-        var attributes = new Dictionary<string, string>(node.Attributes, StringComparer.Ordinal)
-        {
-            ["style"] = BuildStyle(node)
-        };
-
+        wireframes.Add(BuildWireframe(node, ref id));
         if (node.Hidden)
         {
-            attributes["data-guance-hidden"] = "true";
-        }
-
-        var result = new Dictionary<string, object?>
-        {
-            ["type"] = 2,
-            ["id"] = id++,
-            ["tagName"] = node.TagName,
-            ["attributes"] = attributes,
-            ["childNodes"] = new List<object>()
-        };
-
-        var children = (List<object>)result["childNodes"]!;
-        if (node.Hidden)
-        {
-            children.Add(new Dictionary<string, object?> { ["type"] = 3, ["id"] = id++, ["textContent"] = "Hidden" });
-            return result;
-        }
-
-        if (!string.IsNullOrEmpty(node.Text))
-        {
-            children.Add(new Dictionary<string, object?> { ["type"] = 3, ["id"] = id++, ["textContent"] = node.Text });
+            return;
         }
 
         foreach (var child in node.Children)
         {
-            children.Add(BuildNode(child, ref id));
+            AddWireframe(child, wireframes, ref id);
+        }
+    }
+
+    private static Dictionary<string, object?> BuildWireframe(SessionReplayNode node, ref int id)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["id"] = id++,
+            ["x"] = ToReplayInt(node.X),
+            ["y"] = ToReplayInt(node.Y),
+            ["width"] = ToReplayInt(node.Width),
+            ["height"] = ToReplayInt(node.Height)
+        };
+
+        if (node.Hidden)
+        {
+            result["type"] = "placeholder";
+            result["label"] = "Hidden";
+            return result;
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.WebViewSlotId))
+        {
+            result["type"] = "webview";
+            result["slotId"] = node.WebViewSlotId;
+            result["isVisible"] = node.WebViewIsVisible;
+        }
+        else if (string.Equals(node.TagName, "img", StringComparison.Ordinal))
+        {
+            result["type"] = "image";
+            result["mimeType"] = string.IsNullOrWhiteSpace(node.ImageMimeType) ? "png" : node.ImageMimeType;
+            result["isEmpty"] = node.ImageIsEmpty || string.IsNullOrWhiteSpace(node.ImageBase64);
+            if (!string.IsNullOrWhiteSpace(node.ImageBase64))
+            {
+                result["base64"] = node.ImageBase64;
+            }
+        }
+        else if (!string.IsNullOrEmpty(node.Text))
+        {
+            result["type"] = "text";
+            result["text"] = node.Text;
+            result["textStyle"] = new Dictionary<string, object?>
+            {
+                ["family"] = string.IsNullOrWhiteSpace(node.FontFamily) ? "Segoe UI" : node.FontFamily,
+                ["size"] = node.FontSize is > 0 ? ToReplayInt(node.FontSize.Value) : 12,
+                ["color"] = string.IsNullOrWhiteSpace(node.TextColor) ? "#000000FF" : node.TextColor
+            };
+            result["textPosition"] = new Dictionary<string, object?>
+            {
+                ["padding"] = new Dictionary<string, object?>
+                {
+                    ["top"] = ToReplayInt(node.PaddingTop),
+                    ["bottom"] = ToReplayInt(node.PaddingBottom),
+                    ["left"] = ToReplayInt(node.PaddingLeft),
+                    ["right"] = ToReplayInt(node.PaddingRight)
+                },
+                ["alignment"] = new Dictionary<string, object?>
+                {
+                    ["horizontal"] = node.TextHorizontalAlignment,
+                    ["vertical"] = node.TextVerticalAlignment
+                }
+            };
+        }
+        else
+        {
+            result["type"] = "shape";
+        }
+
+        result["shapeStyle"] = new Dictionary<string, object?>
+        {
+            ["backgroundColor"] = string.IsNullOrWhiteSpace(node.BackgroundColor) ? "#FFFFFF00" : node.BackgroundColor,
+            ["opacity"] = Math.Clamp(node.Opacity, 0, 1),
+            ["cornerRadius"] = ToReplayInt(node.CornerRadius)
+        };
+
+        if (!string.IsNullOrWhiteSpace(node.BorderColor) && node.BorderWidth > 0)
+        {
+            result["border"] = new Dictionary<string, object?>
+            {
+                ["color"] = node.BorderColor,
+                ["width"] = Math.Max(1, ToReplayInt(node.BorderWidth))
+            };
         }
 
         return result;
     }
 
-    private static string BuildStyle(SessionReplayNode node)
+    private static JsonElement AddWebViewSlotId(JsonElement record, string slotId)
     {
-        return FormattableString.Invariant($"position:absolute;left:{node.X:0.##}px;top:{node.Y:0.##}px;width:{node.Width:0.##}px;height:{node.Height:0.##}px;box-sizing:border-box;overflow:hidden;");
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in record.EnumerateObject())
+            {
+                if (!string.Equals(property.Name, "slotId", StringComparison.Ordinal))
+                {
+                    property.WriteTo(writer);
+                }
+            }
+            writer.WriteString("slotId", slotId);
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static Dictionary<string, object?> BuildMobileIncrementalData(string eventType, string? target, double x, double y, long timestampMilliseconds, string? value)
+    {
+        if (eventType == "click")
+        {
+            return new Dictionary<string, object?>
+            {
+                ["source"] = 2,
+                ["target"] = target,
+                ["positions"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["id"] = 0,
+                        ["x"] = ToReplayInt(x),
+                        ["y"] = ToReplayInt(y),
+                        ["timestamp"] = timestampMilliseconds
+                    }
+                }
+            };
+        }
+
+        var data = new Dictionary<string, object?>
+        {
+            ["source"] = 0,
+            ["adds"] = Array.Empty<object>(),
+            ["removes"] = Array.Empty<object>(),
+            ["updates"] = Array.Empty<object>(),
+            ["event_type"] = eventType,
+            ["target"] = target,
+            ["x"] = ToReplayInt(x),
+            ["y"] = ToReplayInt(y)
+        };
+        if (value is not null)
+        {
+            data["value"] = value;
+        }
+
+        return data;
+    }
+
+    private static int ToReplayInt(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return 0;
+        }
+
+        return Math.Max(0, (int)Math.Round(value, MidpointRounding.AwayFromZero));
+    }
+
+    private void LogFullSnapshotMapping(SessionReplayNode root, IReadOnlyList<object> wireframes)
+    {
+        if (!config.Debug)
+        {
+            return;
+        }
+
+        var message = $"[Guance.RUM.SessionReplay] full snapshot mapped root tag={root.TagName} text={Truncate(root.Text)} rect=({root.X:0.##},{root.Y:0.##},{root.Width:0.##},{root.Height:0.##}) wireframes={wireframes.Count}";
+        Debug.WriteLine(message);
+        Console.WriteLine(message);
+        LogNodeMapping(root, depth: 0);
+    }
+
+    private void LogNodeMapping(SessionReplayNode node, int depth)
+    {
+        if (!config.Debug || depth > 8)
+        {
+            return;
+        }
+
+        var wireframeType = node.Hidden
+            ? "placeholder"
+            : string.IsNullOrEmpty(node.Text) ? "shape" : "text";
+        var message = $"[Guance.RUM.SessionReplay] node->wireframe depth={depth} tag={node.TagName} type={wireframeType} text={Truncate(node.Text)} hidden={node.Hidden} rect=({node.X:0.##},{node.Y:0.##},{node.Width:0.##},{node.Height:0.##}) attrs={node.Attributes.Count} children={node.Children.Count}";
+        Debug.WriteLine(message);
+        Console.WriteLine(message);
+
+        foreach (var child in node.Children)
+        {
+            LogNodeMapping(child, depth + 1);
+        }
+    }
+
+    private void LogIncrementalEvent(string eventType, string? target, double x, double y, string? value, object record)
+    {
+        if (!config.Debug)
+        {
+            return;
+        }
+
+        var recordJson = Encoding.UTF8.GetString(JsonSerializer.SerializeToUtf8Bytes(record, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var message = $"[Guance.RUM.SessionReplay] incremental event={eventType} target={target ?? string.Empty} x={x:0.##} y={y:0.##} value={Truncate(value)} record={recordJson}";
+        Debug.WriteLine(message);
+        Console.WriteLine(message);
+    }
+
+    private static string Truncate(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= 80 ? value : value[..80] + "...";
     }
 
     private sealed record TimestampedReplayRecord(object Record, long TimestampMilliseconds, string? CoalesceKey, int EstimatedBytes);
+
+    private sealed record PendingReplayRecord(
+        object Record,
+        long TimestampMilliseconds,
+        bool HasFullSnapshot,
+        string CreationReason,
+        string? CoalesceKey);
 
     private sealed record BufferedReplayRecord(
         SessionReplayContext Context,

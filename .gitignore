@@ -19,4 +19,5 @@ build/native/
 out/
 dist/
 dist-*/
+samples/rum.local.json
 /docs/

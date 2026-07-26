@@ -4,6 +4,15 @@ namespace Guance.Rum.Windows;
 
 public sealed class RumConfig
 {
+    private static readonly HashSet<string> SupportedEnvironments = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "prod",
+        "gray",
+        "pre",
+        "common",
+        "local"
+    };
+
     public string? DatawayUrl { get; init; }
     public string? DatakitUrl { get; init; }
     public string? ClientToken { get; init; }
@@ -32,6 +41,21 @@ public sealed class RumConfig
         if (string.IsNullOrWhiteSpace(RumAppId))
         {
             throw new InvalidOperationException("RumAppId is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(ServiceName))
+        {
+            throw new InvalidOperationException("ServiceName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Version))
+        {
+            throw new InvalidOperationException("Version is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Env) || !SupportedEnvironments.Contains(Env))
+        {
+            throw new InvalidOperationException("Env must be one of: prod, gray, pre, common, local.");
         }
 
         var hasDataway = !string.IsNullOrWhiteSpace(DatawayUrl);
@@ -114,6 +138,11 @@ public sealed class RumConfig
         if (SessionReplay.MaxAttributeValueLength <= 0)
         {
             throw new InvalidOperationException("SessionReplay.MaxAttributeValueLength must be greater than 0.");
+        }
+
+        if (SessionReplay.LargeImagePrivacyThreshold <= 0)
+        {
+            throw new InvalidOperationException("SessionReplay.LargeImagePrivacyThreshold must be greater than 0.");
         }
 
         if (SessionReplay.CustomRenderedTypeNameMarkers is null)

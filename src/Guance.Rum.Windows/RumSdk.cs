@@ -24,10 +24,13 @@ public static class RumSdk
 
     public static void EnableAutomaticInstrumentation(AutomaticInstrumentationOptions? options = null) => Client.EnableAutomaticInstrumentation(options);
     public static void AttachWinUIWindow(object window, string? viewName = null) => Client.AttachWinUIWindow(window, viewName);
+    public static void AttachWebView(object webView) => Client.AttachWebView(webView);
+    public static void DetachWebView(object webView) => Client.DetachWebView(webView);
     public static void StartSessionReplayRecording() => Client.StartSessionReplayRecording();
     public static void StopSessionReplayRecording() => Client.StopSessionReplayRecording();
     public static void SetSessionReplayTextAndInputPrivacy(object element, SessionReplayTextAndInputPrivacy? privacy) => Client.SetSessionReplayTextAndInputPrivacy(element, privacy);
     public static void SetSessionReplayTouchPrivacy(object element, SessionReplayTouchPrivacy? privacy) => Client.SetSessionReplayTouchPrivacy(element, privacy);
+    public static void SetSessionReplayImagePrivacy(object element, SessionReplayImagePrivacy? privacy) => Client.SetSessionReplayImagePrivacy(element, privacy);
     public static void SetSessionReplayHidden(object element, bool hidden = true) => Client.SetSessionReplayHidden(element, hidden);
     public static void SetUser(string id, string? name = null, string? email = null, IReadOnlyDictionary<string, object?>? extra = null) => Client.SetUser(id, name, email, extra);
     public static void ClearUser() => Client.ClearUser();

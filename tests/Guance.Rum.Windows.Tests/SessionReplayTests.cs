@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -11,6 +12,16 @@ namespace Guance.Rum.Windows.Tests;
 public sealed class SessionReplayTests
 {
     [Fact]
+    public void SessionReplayConfig_DefaultsToReleaseSafePrivacy()
+    {
+        var config = new RumSessionReplayConfig();
+
+        Assert.Equal(SessionReplayTextAndInputPrivacy.MaskAll, config.TextAndInputPrivacy);
+        Assert.Equal(SessionReplayImagePrivacy.MaskAll, config.ImagePrivacy);
+        Assert.True(config.CaptureImages);
+    }
+
+    [Fact]
     public void SegmentBuilder_WritesExpectedMultipartFieldsAndSegmentFile()
     {
         var context = new SessionReplayContext(
@@ -20,33 +31,93 @@ public sealed class SessionReplayTests
             Service: "svc",
             Env: "prod",
             Version: "1.2.3",
-            SdkName: "guance-rum-windows",
+            SdkName: RumConstants.WindowsSdkName,
             SdkVersion: "0.1.0");
         var records = new object[]
         {
             new Dictionary<string, object?>
             {
-                ["type"] = 2,
+                ["type"] = 10,
                 ["timestamp"] = 10,
-                ["data"] = new Dictionary<string, object?> { ["node"] = new Dictionary<string, object?> { ["tagName"] = "html" } }
+                ["data"] = new Dictionary<string, object?>
+                {
+                    ["wireframes"] = new object[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["id"] = 1,
+                            ["type"] = "shape",
+                            ["x"] = 0,
+                            ["y"] = 0,
+                            ["width"] = 100,
+                            ["height"] = 100
+                        }
+                    }
+                }
             }
         };
 
         var builder = new SessionReplaySegmentBuilder(context, records, hasFullSnapshot: true, creationReason: "full_snapshot", indexInView: 7, startMilliseconds: 10, endMilliseconds: 12);
         var (contentType, body) = builder.Build();
         var text = Encoding.UTF8.GetString(body);
-        var segment = JsonSerializer.SerializeToUtf8Bytes(records, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var segment = ExtractAndDecompressSegment(body);
+        var segmentText = Encoding.UTF8.GetString(segment);
 
         Assert.StartsWith("multipart/form-data; boundary=guance-rum-replay-", contentType, StringComparison.Ordinal);
         Assert.Contains("name=\"app_id\"\r\n\r\napp\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"session_id\"\r\n\r\nsession\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"view_id\"\r\n\r\nview\r\n", text, StringComparison.Ordinal);
-        Assert.Contains("name=\"source\"\r\n\r\nwindows\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("name=\"source\"\r\n\r\nandroid\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"index_in_view\"\r\n\r\n7\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"has_full_snapshot\"\r\n\r\ntrue\r\n", text, StringComparison.Ordinal);
         Assert.Contains($"name=\"raw_segment_size\"\r\n\r\n{segment.Length}\r\n", text, StringComparison.Ordinal);
-        Assert.Contains("name=\"segment\"; filename=\"segment\"", text, StringComparison.Ordinal);
-        Assert.Contains("\"tagName\":\"html\"", text, StringComparison.Ordinal);
+        Assert.Contains("name=\"segment\"; filename=\"view\"", text, StringComparison.Ordinal);
+        Assert.Contains("Content-Type: application/octet-stream", text, StringComparison.Ordinal);
+        Assert.Contains("\"application\":{\"id\":\"app\"}", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"session\":{\"id\":\"session\"}", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"view\":{\"id\":\"view\"}", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"source\":\"android\"", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"records\":[", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"type\":10", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"wireframes\":[", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"type\":\"shape\"", segmentText, StringComparison.Ordinal);
+        Assert.EndsWith("\n", segmentText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SegmentBuilder_NormalizesGuidIdsForMobileSchema()
+    {
+        var appId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var viewId = Guid.NewGuid();
+        var context = new SessionReplayContext(
+            AppId: appId.ToString("N"),
+            SessionId: sessionId.ToString("N"),
+            ViewId: viewId.ToString("N"),
+            Service: "svc",
+            Env: "prod",
+            Version: "1.2.3",
+            SdkName: RumConstants.WindowsSdkName,
+            SdkVersion: "0.1.0");
+        var records = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["type"] = 10,
+                ["timestamp"] = 10,
+                ["data"] = new Dictionary<string, object?>
+                {
+                    ["wireframes"] = Array.Empty<object>()
+                }
+            }
+        };
+
+        var (_, body) = new SessionReplaySegmentBuilder(context, records, true, "full_snapshot", 0, 10, 10).Build();
+        var segmentText = Encoding.UTF8.GetString(ExtractAndDecompressSegment(body));
+
+        Assert.Contains($"\"application\":{{\"id\":\"{appId:D}\"}}", segmentText, StringComparison.Ordinal);
+        Assert.Contains($"\"session\":{{\"id\":\"{sessionId:D}\"}}", segmentText, StringComparison.Ordinal);
+        Assert.Contains($"\"view\":{{\"id\":\"{viewId:D}\"}}", segmentText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -105,6 +176,33 @@ public sealed class SessionReplayTests
         var drop = await dropTransport.SendAsync(segment, CancellationToken.None);
         Assert.True(drop.DeleteFromQueue);
         Assert.False(drop.RetryLater);
+    }
+
+    [Fact]
+    public async Task SessionReplayTransport_IncludesResponseBodyAndRedactedUriForClientErrors()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("replay endpoint is disabled")
+        };
+        using var transport = new SessionReplayTransport(new RumConfig
+        {
+            DatawayUrl = "https://openway.guance.com",
+            ClientToken = "secret token",
+            RumAppId = "app",
+            HttpMessageHandlerFactory = () => new CaptureHandler(response)
+        });
+        var segment = new QueuedSessionReplaySegment(1, "multipart/form-data; boundary=x", Encoding.UTF8.GetBytes("--x--\r\n"), DateTimeOffset.UtcNow, 7);
+
+        var result = await transport.SendAsync(segment, CancellationToken.None);
+
+        Assert.True(result.DeleteFromQueue);
+        Assert.False(result.RetryLater);
+        Assert.Contains("response_body=replay endpoint is disabled", result.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("token=redacted", result.ErrorMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret token", result.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("content_type=multipart/form-data; boundary=x", result.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("body_bytes=7", result.ErrorMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -208,24 +306,79 @@ public sealed class SessionReplayTests
     {
         var root = new FakePanel { Name = "root", Width = 400, Height = 300 };
         var button = new FakeWinUIButton { Content = "Save", ActualWidth = 90, ActualHeight = 30, IsEnabled = false };
-        var textBox = new FakeWinUITextBox { Text = "customer@example.com", PlaceholderText = "Email", ActualWidth = 160, ActualHeight = 32 };
+        var textBox = new FakeWinUITextBox { Text = "ordinary input", PlaceholderText = "Display name", ActualWidth = 160, ActualHeight = 32 };
         var comboBox = new FakeWinUIComboBox { SelectedItem = "Enterprise", SelectedIndex = 2, ActualWidth = 120, ActualHeight = 32 };
         root.Children.Add(button);
         root.Children.Add(textBox);
         root.Children.Add(comboBox);
 
-        var mapped = SessionReplayTreeMapper.Map(root, new SessionReplayPrivacyOverrides(), new RumSessionReplayConfig());
+        var mapped = SessionReplayTreeMapper.Map(
+            root,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig { TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs });
 
         Assert.NotNull(mapped);
         Assert.Equal("button", mapped!.Children[0].TagName);
         Assert.Equal("Save", mapped.Children[0].Text);
         Assert.Equal("true", mapped.Children[0].Attributes["aria-disabled"]);
         Assert.Equal("input", mapped.Children[1].TagName);
-        Assert.Equal("********", mapped.Children[1].Text);
-        Assert.Equal("Email", mapped.Children[1].Attributes["placeholder"]);
+        Assert.Equal("ordinary input", mapped.Children[1].Text);
+        Assert.Equal("Display name", mapped.Children[1].Attributes["placeholder"]);
         Assert.Equal("select", mapped.Children[2].TagName);
-        Assert.Equal("********", mapped.Children[2].Text);
+        Assert.Equal("Enterprise", mapped.Children[2].Text);
         Assert.Equal("2", mapped.Children[2].Attributes["data-selected-index"]);
+    }
+
+    [Fact]
+    public void TreeMapper_AppliesWinUiTextAndInputPrivacyLevels()
+    {
+        var root = new FakePanel { Name = "root", Width = 500, Height = 300 };
+        root.Children.Add(new FakeWinUITextBox { Text = "ordinary input", ActualWidth = 160, ActualHeight = 32 });
+        root.Children.Add(new FakeWinUITextBox { Name = "EmailBox", Text = "customer@example.com", ActualWidth = 160, ActualHeight = 32 });
+        root.Children.Add(new FakeWinUIPasswordBox { Text = "replay-secret", ActualWidth = 160, ActualHeight = 32 });
+        var comboBox = new FakeWinUIComboBox { SelectedItem = "Enterprise", SelectedIndex = 2, ActualWidth = 120, ActualHeight = 32 };
+        comboBox.Children.Add(new FakeLabel { Text = "Enterprise", ActualWidth = 100, ActualHeight = 20 });
+        root.Children.Add(comboBox);
+        root.Children.Add(new FakeWinUIToggleSwitch { IsOn = true, ActualWidth = 80, ActualHeight = 32 });
+        root.Children.Add(new FakeLabel { Text = "Public label", ActualWidth = 100, ActualHeight = 20 });
+
+        var sensitiveOnly = SessionReplayTreeMapper.Map(
+            root,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig { TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs });
+
+        Assert.NotNull(sensitiveOnly);
+        Assert.Equal("ordinary input", sensitiveOnly!.Children[0].Text);
+        Assert.Equal("********", sensitiveOnly.Children[1].Text);
+        Assert.Equal("********", sensitiveOnly.Children[2].Text);
+        Assert.Equal("Enterprise", sensitiveOnly.Children[3].Text);
+        Assert.Equal("2", sensitiveOnly.Children[3].Attributes["data-selected-index"]);
+        Assert.Equal("true", sensitiveOnly.Children[4].Attributes["aria-checked"]);
+        Assert.Equal("Public label", sensitiveOnly.Children[5].Text);
+
+        var allInputs = SessionReplayTreeMapper.Map(
+            root,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig { TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskAllInputs });
+
+        Assert.NotNull(allInputs);
+        Assert.Equal("********", allInputs!.Children[0].Text);
+        Assert.Equal("********", allInputs.Children[1].Text);
+        Assert.Equal("********", allInputs.Children[2].Text);
+        Assert.Equal("********", allInputs.Children[3].Text);
+        Assert.Equal("********", Assert.Single(allInputs.Children[3].Children).Text);
+        Assert.False(allInputs.Children[3].Attributes.ContainsKey("data-selected-index"));
+        Assert.False(allInputs.Children[4].Attributes.ContainsKey("aria-checked"));
+        Assert.Equal("Public label", allInputs.Children[5].Text);
+
+        var allText = SessionReplayTreeMapper.Map(
+            root,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig { TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskAll });
+
+        Assert.NotNull(allText);
+        Assert.Equal("********", allText!.Children[5].Text);
+        Assert.False(allText.Children[4].Attributes.ContainsKey("aria-checked"));
     }
 
     [Fact]
@@ -241,7 +394,10 @@ public sealed class SessionReplayTests
         root.Children.Add(toggle);
         root.Children.Add(webView);
 
-        var mapped = SessionReplayTreeMapper.Map(root, new SessionReplayPrivacyOverrides(), new RumSessionReplayConfig());
+        var mapped = SessionReplayTreeMapper.Map(
+            root,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig { TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs });
 
         Assert.NotNull(mapped);
         Assert.Equal("********", mapped!.Children[0].Text);
@@ -251,6 +407,38 @@ public sealed class SessionReplayTests
         Assert.Equal("true", mapped.Children[2].Attributes["aria-checked"]);
         Assert.Equal("iframe", mapped.Children[3].TagName);
         Assert.Equal("https://example.com", mapped.Children[3].Attributes["src"]);
+        Assert.True(long.TryParse(
+            mapped.Children[3].Attributes["data-guance-webview-slot-id"],
+            out _));
+        Assert.Null(mapped.Children[3].Text);
+    }
+
+    [Fact]
+    public void TreeMapper_ReusesStableWebViewSlotId()
+    {
+        var webView = new FakeWinUIWebView
+        {
+            Source = "https://example.com",
+            ActualWidth = 300,
+            ActualHeight = 180
+        };
+        var firstRoot = new FakePanel { Width = 400, Height = 300 };
+        firstRoot.Children.Add(webView);
+        var secondRoot = new FakePanel { Width = 400, Height = 300 };
+        secondRoot.Children.Add(webView);
+
+        var first = SessionReplayTreeMapper.Map(
+            firstRoot,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig());
+        var second = SessionReplayTreeMapper.Map(
+            secondRoot,
+            new SessionReplayPrivacyOverrides(),
+            new RumSessionReplayConfig());
+
+        var firstSlot = Assert.Single(first!.Children).Attributes["data-guance-webview-slot-id"];
+        var secondSlot = Assert.Single(second!.Children).Attributes["data-guance-webview-slot-id"];
+        Assert.Equal(firstSlot, secondSlot);
     }
 
     [Fact]
@@ -284,6 +472,7 @@ public sealed class SessionReplayTests
             new SessionReplayPrivacyOverrides(),
             new RumSessionReplayConfig
             {
+                TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.Allow,
                 MaxNodeCount = 2,
                 MaxTreeDepth = 8,
                 MaxTextLength = 12,
@@ -346,8 +535,8 @@ public sealed class SessionReplayTests
         manager.CaptureResizeEvent(context, "MainWindow", 800, 600);
         await manager.FlushPendingRecordsAsync(CancellationToken.None);
 
-        var body = Encoding.UTF8.GetString(Assert.Single(queue.Items).Body);
-        Assert.Contains("\"source\":\"resize\"", body, StringComparison.Ordinal);
+        var body = Encoding.UTF8.GetString(ExtractAndDecompressSegment(Assert.Single(queue.Items).Body));
+        Assert.Contains("\"source\":4", body, StringComparison.Ordinal);
         Assert.Contains("\"width\":800", body, StringComparison.Ordinal);
         Assert.Contains("\"height\":600", body, StringComparison.Ordinal);
     }
@@ -371,10 +560,167 @@ public sealed class SessionReplayTests
         manager.CaptureResizeEvent(context, "MainWindow", 801, 601);
         await manager.FlushPendingRecordsAsync(CancellationToken.None);
 
-        var body = Encoding.UTF8.GetString(Assert.Single(queue.Items).Body);
-        Assert.Contains("name=\"records_count\"\r\n\r\n1\r\n", body, StringComparison.Ordinal);
+        var item = Assert.Single(queue.Items);
+        var multipart = Encoding.UTF8.GetString(item.Body);
+        var body = Encoding.UTF8.GetString(ExtractAndDecompressSegment(item.Body));
+        Assert.Contains("name=\"records_count\"\r\n\r\n1\r\n", multipart, StringComparison.Ordinal);
         Assert.Contains("\"width\":801", body, StringComparison.Ordinal);
         Assert.DoesNotContain("\"width\":800", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionReplayManager_WritesViewportMetaBeforeFullSnapshot()
+    {
+        var queue = new MemoryReplayQueue();
+        await using var manager = new SessionReplayManager(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                SessionReplay = new RumSessionReplayConfig { Enabled = true }
+            },
+            queue,
+            new SessionReplayPrivacyOverrides());
+        var context = new SessionReplayContext("app", "session", "view", "svc", "prod", "1.0.0", "sdk", "0.1.0");
+        var root = new SessionReplayNode("window", 0, 0, 800, 600) { Text = "MainWindow" };
+
+        manager.CaptureFullSnapshot(context, root);
+        await manager.FlushPendingRecordsAsync(CancellationToken.None);
+
+        var payload = ExtractAndDecompressSegment(Assert.Single(queue.Items).Body);
+        using var json = System.Text.Json.JsonDocument.Parse(payload);
+        var records = json.RootElement.GetProperty("records");
+        Assert.Equal(new[] { 4, 10 }, records.EnumerateArray().Select(record => record.GetProperty("type").GetInt32()));
+        var meta = records[0].GetProperty("data");
+        Assert.Equal(800, meta.GetProperty("width").GetInt32());
+        Assert.Equal(600, meta.GetProperty("height").GetInt32());
+        Assert.Equal(string.Empty, meta.GetProperty("href").GetString());
+        Assert.True(json.RootElement.GetProperty("has_full_snapshot").GetBoolean());
+    }
+
+    [Fact]
+    public async Task SessionReplayManager_WritesViewEndAfterSnapshotRecords()
+    {
+        var queue = new MemoryReplayQueue();
+        await using var manager = new SessionReplayManager(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                SessionReplay = new RumSessionReplayConfig { Enabled = true }
+            },
+            queue,
+            new SessionReplayPrivacyOverrides());
+        var context = new SessionReplayContext("app", "session", "view", "svc", "prod", "1.0.0", "sdk", "0.1.0");
+        var root = new SessionReplayNode("window", 0, 0, 800, 600) { Text = "MainWindow" };
+
+        manager.CaptureFullSnapshot(context, root);
+        manager.CaptureViewEnd(context);
+        await manager.FlushPendingRecordsAsync(CancellationToken.None);
+
+        var payload = ExtractAndDecompressSegment(Assert.Single(queue.Items).Body);
+        using var json = System.Text.Json.JsonDocument.Parse(payload);
+        var records = json.RootElement.GetProperty("records");
+        Assert.Equal(new[] { 4, 10, 7 }, records.EnumerateArray().Select(record => record.GetProperty("type").GetInt32()));
+        Assert.True(records[2].GetProperty("timestamp").GetInt64() > records[1].GetProperty("timestamp").GetInt64());
+    }
+
+    [Fact]
+    public async Task SessionReplayManager_WritesStyledImageWireframe()
+    {
+        var queue = new MemoryReplayQueue();
+        await using var manager = new SessionReplayManager(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                SessionReplay = new RumSessionReplayConfig { Enabled = true }
+            },
+            queue,
+            new SessionReplayPrivacyOverrides());
+        var context = new SessionReplayContext("app", "session", "view", "svc", "prod", "1.0.0", "sdk", "0.1.0");
+        var root = new SessionReplayNode("window", 0, 0, 320, 240);
+        var pngBase64 = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+        root.Children.Add(new SessionReplayNode("img", 16, 24, 96, 64)
+        {
+            ImageBase64 = pngBase64,
+            ImageMimeType = "png",
+            BackgroundColor = "#EFF6FFFF",
+            BorderColor = "#2563EBFF",
+            BorderWidth = 2,
+            CornerRadius = 6
+        });
+
+        manager.CaptureFullSnapshot(context, root);
+        await manager.FlushPendingRecordsAsync(CancellationToken.None);
+
+        var payload = ExtractAndDecompressSegment(Assert.Single(queue.Items).Body);
+        using var json = System.Text.Json.JsonDocument.Parse(payload);
+        var fullSnapshot = Assert.Single(
+            json.RootElement.GetProperty("records").EnumerateArray(),
+            record => record.GetProperty("type").GetInt32() == 10);
+        var image = Assert.Single(
+            fullSnapshot.GetProperty("data").GetProperty("wireframes").EnumerateArray(),
+            wireframe => wireframe.GetProperty("type").GetString() == "image");
+        Assert.Equal("png", image.GetProperty("mimeType").GetString());
+        Assert.Equal(pngBase64, image.GetProperty("base64").GetString());
+        Assert.False(image.GetProperty("isEmpty").GetBoolean());
+        Assert.Equal("#EFF6FFFF", image.GetProperty("shapeStyle").GetProperty("backgroundColor").GetString());
+        Assert.Equal(6, image.GetProperty("shapeStyle").GetProperty("cornerRadius").GetInt32());
+        Assert.Equal("#2563EBFF", image.GetProperty("border").GetProperty("color").GetString());
+        Assert.Equal(2, image.GetProperty("border").GetProperty("width").GetInt32());
+    }
+
+    [Fact]
+    public async Task SessionReplayManager_MergesWebViewRecordsByServerOwnedSlotId()
+    {
+        var queue = new MemoryReplayQueue();
+        await using var manager = new SessionReplayManager(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                SessionReplay = new RumSessionReplayConfig { Enabled = true }
+            },
+            queue,
+            new SessionReplayPrivacyOverrides());
+        var context = new SessionReplayContext("app", "session", "view", "svc", "prod", "1.0.0", "sdk", "0.1.0");
+        var root = new SessionReplayNode("window", 0, 0, 800, 600);
+        root.Children.Add(new SessionReplayNode("iframe", 20, 30, 640, 480)
+        {
+            WebViewSlotId = "42"
+        });
+        using var browserRecord = JsonDocument.Parse(
+            $$"""
+            {
+              "type": 2,
+              "timestamp": {{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 1000}},
+              "slotId": "untrusted-page-value",
+              "data": { "node": { "type": 0, "id": 1, "childNodes": [] } }
+            }
+            """);
+
+        manager.CaptureFullSnapshot(context, root);
+        manager.CaptureWebViewRecord(context, "42", browserRecord.RootElement);
+        await manager.FlushPendingRecordsAsync(CancellationToken.None);
+
+        var payload = ExtractAndDecompressSegment(Assert.Single(queue.Items).Body);
+        using var json = JsonDocument.Parse(payload);
+        var records = json.RootElement.GetProperty("records");
+        var nativeSnapshot = Assert.Single(
+            records.EnumerateArray(),
+            record => record.GetProperty("type").GetInt32() == 10);
+        var webViewWireframe = Assert.Single(
+            nativeSnapshot.GetProperty("data").GetProperty("wireframes").EnumerateArray(),
+            wireframe => wireframe.GetProperty("type").GetString() == "webview");
+        var browserSnapshot = Assert.Single(
+            records.EnumerateArray(),
+            record => record.GetProperty("type").GetInt32() == 2);
+
+        Assert.Equal("42", webViewWireframe.GetProperty("slotId").GetString());
+        Assert.True(webViewWireframe.GetProperty("isVisible").GetBoolean());
+        Assert.Equal("42", browserSnapshot.GetProperty("slotId").GetString());
+        Assert.True(json.RootElement.GetProperty("has_full_snapshot").GetBoolean());
     }
 
     [Fact]
@@ -406,7 +752,10 @@ public sealed class SessionReplayTests
         await manager.FlushPendingRecordsAsync(CancellationToken.None);
 
         var item = Assert.Single(queue.Items);
-        Assert.Contains("name=\"creation_reason\"\r\n\r\nfull_snapshot\r\n", Encoding.UTF8.GetString(item.Body), StringComparison.Ordinal);
+        var multipart = Encoding.UTF8.GetString(item.Body);
+        var body = Encoding.UTF8.GetString(ExtractAndDecompressSegment(item.Body));
+        Assert.Contains("name=\"has_full_snapshot\"\r\n\r\ntrue\r\n", multipart, StringComparison.Ordinal);
+        Assert.Contains("\"has_full_snapshot\":true", body, StringComparison.Ordinal);
     }
 
     private sealed class CaptureHandler : HttpMessageHandler
@@ -431,6 +780,48 @@ public sealed class SessionReplayTests
             }
             return response;
         }
+    }
+
+    private static byte[] ExtractAndDecompressSegment(byte[] multipartBody)
+    {
+        var marker = Encoding.ASCII.GetBytes("Content-Type: application/octet-stream\r\n\r\n");
+        var start = IndexOf(multipartBody, marker);
+        Assert.True(start >= 0);
+        start += marker.Length;
+        var endMarker = Encoding.ASCII.GetBytes("\r\n--guance-rum-replay-");
+        var end = IndexOf(multipartBody, endMarker, start);
+        Assert.True(end > start);
+
+        var compressedLength = end - start;
+        Assert.True(compressedLength > 6);
+        using var compressed = new MemoryStream(multipartBody, start + 2, compressedLength - 6);
+        using var zlib = new DeflateStream(compressed, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        zlib.CopyTo(output);
+        return output.ToArray();
+    }
+
+    private static int IndexOf(byte[] source, byte[] pattern, int start = 0)
+    {
+        for (var i = start; i <= source.Length - pattern.Length; i++)
+        {
+            var matches = true;
+            for (var j = 0; j < pattern.Length; j++)
+            {
+                if (source[i + j] != pattern[j])
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private sealed class ThrowingHandler : HttpMessageHandler
@@ -516,6 +907,13 @@ public sealed class SessionReplayTests
     {
         public string? Text { get; init; }
         public string? PlaceholderText { get; init; }
+        public double ActualWidth { get; init; }
+        public double ActualHeight { get; init; }
+    }
+
+    private sealed class FakeWinUIPasswordBox : FakePanel
+    {
+        public string? Text { get; init; }
         public double ActualWidth { get; init; }
         public double ActualHeight { get; init; }
     }

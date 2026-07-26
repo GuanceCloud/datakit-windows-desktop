@@ -1,23 +1,142 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 using Guance.Rum.Windows;
 
 namespace WpfSample;
 
 public partial class MainWindow : Window
 {
+    private const string WebViewTestUrlEnvironmentVariable = "GUANCE_RUM_WEBVIEW_TEST_URL";
     private readonly HttpClient httpClient = new(RumSdk.CreateHttpMessageHandler());
     private int sampleCounter;
     private bool diagnosticListenerAttached;
+    private bool networkReplayImagesLoading;
+    private bool webViewAttached;
 
     public MainWindow()
     {
         InitializeComponent();
         AppendLog("Ready. SDK initialization is performed by App.OnStartup.");
+    }
+
+    private async void OnNetworkReplayImagesLoaded(object sender, RoutedEventArgs e)
+    {
+        if (networkReplayImagesLoading || NetworkReplayPngImage.Source is not null || NetworkReplayJpegImage.Source is not null)
+        {
+            return;
+        }
+
+        networkReplayImagesLoading = true;
+        NetworkReplayImageStatus.Text = "Loading network images...";
+        try
+        {
+            var results = await Task.WhenAll(
+                LoadNetworkReplayImageAsync(NetworkReplayPngImage, "https://picsum.photos/seed/standalone/200/200"),
+                LoadNetworkReplayImageAsync(NetworkReplayJpegImage, "https://picsum.photos/seed/composition/200/200"));
+            var loadedCount = results.Count(loaded => loaded);
+            NetworkReplayImageStatus.Text = $"Loaded {loadedCount}/2 network images from picsum.photos";
+            AppendLog($"Replay network image composition loaded {loadedCount}/2 images.");
+        }
+        catch (Exception ex)
+        {
+            NetworkReplayImageStatus.Text = $"Network images unavailable: {ex.GetType().Name}";
+            AppendLog($"Replay network images failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            networkReplayImagesLoading = false;
+        }
+    }
+
+    private async Task<bool> LoadNetworkReplayImageAsync(Image target, string url)
+    {
+        try
+        {
+            using var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(true);
+            response.EnsureSuccessStatusCode();
+            await using var source = await response.Content.ReadAsStreamAsync().ConfigureAwait(true);
+            using var buffer = new MemoryStream();
+            await source.CopyToAsync(buffer).ConfigureAwait(true);
+            buffer.Position = 0;
+
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.StreamSource = buffer;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            target.Source = bitmap;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Network Replay image {url} failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void OnMaskNetworkReplayImagesClicked(object sender, RoutedEventArgs e)
+    {
+        RumSdk.SetSessionReplayImagePrivacy(NetworkReplayImagePanel, SessionReplayImagePrivacy.MaskAll);
+        AppendLog("Replay network image privacy set to MaskAll.");
+    }
+
+    private void OnMaskLargeNetworkReplayImagesClicked(object sender, RoutedEventArgs e)
+    {
+        RumSdk.SetSessionReplayImagePrivacy(NetworkReplayImagePanel, SessionReplayImagePrivacy.MaskLargeOnly);
+        AppendLog("Replay network image privacy set to MaskLargeOnly.");
+    }
+
+    private void OnShowNetworkReplayImagesClicked(object sender, RoutedEventArgs e)
+    {
+        RumSdk.SetSessionReplayImagePrivacy(NetworkReplayImagePanel, SessionReplayImagePrivacy.MaskNone);
+        AppendLog("Replay network image privacy set to MaskNone.");
+    }
+
+    private async void OnWebViewTestLoaded(object sender, RoutedEventArgs e)
+    {
+        if (webViewAttached)
+        {
+            return;
+        }
+
+        var configuredUrl = Environment.GetEnvironmentVariable(WebViewTestUrlEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(configuredUrl))
+        {
+            WebViewTestStatus.Text = $"WebView2 smoke page skipped: {WebViewTestUrlEnvironmentVariable} is not set.";
+            AppendLog(WebViewTestStatus.Text);
+            return;
+        }
+
+        if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https"))
+        {
+            WebViewTestStatus.Text = $"{WebViewTestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.";
+            AppendLog(WebViewTestStatus.Text);
+            return;
+        }
+
+        webViewAttached = true;
+        try
+        {
+            RumSdk.AttachWebView(WebViewTestBrowser);
+            await WebViewTestBrowser.EnsureCoreWebView2Async().ConfigureAwait(true);
+            WebViewTestBrowser.Source = uri;
+            WebViewTestStatus.Text = $"WebView2 RUM bridge attached. Loading {uri.Host}.";
+            AppendLog(WebViewTestStatus.Text);
+        }
+        catch (Exception ex)
+        {
+            webViewAttached = false;
+            WebViewTestStatus.Text = $"WebView2 initialization failed: {ex.GetType().Name}: {ex.Message}";
+            AppendLog(WebViewTestStatus.Text);
+        }
     }
 
     private void OnSetUserClicked(object sender, RoutedEventArgs e)
@@ -364,6 +483,11 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         DetachDiagnosticListener();
+        if (webViewAttached)
+        {
+            RumSdk.DetachWebView(WebViewTestBrowser);
+            webViewAttached = false;
+        }
         httpClient.Dispose();
         base.OnClosed(e);
     }

@@ -2,6 +2,9 @@ namespace Guance.Rum.Windows;
 
 internal static class RumConstants
 {
+    public const string WindowsSdkName = "df_windows_rum_sdk";
+    public const string AndroidSdkName = "df_android_rum_sdk";
+
     public const string RumWritePath = "v1/write/rum";
     public const string RumReplayWritePath = "v1/write/rum/replay";
 
@@ -14,11 +17,18 @@ internal static class RumConstants
     public const string AppId = "app_id";
     public const string Service = "service";
     public const string Env = "env";
+    public const string Version = "version";
     public const string SdkName = "sdk_name";
     public const string SdkVersion = "sdk_version";
+    public const string ApplicationUuid = "application_uuid";
     public const string Os = "os";
     public const string OsVersion = "os_version";
+    public const string OsVersionMajor = "os_version_major";
     public const string Device = "device";
+    public const string Model = "model";
+    public const string Arch = "arch";
+    public const string ScreenSize = "screen_size";
+    public const string Locale = "locale";
     public const string NetworkType = "network_type";
     public const string CustomKeys = "custom_keys";
 
@@ -28,6 +38,8 @@ internal static class RumConstants
     public const string IsSignIn = "is_signin";
 
     public const string SessionId = "session_id";
+    public const string SessionType = "session_type";
+    public const string SessionHasReplay = "session_has_replay";
     public const string SessionSampleRate = "session_sample_rate";
     public const string SessionOnErrorSampleRate = "session_on_error_sample_rate";
     public const string SampledForErrorSession = "sampled_for_error_session";

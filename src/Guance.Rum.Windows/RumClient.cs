@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using Guance.Rum.Windows.Queue;
 using Guance.Rum.Windows.SessionReplay;
@@ -9,6 +11,7 @@ namespace Guance.Rum.Windows;
 
 public sealed class RumClient : IAsyncDisposable
 {
+    private const string ResourceDurationOverride = "_guance_resource_duration_override";
     private static readonly HashSet<string> ResourcePropertyKeys = new(StringComparer.Ordinal)
     {
         RumConstants.TraceId,
@@ -22,7 +25,8 @@ public sealed class RumClient : IAsyncDisposable
         RumConstants.ResourceTimingPrecision,
         RumConstants.ResourceTimingDuration,
         RumConstants.ResourceTimingPhase,
-        RumConstants.ResourceTtfbEstimated
+        RumConstants.ResourceTtfbEstimated,
+        ResourceDurationOverride
     };
 
     private readonly RumConfig config;
@@ -34,11 +38,17 @@ public sealed class RumClient : IAsyncDisposable
     private readonly SessionReplayManager sessionReplay;
     private readonly SamplingController sampling;
     private readonly SessionManager session;
+    private readonly RumPlatformInfo platformInfo;
+    private readonly WebViewInstrumentationManager webViewInstrumentation;
     private readonly ConcurrentDictionary<string, ActiveResource> resources = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ActiveAction> actions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?> globalContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?> rumGlobalContext = new(StringComparer.Ordinal);
     private readonly object stateGate = new();
+    private readonly object rumQueueWriteGate = new();
+    private readonly HashSet<Task> pendingRumQueueWrites = new();
+    private readonly SemaphoreSlim rumFlushGate = new(1, 1);
+    private readonly SemaphoreSlim sessionReplayFlushGate = new(1, 1);
     private readonly RetryBackoff rumRetryBackoff;
     private readonly RetryBackoff sessionReplayRetryBackoff;
     private readonly System.Threading.Timer flushTimer;
@@ -47,8 +57,6 @@ public sealed class RumClient : IAsyncDisposable
     private AutomaticInstrumentation? automaticInstrumentation;
     private ActiveView? activeView;
     private UserInfo? userInfo;
-    private int flushInProgress;
-    private int sessionReplayFlushInProgress;
     private long rumEventsEnqueued;
     private long rumEventsDroppedBySampling;
     private long rumUploadSuccessCount;
@@ -63,6 +71,7 @@ public sealed class RumClient : IAsyncDisposable
     private string? lastRumUploadError;
     private string? lastReplayUploadError;
     private string? lastQueueError;
+    private volatile bool webViewAutoInstrumentationEnabled = true;
 
     public RumClient(RumConfig config)
         : this(config, new SqliteRumQueue(config), new DatawayTransport(config), new SqliteSessionReplayQueue(config), new SessionReplayTransport(config))
@@ -84,6 +93,8 @@ public sealed class RumClient : IAsyncDisposable
         this.sessionReplayTransport = sessionReplayTransport;
         sampling = new SamplingController(config);
         session = new SessionManager(sampling);
+        platformInfo = RumPlatformInfo.Capture();
+        webViewInstrumentation = new WebViewInstrumentationManager(this);
         sessionReplay = new SessionReplayManager(config, sessionReplayQueue, sessionReplayPrivacy);
         rumRetryBackoff = new RetryBackoff(config.FlushInterval);
         sessionReplayRetryBackoff = new RetryBackoff(config.SessionReplay.FlushInterval);
@@ -126,13 +137,49 @@ public sealed class RumClient : IAsyncDisposable
 
     public void EnableAutomaticInstrumentation(AutomaticInstrumentationOptions? options = null)
     {
-        automaticInstrumentation ??= new AutomaticInstrumentation(this, options ?? new AutomaticInstrumentationOptions());
+        if (automaticInstrumentation is null)
+        {
+            var resolvedOptions = options ?? new AutomaticInstrumentationOptions();
+            webViewAutoInstrumentationEnabled = resolvedOptions.EnableWebView;
+            automaticInstrumentation = new AutomaticInstrumentation(this, resolvedOptions);
+        }
         automaticInstrumentation.Start();
     }
 
     public void AttachWinUIWindow(object window, string? viewName = null)
     {
         WinUIReflectionInstrumentation.Attach(this, window, viewName);
+    }
+
+    public void AttachWebView(object webView)
+    {
+        webViewInstrumentation.Attach(webView);
+    }
+
+    public void DetachWebView(object webView)
+    {
+        webViewInstrumentation.Detach(webView);
+    }
+
+    internal void AttachDiscoveredWebView(object webView)
+    {
+        if (!webViewAutoInstrumentationEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            webViewInstrumentation.Attach(webView);
+        }
+        catch (ObjectDisposedException)
+        {
+            // A late UI Loaded/Idle callback may run while the SDK is shutting down.
+        }
+        catch (ArgumentException ex)
+        {
+            ReportWebViewDiagnostic(RumDiagnosticLevel.Warning, "Discovered WebView2 control could not be attached.", ex);
+        }
     }
 
     public void StartSessionReplayRecording() => sessionReplay.Start();
@@ -147,6 +194,11 @@ public sealed class RumClient : IAsyncDisposable
     public void SetSessionReplayTouchPrivacy(object element, SessionReplayTouchPrivacy? privacy)
     {
         sessionReplayPrivacy.SetTouchPrivacy(element, privacy);
+    }
+
+    public void SetSessionReplayImagePrivacy(object element, SessionReplayImagePrivacy? privacy)
+    {
+        sessionReplayPrivacy.SetImagePrivacy(element, privacy);
     }
 
     public void SetSessionReplayHidden(object element, bool hidden = true)
@@ -197,6 +249,7 @@ public sealed class RumClient : IAsyncDisposable
 
         if (viewToClose is not null)
         {
+            sessionReplay.CaptureViewEnd(CreateSessionReplayContext(viewToClose.Id));
             TrackView(viewToClose, isActive: false, properties: null);
         }
 
@@ -220,6 +273,7 @@ public sealed class RumClient : IAsyncDisposable
 
         if (viewToClose is not null)
         {
+            sessionReplay.CaptureViewEnd(CreateSessionReplayContext(viewToClose.Id));
             TrackView(viewToClose, isActive: false, properties);
         }
     }
@@ -300,7 +354,8 @@ public sealed class RumClient : IAsyncDisposable
             return;
         }
 
-        var duration = Clock.DurationNanoseconds(resource.Duration);
+        var duration = GetInt64(properties, ResourceDurationOverride) ??
+                       Clock.DurationNanoseconds(resource.Duration);
         var uri = TryCreateUri(resource.Url);
         var rumEvent = CreateEvent(RumConstants.MeasurementResource, resource.StartTime)
             .WithTag(RumConstants.ResourceId, resource.Id)
@@ -380,6 +435,7 @@ public sealed class RumClient : IAsyncDisposable
     public void AddError(string stack, string message, string errorType, string source = "logger", IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
+        sessionReplay.NotifyError(CreateSessionReplayContext());
         var view = SnapshotView();
         var action = SnapshotAction();
         var rumEvent = CreateEvent(RumConstants.MeasurementError, Clock.UnixTimeNanoseconds())
@@ -397,7 +453,6 @@ public sealed class RumClient : IAsyncDisposable
         AddErrorResourceTags(rumEvent, properties);
         Enqueue(rumEvent, waitForQueue: IsCrash(properties));
         IncrementError(view, action);
-        sessionReplay.NotifyError(CreateSessionReplayContext());
     }
 
     public void AddLongTask(TimeSpan duration, string? stack = null, IReadOnlyDictionary<string, object?>? properties = null)
@@ -428,13 +483,12 @@ public sealed class RumClient : IAsyncDisposable
 
     private async Task FlushRumQueueAsync(CancellationToken cancellationToken, bool respectBackoff)
     {
-        if (Interlocked.Exchange(ref flushInProgress, 1) == 1)
-        {
-            return;
-        }
+        await rumFlushGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
+            await WaitForPendingRumQueueWritesAsync(cancellationToken).ConfigureAwait(false);
+
             if (respectBackoff && !rumRetryBackoff.CanAttemptNow())
             {
                 return;
@@ -474,12 +528,13 @@ public sealed class RumClient : IAsyncDisposable
         }
         finally
         {
-            Interlocked.Exchange(ref flushInProgress, 0);
+            rumFlushGate.Release();
         }
     }
 
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
+        webViewInstrumentation.Dispose();
         StopView();
         await FlushAsync(cancellationToken).ConfigureAwait(false);
         await FlushSessionReplayAsync(cancellationToken).ConfigureAwait(false);
@@ -502,20 +557,42 @@ public sealed class RumClient : IAsyncDisposable
 
     internal void CaptureSessionReplayFullSnapshot(object root)
     {
-        var node = SessionReplayTreeMapper.Map(root, sessionReplayPrivacy, config.SessionReplay);
-        if (node is not null)
+        if (!sessionReplay.IsRecordingEnabled)
         {
-            sessionReplay.CaptureFullSnapshot(CreateSessionReplayContext(), node);
+            return;
+        }
+
+        try
+        {
+            var node = SessionReplayTreeMapper.Map(root, sessionReplayPrivacy, config.SessionReplay);
+            if (node is not null)
+            {
+                sessionReplay.CaptureFullSnapshot(CreateSessionReplayContext(), node);
+            }
+        }
+        catch (Exception ex)
+        {
+            EmitDiagnostic(RumDiagnosticLevel.Warning, "session_replay_capture", "Session Replay snapshot capture failed.", exception: ex);
         }
     }
 
     internal void CaptureSessionReplayClick(string target, double x, double y)
     {
+        if (!sessionReplay.IsRecordingEnabled)
+        {
+            return;
+        }
+
         sessionReplay.CaptureIncrementalEvent(CreateSessionReplayContext(), "click", target, x, y);
     }
 
     internal void CaptureSessionReplayClick(object element, string target, double x, double y)
     {
+        if (!sessionReplay.IsRecordingEnabled)
+        {
+            return;
+        }
+
         var privacy = sessionReplayPrivacy.Resolve(element, SessionReplayPrivacyOverrides.FromConfig(config.SessionReplay), config.SessionReplay);
         if (privacy.TouchPrivacy == SessionReplayTouchPrivacy.Hide || privacy.Hidden)
         {
@@ -528,30 +605,221 @@ public sealed class RumClient : IAsyncDisposable
 
     internal void CaptureSessionReplayInput(string target, string? value = null)
     {
+        if (!sessionReplay.IsRecordingEnabled)
+        {
+            return;
+        }
+
         sessionReplay.CaptureIncrementalEvent(CreateSessionReplayContext(), "input", target, 0, 0, value);
     }
 
     internal void CaptureSessionReplayInteraction(string eventType, string target)
     {
+        if (!sessionReplay.IsRecordingEnabled)
+        {
+            return;
+        }
+
         sessionReplay.CaptureIncrementalEvent(CreateSessionReplayContext(), eventType, target, 0, 0);
     }
 
     internal void CaptureSessionReplayResize(string target, double width, double height)
     {
+        if (!sessionReplay.IsRecordingEnabled)
+        {
+            return;
+        }
+
         sessionReplay.CaptureResizeEvent(CreateSessionReplayContext(), target, width, height);
+    }
+
+    internal void CaptureSessionReplayWebViewRecord(string slotId, JsonElement record, string? webViewId)
+    {
+        if (!sessionReplay.IsRecordingEnabled || string.IsNullOrWhiteSpace(webViewId))
+        {
+            return;
+        }
+
+        sessionReplay.CaptureWebViewRecord(
+            CreateSessionReplayContext(webViewId),
+            slotId,
+            record);
+    }
+
+    internal void TrackWebViewRumRecord(
+        JsonElement record,
+        string? hostViewId,
+        string? hostViewName,
+        string sourceUrl)
+    {
+        if (record.ValueKind != JsonValueKind.Object ||
+            !record.TryGetProperty("measurement", out var measurementProperty) ||
+            measurementProperty.ValueKind != JsonValueKind.String ||
+            !IsSupportedWebViewMeasurement(measurementProperty.GetString()) ||
+            !record.TryGetProperty("time", out var timeProperty) ||
+            !timeProperty.TryGetInt64(out var timestampMilliseconds) ||
+            timestampMilliseconds <= 0 ||
+            timestampMilliseconds > long.MaxValue / 1_000_000 ||
+            !record.TryGetProperty("tags", out var tags) ||
+            tags.ValueKind != JsonValueKind.Object ||
+            !record.TryGetProperty("fields", out var fields) ||
+            fields.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var measurement = measurementProperty.GetString()!;
+        var rumEvent = CreateEvent(measurement, timestampMilliseconds * 1_000_000);
+        AddWebViewProperties(rumEvent, tags, asTags: true);
+        AddWebViewProperties(rumEvent, fields, asTags: false);
+        if (rumEvent.Fields.Count == 0)
+        {
+            return;
+        }
+
+        ApplyTrustedEventContext(rumEvent);
+        rumEvent
+            .WithTag("is_web_view", true)
+            .WithTag("webview_url", HttpHeaderRedactor.RedactUrl(sourceUrl, config.Privacy))
+            .WithTag("webview_host_view_id", hostViewId)
+            .WithTag("webview_host_view_name", hostViewName);
+
+        if (!string.IsNullOrWhiteSpace(hostViewId))
+        {
+            rumEvent.WithTag(
+                "container",
+                JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    ["source"] = "android",
+                    ["view_id"] = hostViewId
+                }));
+        }
+
+        if (string.Equals(measurement, RumConstants.MeasurementView, StringComparison.Ordinal))
+        {
+            rumEvent.WithField(RumConstants.ViewIsActive, false);
+        }
+        if (string.Equals(measurement, RumConstants.MeasurementError, StringComparison.Ordinal))
+        {
+            sessionReplay.NotifyError(CreateSessionReplayContext());
+        }
+
+        Enqueue(rumEvent);
+    }
+
+    private static bool IsSupportedWebViewMeasurement(string? measurement)
+    {
+        return measurement is
+            RumConstants.MeasurementView or
+            RumConstants.MeasurementAction or
+            RumConstants.MeasurementResource or
+            RumConstants.MeasurementError or
+            RumConstants.MeasurementLongTask;
+    }
+
+    private void AddWebViewProperties(RumEvent rumEvent, JsonElement properties, bool asTags)
+    {
+        var count = 0;
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (++count > 256 || !IsSafeWebViewPropertyKey(property.Name))
+            {
+                continue;
+            }
+
+            var value = ConvertWebViewJsonValue(property.Value);
+            if (value is string text && IsWebViewUrlProperty(property.Name))
+            {
+                value = HttpHeaderRedactor.RedactUrl(text, config.Privacy);
+            }
+            if (asTags)
+            {
+                rumEvent.WithTag(property.Name, value);
+            }
+            else
+            {
+                rumEvent.WithField(property.Name, value);
+            }
+        }
+    }
+
+    private static bool IsWebViewUrlProperty(string key)
+    {
+        return key.EndsWith("_url", StringComparison.OrdinalIgnoreCase) ||
+               key.EndsWith("_referrer", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSafeWebViewPropertyKey(string key)
+    {
+        if (key.Length is < 1 or > 128)
+        {
+            return false;
+        }
+
+        foreach (var character in key)
+        {
+            if (!IsAsciiLetterOrDigit(character) &&
+                character is not '_' and not '-' and not '.')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsAsciiLetterOrDigit(char character)
+    {
+        return character is >= 'a' and <= 'z' or
+            >= 'A' and <= 'Z' or
+            >= '0' and <= '9';
+    }
+
+    private static object? ConvertWebViewJsonValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when value.TryGetInt64(out var integer) => integer,
+            JsonValueKind.Number when value.TryGetDouble(out var number) && double.IsFinite(number) => number,
+            JsonValueKind.Null => null,
+            JsonValueKind.Object or JsonValueKind.Array => value.GetRawText(),
+            _ => null
+        };
     }
 
     private RumEvent CreateEvent(string measurement, long timestampNanoseconds)
     {
-        var rumEvent = new RumEvent(measurement, timestampNanoseconds)
+        return ApplyTrustedEventContext(new RumEvent(measurement, timestampNanoseconds));
+    }
+
+    private RumEvent ApplyTrustedEventContext(RumEvent rumEvent)
+    {
+        var user = userInfo;
+        rumEvent
             .WithTag(RumConstants.AppId, config.RumAppId)
             .WithTag(RumConstants.Service, config.ServiceName)
-            .WithTag(RumConstants.Env, config.Env)
-            .WithTag(RumConstants.SdkName, "guance-rum-windows")
+            .WithTag(RumConstants.Env, config.Env.ToLowerInvariant())
+            .WithTag(RumConstants.Version, config.Version)
+            .WithTag(RumConstants.SdkName, GetReportedSdkName())
             .WithTag(RumConstants.SdkVersion, typeof(RumClient).Assembly.GetName().Version?.ToString() ?? "0.1.0")
-            .WithTag(RumConstants.Os, Environment.OSVersion.Platform.ToString())
-            .WithTag(RumConstants.OsVersion, Environment.OSVersion.VersionString)
+            .WithTag(RumConstants.ApplicationUuid, platformInfo.ApplicationUuid)
+            .WithTag(RumConstants.Os, platformInfo.Os)
+            .WithTag(RumConstants.OsVersion, platformInfo.OsVersion)
+            .WithTag(RumConstants.OsVersionMajor, platformInfo.OsVersionMajor)
+            .WithTag(RumConstants.Device, platformInfo.Device)
+            .WithTag(RumConstants.Model, platformInfo.Model)
+            .WithTag(RumConstants.Arch, platformInfo.Architecture)
+            .WithTag(RumConstants.ScreenSize, platformInfo.ScreenSize)
+            .WithTag(RumConstants.Locale, platformInfo.Locale)
+            .WithTag(RumConstants.NetworkType, RumPlatformInfo.GetNetworkType())
             .WithTag(RumConstants.SessionId, session.SessionId)
+            .WithTag(RumConstants.SessionType, "user")
+            .WithTag(RumConstants.IsSignIn, user is null ? "F" : "T")
+            .WithTag(RumConstants.UserId, user?.Id ?? session.SessionId)
+            .WithField(RumConstants.SessionHasReplay, sessionReplay.HasReplay(session.SessionId))
             .WithField(RumConstants.SessionSampleRate, config.SampleRate)
             .WithField(RumConstants.SessionOnErrorSampleRate, config.SessionErrorSampleRate);
 
@@ -566,12 +834,9 @@ public sealed class RumClient : IAsyncDisposable
             AddTags(rumEvent, rumGlobalContext);
         }
 
-        var user = userInfo;
         if (user is not null)
         {
             rumEvent
-                .WithTag(RumConstants.IsSignIn, true)
-                .WithTag(RumConstants.UserId, user.Id)
                 .WithTag(RumConstants.UserName, user.Name)
                 .WithTag(RumConstants.UserEmail, user.Email);
             AddTags(rumEvent, user.Extra);
@@ -595,6 +860,7 @@ public sealed class RumClient : IAsyncDisposable
         try
         {
             enqueueTask = queue.EnqueueAsync(line, shutdown.Token);
+            TrackRumQueueWrite(enqueueTask);
         }
         catch (Exception ex)
         {
@@ -619,31 +885,72 @@ public sealed class RumClient : IAsyncDisposable
             return;
         }
 
-        _ = enqueueTask
-            .ContinueWith(task =>
+    }
+
+    private void TrackRumQueueWrite(Task enqueueTask)
+    {
+        lock (rumQueueWriteGate)
+        {
+            pendingRumQueueWrites.Add(enqueueTask);
+        }
+
+        _ = enqueueTask.ContinueWith(task =>
+        {
+            if (task.IsFaulted)
             {
-                if (task.IsFaulted)
-                {
-                    RecordQueueError(task.Exception?.GetBaseException() ?? new InvalidOperationException("Queue enqueue failed."));
-                    return;
-                }
+                RecordQueueError(task.Exception?.GetBaseException() ?? new InvalidOperationException("Queue enqueue failed."));
+            }
+            else if (task.IsCanceled)
+            {
+                RecordQueueError(new OperationCanceledException("Queue enqueue was canceled."));
+            }
 
-                if (task.IsCanceled)
-                {
-                    RecordQueueError(new OperationCanceledException("Queue enqueue was canceled."));
-                    return;
-                }
+            lock (rumQueueWriteGate)
+            {
+                pendingRumQueueWrites.Remove(task);
+            }
 
+            if (task.Status == TaskStatus.RanToCompletion)
+            {
                 _ = FlushRumQueueAsync(shutdown.Token, respectBackoff: true);
-            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private async Task WaitForPendingRumQueueWritesAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task[] pending;
+            lock (rumQueueWriteGate)
+            {
+                pending = pendingRumQueueWrites.ToArray();
+            }
+
+            if (pending.Length == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.WhenAll(pending).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Enqueue failures are recorded by TrackRumQueueWrite. Continue until
+                // all writes observed by this flush have completed or failed.
+            }
+        }
     }
 
     private async Task FlushSessionReplayAsync(CancellationToken cancellationToken, bool respectBackoff = false)
     {
-        if (Interlocked.Exchange(ref sessionReplayFlushInProgress, 1) == 1)
-        {
-            return;
-        }
+        await sessionReplayFlushGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -665,6 +972,7 @@ public sealed class RumClient : IAsyncDisposable
                 }
 
                 var segment = batch[0];
+                LogSessionReplayUploadPayload(segment);
                 var result = await sessionReplayTransport.SendAsync(segment, cancellationToken).ConfigureAwait(false);
                 RecordReplayUploadResult(result);
                 if (config.Debug && result.ErrorMessage is not null)
@@ -689,7 +997,33 @@ public sealed class RumClient : IAsyncDisposable
         }
         finally
         {
-            Interlocked.Exchange(ref sessionReplayFlushInProgress, 0);
+            sessionReplayFlushGate.Release();
+        }
+    }
+
+    private void LogSessionReplayUploadPayload(QueuedSessionReplaySegment segment)
+    {
+        if (!config.Debug)
+        {
+            return;
+        }
+
+        try
+        {
+            var json = SessionReplaySegmentBuilder.TryGetDebugPayload(segment.ContentType, segment.Body);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                Debug.WriteLine("[Guance.RUM.SessionReplay] upload payload structure unavailable.");
+                return;
+            }
+
+            var message = "[Guance.RUM.SessionReplay] upload payload structure:\n" + json;
+            Debug.WriteLine(message);
+            Console.WriteLine(message);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Guance.RUM.SessionReplay] failed to print upload payload structure: {ex.Message}");
         }
     }
 
@@ -744,6 +1078,11 @@ public sealed class RumClient : IAsyncDisposable
         Interlocked.Increment(ref queueErrorCount);
         Volatile.Write(ref lastQueueError, exception.Message);
         EmitDiagnostic(RumDiagnosticLevel.Error, "queue", exception.Message, exception: exception);
+    }
+
+    internal void ReportWebViewDiagnostic(RumDiagnosticLevel level, string message, Exception? exception = null)
+    {
+        EmitDiagnostic(level, "webview", message, exception: exception);
     }
 
     private void EmitDiagnostic(RumDiagnosticLevel level, string source, string message, int? statusCode = null, Exception? exception = null)
@@ -815,6 +1154,12 @@ public sealed class RumClient : IAsyncDisposable
         }
     }
 
+    internal (string? Id, string? Name) GetActiveViewCorrelation()
+    {
+        var view = SnapshotView();
+        return (view?.Id, view?.Name);
+    }
+
     private ActiveActionSnapshot? SnapshotAction()
     {
         var action = actions.Values.OrderByDescending(item => item.StartTime).FirstOrDefault();
@@ -824,15 +1169,27 @@ public sealed class RumClient : IAsyncDisposable
     private SessionReplayContext CreateSessionReplayContext()
     {
         var view = SnapshotView();
+        return CreateSessionReplayContext(view?.Id);
+    }
+
+    private SessionReplayContext CreateSessionReplayContext(string? viewId)
+    {
         return new SessionReplayContext(
             config.RumAppId,
             session.SessionId,
-            view?.Id,
+            viewId,
             config.ServiceName,
             config.Env,
             config.Version,
-            "guance-rum-windows",
+            GetReportedSdkName(),
             typeof(RumClient).Assembly.GetName().Version?.ToString() ?? "0.1.0");
+    }
+
+    private string GetReportedSdkName()
+    {
+        return config.SessionReplay.Enabled && config.SessionReplay.AndroidCompatibilityMode
+            ? RumConstants.AndroidSdkName
+            : RumConstants.WindowsSdkName;
     }
 
     private void IncrementAction(ActiveViewSnapshot? view)
@@ -903,7 +1260,10 @@ public sealed class RumClient : IAsyncDisposable
     {
         foreach (var item in values)
         {
-            rumEvent.WithTag(item.Key, item.Value);
+            if (!rumEvent.Tags.ContainsKey(item.Key))
+            {
+                rumEvent.WithTag(item.Key, item.Value);
+            }
         }
     }
 
@@ -1000,6 +1360,11 @@ public sealed class RumClient : IAsyncDisposable
             {
                 merged[item.Key] = item.Value;
             }
+        }
+
+        if (timing.TotalDuration is not null)
+        {
+            merged[ResourceDurationOverride] = Clock.DurationNanoseconds(timing.TotalDuration.Value);
         }
 
         return merged;

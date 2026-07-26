@@ -59,8 +59,18 @@ internal static class SessionReplayTreeMapper
             Text = LimitText(TextForWpf(frameworkElement, privacy, config), config)
         };
         node.Attributes["data-control-type"] = frameworkElement.GetType().Name;
+        ApplyWpfVisualStyle(frameworkElement, node);
+        if (frameworkElement is System.Windows.Controls.Image image)
+        {
+            ApplyWpfImage(image, node, privacy, config);
+        }
+        var isWebView = IsWebView(frameworkElement);
         var customRendered = IsCustomRendered(frameworkElement.GetType().Name, config);
-        if (customRendered)
+        if (isWebView)
+        {
+            MarkWebView(node, frameworkElement);
+        }
+        else if (customRendered)
         {
             MarkCustomRendered(node, frameworkElement.GetType().Name);
         }
@@ -84,7 +94,249 @@ internal static class SessionReplayTreeMapper
             }
         }
 
+        RedactWpfMaskedValueDescendants(frameworkElement, node, privacy, config);
+
+        if (frameworkElement is ContentControl &&
+            !string.IsNullOrEmpty(node.Text) &&
+            HasDescendantWithText(node, node.Text))
+        {
+            node.Text = null;
+        }
+
+        if (frameworkElement is System.Windows.Controls.Control && HasDescendantWithSameVisualStyle(node))
+        {
+            node.BackgroundColor = null;
+            node.BorderColor = null;
+            node.BorderWidth = 0;
+            node.CornerRadius = 0;
+        }
+
         return node;
+    }
+
+    private static void ApplyWpfVisualStyle(FrameworkElement element, SessionReplayNode node)
+    {
+        node.Opacity = Math.Clamp(element.Opacity, 0, 1);
+
+        switch (element)
+        {
+            case System.Windows.Controls.Control control:
+                node.BackgroundColor = BrushToReplayColor(control.Background);
+                node.BorderColor = BrushToReplayColor(control.BorderBrush);
+                node.BorderWidth = MaxThickness(control.BorderThickness);
+                node.FontFamily = control.FontFamily?.Source;
+                node.FontSize = control.FontSize;
+                node.TextColor = BrushToReplayColor(control.Foreground);
+                node.TextHorizontalAlignment = ToReplayHorizontalAlignment(control.HorizontalContentAlignment);
+                node.TextVerticalAlignment = ToReplayVerticalAlignment(control.VerticalContentAlignment);
+                ApplyPadding(node, control.Padding);
+                break;
+            case Border border:
+                node.BackgroundColor = BrushToReplayColor(border.Background);
+                node.BorderColor = BrushToReplayColor(border.BorderBrush);
+                node.BorderWidth = MaxThickness(border.BorderThickness);
+                node.CornerRadius = Math.Max(0, Math.Max(Math.Max(border.CornerRadius.TopLeft, border.CornerRadius.TopRight), Math.Max(border.CornerRadius.BottomRight, border.CornerRadius.BottomLeft)));
+                ApplyPadding(node, border.Padding);
+                break;
+            case System.Windows.Controls.Panel panel:
+                node.BackgroundColor = BrushToReplayColor(panel.Background);
+                break;
+            case TextBlock textBlock:
+                node.BackgroundColor = BrushToReplayColor(textBlock.Background);
+                node.FontFamily = textBlock.FontFamily?.Source;
+                node.FontSize = textBlock.FontSize;
+                node.TextColor = BrushToReplayColor(textBlock.Foreground);
+                node.TextHorizontalAlignment = ToReplayHorizontalAlignment(textBlock.TextAlignment);
+                node.TextVerticalAlignment = "center";
+                ApplyPadding(node, textBlock.Padding);
+                break;
+            case System.Windows.Shapes.Shape shape:
+                node.BackgroundColor = BrushToReplayColor(shape.Fill);
+                node.BorderColor = BrushToReplayColor(shape.Stroke);
+                node.BorderWidth = Math.Max(0, shape.StrokeThickness);
+                break;
+        }
+    }
+
+    private static void ApplyPadding(SessionReplayNode node, Thickness padding)
+    {
+        node.PaddingTop = Math.Max(0, padding.Top);
+        node.PaddingRight = Math.Max(0, padding.Right);
+        node.PaddingBottom = Math.Max(0, padding.Bottom);
+        node.PaddingLeft = Math.Max(0, padding.Left);
+    }
+
+    private static void ApplyWpfImage(System.Windows.Controls.Image image, SessionReplayNode node, ResolvedPrivacy privacy, RumSessionReplayConfig config)
+    {
+        node.ImageMimeType = "png";
+        if (!config.CaptureImages ||
+            privacy.ImagePrivacy == SessionReplayImagePrivacy.MaskAll ||
+            privacy.ImagePrivacy == SessionReplayImagePrivacy.MaskLargeOnly && IsLargeWpfImage(image, config) ||
+            image.Source is null)
+        {
+            node.ImageIsEmpty = true;
+            return;
+        }
+
+        try
+        {
+            var bitmap = image.Source as System.Windows.Media.Imaging.BitmapSource ?? RenderImageSource(image.Source, image, config.MaxImageDimension);
+            bitmap = ScaleBitmap(bitmap, config.MaxImageDimension);
+
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            using var stream = new System.IO.MemoryStream();
+            encoder.Save(stream);
+            if (stream.Length > config.MaxImageBytes)
+            {
+                node.ImageIsEmpty = true;
+                return;
+            }
+
+            node.ImageBase64 = Convert.ToBase64String(stream.GetBuffer(), 0, checked((int)stream.Length));
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException)
+        {
+            node.ImageIsEmpty = true;
+        }
+    }
+
+    private static bool IsLargeWpfImage(System.Windows.Controls.Image image, RumSessionReplayConfig config)
+    {
+        var width = PositiveDimension(image.ActualWidth, image.Width, image.Source?.Width);
+        var height = PositiveDimension(image.ActualHeight, image.Height, image.Source?.Height);
+        return width > config.LargeImagePrivacyThreshold && height > config.LargeImagePrivacyThreshold;
+    }
+
+    private static double PositiveDimension(double? first, double? second, double? third)
+    {
+        return ValidDimension(first) ?? ValidDimension(second) ?? ValidDimension(third) ?? 0;
+    }
+
+    private static double? ValidDimension(double? value) => value is > 0 && double.IsFinite(value.Value) ? value : null;
+
+    private static System.Windows.Media.Imaging.BitmapSource RenderImageSource(System.Windows.Media.ImageSource source, FrameworkElement image, int maxDimension)
+    {
+        var sourceWidth = double.IsFinite(source.Width) && source.Width > 0 ? source.Width : image.ActualWidth;
+        var sourceHeight = double.IsFinite(source.Height) && source.Height > 0 ? source.Height : image.ActualHeight;
+        var width = Math.Clamp((int)Math.Ceiling(sourceWidth), 1, maxDimension);
+        var height = Math.Clamp((int)Math.Ceiling(sourceHeight), 1, maxDimension);
+        var visual = new DrawingVisual();
+        using (var context = visual.RenderOpen())
+        {
+            context.DrawImage(source, new Rect(0, 0, width, height));
+        }
+
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    private static System.Windows.Media.Imaging.BitmapSource ScaleBitmap(System.Windows.Media.Imaging.BitmapSource bitmap, int maxDimension)
+    {
+        var largestDimension = Math.Max(bitmap.PixelWidth, bitmap.PixelHeight);
+        if (largestDimension <= maxDimension)
+        {
+            return bitmap;
+        }
+
+        var scale = maxDimension / (double)largestDimension;
+        var scaled = new System.Windows.Media.Imaging.TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
+        scaled.Freeze();
+        return scaled;
+    }
+
+    private static double MaxThickness(Thickness thickness)
+    {
+        return Math.Max(0, Math.Max(Math.Max(thickness.Left, thickness.Top), Math.Max(thickness.Right, thickness.Bottom)));
+    }
+
+    private static string? BrushToReplayColor(System.Windows.Media.Brush? brush)
+    {
+        if (brush is not SolidColorBrush solid)
+        {
+            return null;
+        }
+
+        var color = solid.Color;
+        var alpha = (byte)Math.Round(color.A * Math.Clamp(solid.Opacity, 0, 1), MidpointRounding.AwayFromZero);
+        return $"#{color.R:X2}{color.G:X2}{color.B:X2}{alpha:X2}";
+    }
+
+    private static string ToReplayHorizontalAlignment(System.Windows.HorizontalAlignment alignment) => alignment switch
+    {
+        System.Windows.HorizontalAlignment.Center => "center",
+        System.Windows.HorizontalAlignment.Right => "right",
+        _ => "left"
+    };
+
+    private static string ToReplayHorizontalAlignment(TextAlignment alignment) => alignment switch
+    {
+        TextAlignment.Center => "center",
+        TextAlignment.Right => "right",
+        _ => "left"
+    };
+
+    private static string ToReplayVerticalAlignment(System.Windows.VerticalAlignment alignment) => alignment switch
+    {
+        System.Windows.VerticalAlignment.Center or System.Windows.VerticalAlignment.Stretch => "center",
+        System.Windows.VerticalAlignment.Bottom => "bottom",
+        _ => "top"
+    };
+
+    private static bool HasDescendantWithText(SessionReplayNode node, string text)
+    {
+        foreach (var child in node.Children)
+        {
+            if (string.Equals(child.Text, text, StringComparison.Ordinal) || HasDescendantWithText(child, text))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasDescendantWithSameVisualStyle(SessionReplayNode node)
+    {
+        if (string.IsNullOrWhiteSpace(node.BackgroundColor) &&
+            (string.IsNullOrWhiteSpace(node.BorderColor) || node.BorderWidth <= 0))
+        {
+            return false;
+        }
+
+        return HasDescendantWithSameVisualStyle(node, node.Children);
+    }
+
+    private static bool HasDescendantWithSameVisualStyle(SessionReplayNode target, IEnumerable<SessionReplayNode> descendants)
+    {
+        foreach (var child in descendants)
+        {
+            if (SameBounds(target, child) &&
+                string.Equals(target.BackgroundColor, child.BackgroundColor, StringComparison.Ordinal) &&
+                string.Equals(target.BorderColor, child.BorderColor, StringComparison.Ordinal) &&
+                Math.Abs(target.BorderWidth - child.BorderWidth) < 0.01 &&
+                Math.Abs(target.CornerRadius - child.CornerRadius) < 0.01)
+            {
+                return true;
+            }
+
+            if (HasDescendantWithSameVisualStyle(target, child.Children))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SameBounds(SessionReplayNode left, SessionReplayNode right)
+    {
+        return Math.Abs(left.X - right.X) < 0.5 &&
+               Math.Abs(left.Y - right.Y) < 0.5 &&
+               Math.Abs(left.Width - right.Width) < 0.5 &&
+               Math.Abs(left.Height - right.Height) < 0.5;
     }
 
     private static IEnumerable<DependencyObject> WpfChildren(DependencyObject element)
@@ -120,8 +372,13 @@ internal static class SessionReplayTreeMapper
             Text = LimitText(TextForWinForms(control, privacy, config), config)
         };
         node.Attributes["data-control-type"] = control.GetType().Name;
+        var isWebView = IsWebView(control);
         var customRendered = IsCustomRendered(control.GetType().Name, config);
-        if (customRendered)
+        if (isWebView)
+        {
+            MarkWebView(node, control);
+        }
+        else if (customRendered)
         {
             MarkCustomRendered(node, control.GetType().Name);
         }
@@ -154,29 +411,59 @@ internal static class SessionReplayTreeMapper
     private static string? TextForWpf(FrameworkElement element, ResolvedPrivacy privacy, RumSessionReplayConfig config)
     {
         var text = ReadWpfText(element);
-        if (ShouldMaskWpf(element, privacy) || ShouldMaskSensitiveText(element.GetType().Name, element.Name, text, privacy, config))
-        {
-            return MaskText(text);
-        }
-
-        return privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAll
-            ? MaskText(text)
-            : text;
+        return ShouldMaskWpfText(element, text, privacy, config) ? MaskText(text) : text;
     }
 
-    private static bool ShouldMaskWpf(FrameworkElement element, ResolvedPrivacy privacy)
+    private static bool ShouldMaskWpfText(FrameworkElement element, string? text, ResolvedPrivacy privacy, RumSessionReplayConfig config)
     {
-        if (privacy.TextAndInputPrivacy is SessionReplayTextAndInputPrivacy.MaskAll or SessionReplayTextAndInputPrivacy.MaskAllInputs)
+        if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.Allow || string.IsNullOrEmpty(text))
         {
-            return element is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox or ToggleButton or Selector;
+            return false;
         }
 
-        if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskSensitiveInputs)
+        if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAll)
         {
-            return element is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox or ToggleButton or Selector;
+            return true;
         }
 
-        return false;
+        if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAllInputs &&
+            element is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox or Selector)
+        {
+            return true;
+        }
+
+        if (element is PasswordBox)
+        {
+            return true;
+        }
+
+        return ShouldMaskSensitiveText(element.GetType().Name, element.Name, text, privacy, config);
+    }
+
+    private static void RedactWpfMaskedValueDescendants(FrameworkElement element, SessionReplayNode node, ResolvedPrivacy privacy, RumSessionReplayConfig config)
+    {
+        var value = element switch
+        {
+            System.Windows.Controls.TextBox textBox => textBox.Text,
+            Selector selector => SelectedWpfText(selector),
+            _ => ReadWpfText(element)
+        };
+        if (!ShouldMaskWpfText(element, value, privacy, config))
+        {
+            return;
+        }
+
+        RedactDescendantText(node.Children, value!);
+    }
+
+    private static string? SelectedWpfText(Selector selector)
+    {
+        return selector.SelectedItem switch
+        {
+            string text => text,
+            ContentControl content when content.Content is string text => text,
+            _ => null
+        };
     }
 
     private static string? ReadWpfText(FrameworkElement element)
@@ -195,17 +482,25 @@ internal static class SessionReplayTreeMapper
     private static string? TextForWinForms(WinForms.Control control, ResolvedPrivacy privacy, RumSessionReplayConfig config)
     {
         if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAll ||
+            (privacy.TextAndInputPrivacy != SessionReplayTextAndInputPrivacy.Allow && IsWinFormsPasswordInput(control)) ||
             ShouldMaskSensitiveText(control.GetType().Name, control.Name, control.Text, privacy, config))
         {
             return MaskText(control.Text);
         }
 
-        if (control is WinForms.TextBoxBase or WinForms.ComboBox or WinForms.CheckBox or WinForms.RadioButton)
+        if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAllInputs &&
+            control is WinForms.TextBoxBase or WinForms.ComboBox)
         {
-            return privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.Allow ? control.Text : MaskText(control.Text);
+            return MaskText(control.Text);
         }
 
         return control.Text;
+    }
+
+    private static bool IsWinFormsPasswordInput(WinForms.Control control)
+    {
+        return control is WinForms.TextBox textBox &&
+               (textBox.UseSystemPasswordChar || textBox.PasswordChar != '\0');
     }
 
     private static string TagFor(FrameworkElement element)
@@ -214,6 +509,7 @@ internal static class SessionReplayTreeMapper
         {
             System.Windows.Controls.Primitives.TextBoxBase or PasswordBox => "input",
             System.Windows.Controls.Primitives.ButtonBase => "button",
+            System.Windows.Controls.Image => "img",
             TextBlock => "span",
             Selector => "select",
             _ => "div"
@@ -256,12 +552,17 @@ internal static class SessionReplayTreeMapper
             Text = LimitText(TextForReflection(element, privacy, config), config)
         };
         node.Attributes["data-control-type"] = element.GetType().Name;
+        var isWebView = IsWebView(element);
         var customRendered = IsCustomRendered(element.GetType().Name, config);
-        if (customRendered)
+        if (isWebView)
+        {
+            MarkWebView(node, element);
+        }
+        else if (customRendered)
         {
             MarkCustomRendered(node, element.GetType().Name);
         }
-        AddReflectionAttributes(element, node);
+        AddReflectionAttributes(element, node, privacy);
         ApplyNodeLimits(node, config);
 
         if (node.Hidden || customRendered)
@@ -277,6 +578,8 @@ internal static class SessionReplayTreeMapper
                 node.Children.Add(childNode);
             }
         }
+
+        RedactReflectionMaskedValueDescendants(element, node, privacy, config);
 
         return node;
     }
@@ -375,7 +678,7 @@ internal static class SessionReplayTreeMapper
         return visibility is null || string.Equals(visibility.ToString(), "Visible", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void AddReflectionAttributes(object element, SessionReplayNode node)
+    private static void AddReflectionAttributes(object element, SessionReplayNode node, ResolvedPrivacy privacy)
     {
         var name = ReadString(element, "Name") ?? ReadString(element, "AutomationId") ?? ReadString(element, "Uid");
         if (!string.IsNullOrWhiteSpace(name))
@@ -394,26 +697,28 @@ internal static class SessionReplayTreeMapper
             node.Attributes["aria-disabled"] = "true";
         }
 
+        var masksInputState = privacy.TextAndInputPrivacy is SessionReplayTextAndInputPrivacy.MaskAllInputs or SessionReplayTextAndInputPrivacy.MaskAll;
+
         var isChecked = ReadBool(element, "IsChecked");
-        if (isChecked is not null)
+        if (!masksInputState && isChecked is not null)
         {
             node.Attributes["aria-checked"] = isChecked.Value ? "true" : "false";
         }
 
         var isSelected = ReadBool(element, "IsSelected");
-        if (isSelected is not null)
+        if (!masksInputState && isSelected is not null)
         {
             node.Attributes["aria-selected"] = isSelected.Value ? "true" : "false";
         }
 
         var selectedIndex = ReadInt(element, "SelectedIndex");
-        if (selectedIndex is not null && selectedIndex >= 0)
+        if (!masksInputState && selectedIndex is not null && selectedIndex >= 0)
         {
             node.Attributes["data-selected-index"] = selectedIndex.Value.ToString();
         }
 
         var isOn = ReadBool(element, "IsOn");
-        if (isOn is not null)
+        if (!masksInputState && isOn is not null)
         {
             node.Attributes["aria-checked"] = isOn.Value ? "true" : "false";
         }
@@ -437,7 +742,7 @@ internal static class SessionReplayTreeMapper
         }
 
         var value = ReadDouble(element, "Value");
-        if (value is not null)
+        if (!masksInputState && value is not null)
         {
             node.Attributes["aria-valuenow"] = FormattableString.Invariant($"{value:0.##}");
         }
@@ -507,6 +812,18 @@ internal static class SessionReplayTreeMapper
 
     private static string? TextForReflection(object element, ResolvedPrivacy privacy, RumSessionReplayConfig config)
     {
+        var text = ReadReflectionText(element);
+
+        if (text is null)
+        {
+            return null;
+        }
+
+        return ShouldMaskReflectionText(element, text, privacy, config) ? MaskText(text) : text;
+    }
+
+    private static string? ReadReflectionText(object element)
+    {
         var text = ReadString(element, "Text", "Title", "Header", "Label");
         var content = element.GetType().GetRuntimeProperty("Content")?.GetValue(element);
         if (text is null && content is string contentText)
@@ -516,28 +833,36 @@ internal static class SessionReplayTreeMapper
 
         if (text is null)
         {
-            var selectedItem = element.GetType().GetRuntimeProperty("SelectedItem")?.GetValue(element);
-            text = selectedItem as string;
+            text = element.GetType().GetRuntimeProperty("SelectedItem")?.GetValue(element) as string;
         }
 
-        if (text is null)
-        {
-            return null;
-        }
+        return text;
+    }
 
+    private static bool ShouldMaskReflectionText(object element, string text, ResolvedPrivacy privacy, RumSessionReplayConfig config)
+    {
         if (privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.Allow)
         {
-            return text;
+            return false;
         }
 
         var typeName = element.GetType().Name;
-        return IsReflectionInput(typeName) ||
+        return privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAll ||
                IsReflectionSecret(typeName) ||
-               IsReflectionSelection(typeName) ||
                ShouldMaskSensitiveText(typeName, ReadString(element, "Name", "AutomationId", "Uid"), text, privacy, config) ||
-               privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAll
-            ? MaskText(text)
-            : text;
+               privacy.TextAndInputPrivacy == SessionReplayTextAndInputPrivacy.MaskAllInputs &&
+               (IsReflectionInput(typeName) || IsReflectionSelectionValue(typeName));
+    }
+
+    private static void RedactReflectionMaskedValueDescendants(object element, SessionReplayNode node, ResolvedPrivacy privacy, RumSessionReplayConfig config)
+    {
+        var value = ReadReflectionText(element);
+        if (string.IsNullOrEmpty(value) || !ShouldMaskReflectionText(element, value, privacy, config))
+        {
+            return;
+        }
+
+        RedactDescendantText(node.Children, value);
     }
 
     private static (double X, double Y, double Width, double Height)? ReadBoundsRelativeToRoot(object root, object element)
@@ -613,6 +938,14 @@ internal static class SessionReplayTreeMapper
                typeName.Contains("RadioButton", StringComparison.OrdinalIgnoreCase) ||
                typeName.Contains("ToggleSwitch", StringComparison.OrdinalIgnoreCase) ||
                typeName.Contains("ToggleButton", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Contains("Selector", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsReflectionSelectionValue(string typeName)
+    {
+        return typeName.Contains("ComboBox", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Contains("ListBox", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Contains("ListView", StringComparison.OrdinalIgnoreCase) ||
                typeName.Contains("Selector", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -713,6 +1046,20 @@ internal static class SessionReplayTreeMapper
         return false;
     }
 
+    private static bool IsWebView(object element)
+    {
+        return element.GetType().Name.Contains("WebView", StringComparison.OrdinalIgnoreCase) ||
+               element.GetType().GetRuntimeProperty("CoreWebView2") is not null;
+    }
+
+    private static void MarkWebView(SessionReplayNode node, object webView)
+    {
+        node.Text = null;
+        node.WebViewSlotId = WebViewSlotRegistry.GetOrCreate(webView);
+        node.WebViewIsVisible = true;
+        node.Attributes["data-guance-webview-slot-id"] = node.WebViewSlotId;
+    }
+
     private static void MarkCustomRendered(SessionReplayNode node, string renderer)
     {
         node.Text ??= "Custom rendered content";
@@ -761,6 +1108,20 @@ internal static class SessionReplayTreeMapper
         }
 
         return new string('*', Math.Min(text.Length, 8));
+    }
+
+    private static void RedactDescendantText(IEnumerable<SessionReplayNode> descendants, string sensitiveValue)
+    {
+        foreach (var descendant in descendants)
+        {
+            if (!string.IsNullOrEmpty(descendant.Text) &&
+                descendant.Text.Contains(sensitiveValue, StringComparison.Ordinal))
+            {
+                descendant.Text = MaskText(descendant.Text);
+            }
+
+            RedactDescendantText(descendant.Children, sensitiveValue);
+        }
     }
 
     private static string? LimitText(string? text, RumSessionReplayConfig config)

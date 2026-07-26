@@ -10,11 +10,11 @@ Windows desktop RUM SDK for reporting user behavior data to Dataway or local Dat
 - Manual APIs for View, Action, Error, Resource, LongTask, user binding, global context, flush, and shutdown.
 - .NET automatic instrumentation entry points for WPF, WinForms, WinUI, `HttpClient`, unhandled exceptions, and UI-thread long tasks.
 - Native C ABI for C/C++ safe automatic boundaries and manual behavior reporting.
-- Session Replay for .NET and native apps using structured rrweb-like desktop snapshots, default sensitive-input masking, and a dedicated replay intake.
+- Session Replay for .NET and native apps using structured rrweb-like desktop snapshots, privacy levels for text, input, touch, and images, and a dedicated replay intake.
 - Native fallback persistence uses an on-disk FIFO file queue when SQLite is not linked, so the packaged DLL keeps failed events across process restarts.
 
 Automatic WPF, WinForms, and WinUI instrumentation captures window view lifecycle, resize replay events, button/menu clicks, text input focus and changes, selector changes, toggle changes, keyboard shortcuts where available, WPF commands, WinForms grid cell interactions, and dynamically added controls discovered during idle scans or WinUI loaded-tree scans. `HttpClient` diagnostics classify resources as `http` or `grpc` and add network instrumentation metadata when available.
-HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. Resource events also carry trace/span IDs, HTTP protocol/version metadata, and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown. Session Replay enforces node count, depth, text, and attribute limits before serialization, and custom-rendered surfaces such as DirectX/OpenGL/Skia/WebView areas are represented as explicit placeholders instead of attempting screenshot or frame capture.
+HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. Resource events also carry trace/span IDs, HTTP protocol/version metadata, and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown. Session Replay preserves WPF control backgrounds, outlines, typography, and image content; image payloads are PNG-encoded with configurable byte and dimension limits. It also enforces node count, depth, text, and attribute limits before serialization. DirectX/OpenGL/Skia and similar custom-rendered surfaces remain explicit placeholders. WebView2 uses the Android-compatible Browser SDK `records`/`slotId` protocol: the native tree contributes a `webview` slot and page DOM records are merged into that slot by the mobile replay player.
 
 ## Quick Start
 
@@ -34,7 +34,11 @@ RumSdk.Init(new RumConfig
         SampleRate = 1.0,
         OnErrorSampleRate = 0.0,
         TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs,
-        TouchPrivacy = SessionReplayTouchPrivacy.Show
+        TouchPrivacy = SessionReplayTouchPrivacy.Show,
+        ImagePrivacy = SessionReplayImagePrivacy.MaskAll,
+        CaptureImages = true, // Compatibility kill switch; false always masks images.
+        MaxImageBytes = 512 * 1024,
+        MaxImageDimension = 1024
     },
     Privacy = new RumPrivacyConfig
     {
@@ -115,6 +119,7 @@ Session Replay privacy can be overridden per UI element:
 ```csharp
 RumSdk.SetSessionReplayTextAndInputPrivacy(passwordBox, SessionReplayTextAndInputPrivacy.MaskAll);
 RumSdk.SetSessionReplayTouchPrivacy(secretPanel, SessionReplayTouchPrivacy.Hide);
+RumSdk.SetSessionReplayImagePrivacy(imagePanel, SessionReplayImagePrivacy.MaskAll);
 RumSdk.SetSessionReplayHidden(customerSsnPanel);
 
 RumSdk.StartSessionReplayRecording();
@@ -166,4 +171,4 @@ Use `build\pack.ps1` for release validation; it restores, tests, packs, verifies
 
 ## Dataway Contract
 
-The SDK posts `text/plain` line protocol to `v1/write/rum`. Session Replay posts `multipart/form-data` to `v1/write/rum/replay` with a `segment` file field containing rrweb-like JSON records. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. RUM and Session Replay use independent flush loops so a line-protocol outage does not block replay retries. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Session Replay also masks sensitive-looking text such as email addresses, card-like numbers, phone-like numbers, and controls whose type/name contains password, token, secret, SSN, or card markers unless text privacy is explicitly set to `Allow`. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
+The SDK posts `text/plain` line protocol to `v1/write/rum`. Session Replay posts `multipart/form-data` to `v1/write/rum/replay` with a zlib-compressed `segment` file field using the Android-compatible mobile segment envelope expected by the public replay intake. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. RUM and Session Replay use independent flush loops so a line-protocol outage does not block replay retries. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Session Replay also masks sensitive-looking text such as email addresses, card-like numbers, phone-like numbers, and controls whose type/name contains password, token, secret, SSN, or card markers unless text privacy is explicitly set to `Allow`. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.

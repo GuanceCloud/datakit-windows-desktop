@@ -20,9 +20,12 @@ internal sealed class SessionReplayTransport : ISessionReplayTransport
 
     public async Task<SendResult> SendAsync(QueuedSessionReplaySegment segment, CancellationToken cancellationToken)
     {
+        Uri? intakeUri = null;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, BuildIntakeUri());
+            intakeUri = BuildIntakeUri();
+            using var request = new HttpRequestMessage(HttpMethod.Post, intakeUri);
+            request.Options.Set(HttpInstrumentationMarks.SuppressResourceInstrumentation, true);
             request.Headers.TryAddWithoutValidation("X-Datakit-Device-Time", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString());
             request.Headers.TryAddWithoutValidation("X-Datakit-Trace", Guid.NewGuid().ToString("N"));
             request.Content = new ByteArrayContent(segment.Body);
@@ -34,10 +37,10 @@ internal sealed class SessionReplayTransport : ISessionReplayTransport
             {
                 return statusCode < 300
                     ? SendResult.Success(statusCode)
-                    : SendResult.TerminalFailure(statusCode, response.ReasonPhrase);
+                    : SendResult.TerminalFailure(statusCode, await BuildErrorMessageAsync(response, segment, intakeUri, cancellationToken).ConfigureAwait(false));
             }
 
-            return SendResult.Retry(statusCode, response.ReasonPhrase);
+            return SendResult.Retry(statusCode, await BuildErrorMessageAsync(response, segment, intakeUri, cancellationToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -72,6 +75,52 @@ internal sealed class SessionReplayTransport : ISessionReplayTransport
         }
 
         return builder.Uri;
+    }
+
+    private static async Task<string> BuildErrorMessageAsync(HttpResponseMessage response, QueuedSessionReplaySegment segment, Uri? intakeUri, CancellationToken cancellationToken)
+    {
+        var body = response.Content is null
+            ? null
+            : await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var message = response.ReasonPhrase ?? "session replay upload failed";
+        var details = new List<string>
+        {
+            message,
+            $"uri={RedactUri(intakeUri)}",
+            $"content_type={segment.ContentType}",
+            $"body_bytes={segment.Body.LongLength}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            details.Add("response_body=" + Truncate(body.Trim(), 1024));
+        }
+
+        return string.Join("; ", details);
+    }
+
+    private static string RedactUri(Uri? uri)
+    {
+        if (uri is null)
+        {
+            return string.Empty;
+        }
+
+        var builder = new UriBuilder(uri);
+        if (!string.IsNullOrWhiteSpace(builder.Query))
+        {
+            var query = builder.Query.TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.StartsWith("token=", StringComparison.OrdinalIgnoreCase) ? "token=redacted" : part);
+            builder.Query = string.Join("&", query);
+        }
+
+        return builder.Uri.AbsoluteUri;
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 
     private static string AppendPath(string baseUrl, string path)

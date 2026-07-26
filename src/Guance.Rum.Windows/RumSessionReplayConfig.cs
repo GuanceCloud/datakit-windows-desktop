@@ -3,10 +3,16 @@ namespace Guance.Rum.Windows;
 public sealed class RumSessionReplayConfig
 {
     public bool Enabled { get; init; }
+    /// <summary>
+    /// Temporarily reports the session as Android so the existing mobile wireframe player can be used for integration testing.
+    /// Keep disabled for normal Windows telemetry.
+    /// </summary>
+    public bool AndroidCompatibilityMode { get; init; }
     public double SampleRate { get; init; } = 1.0;
     public double OnErrorSampleRate { get; init; }
-    public SessionReplayTextAndInputPrivacy TextAndInputPrivacy { get; init; } = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs;
+    public SessionReplayTextAndInputPrivacy TextAndInputPrivacy { get; init; } = SessionReplayTextAndInputPrivacy.MaskAll;
     public SessionReplayTouchPrivacy TouchPrivacy { get; init; } = SessionReplayTouchPrivacy.Show;
+    public SessionReplayImagePrivacy ImagePrivacy { get; init; } = SessionReplayImagePrivacy.MaskAll;
     public int SegmentRecordLimit { get; init; } = 500;
     public int SegmentBytesLimit { get; init; } = 1024 * 1024;
     public TimeSpan FlushInterval { get; init; } = TimeSpan.FromSeconds(5);
@@ -16,6 +22,13 @@ public sealed class RumSessionReplayConfig
     public int MaxTreeDepth { get; init; } = 64;
     public int MaxTextLength { get; init; } = 256;
     public int MaxAttributeValueLength { get; init; } = 512;
+    /// <summary>
+    /// Compatibility kill switch for image capture. When false, it overrides <see cref="ImagePrivacy" /> and masks every image.
+    /// </summary>
+    public bool CaptureImages { get; init; } = true;
+    public int MaxImageBytes { get; init; } = 512 * 1024;
+    public int MaxImageDimension { get; init; } = 1024;
+    public double LargeImagePrivacyThreshold { get; init; } = 100;
     public IReadOnlyCollection<string> CustomRenderedTypeNameMarkers { get; init; } = new[]
     {
         "DirectX",
@@ -53,4 +66,11 @@ public enum SessionReplayTouchPrivacy
 {
     Show,
     Hide
+}
+
+public enum SessionReplayImagePrivacy
+{
+    MaskAll,
+    MaskLargeOnly,
+    MaskNone
 }

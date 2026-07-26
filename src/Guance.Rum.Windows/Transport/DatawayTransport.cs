@@ -42,6 +42,7 @@ internal sealed class DatawayTransport : IDatawayTransport
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, BuildIntakeUri());
+            request.Options.Set(HttpInstrumentationMarks.SuppressResourceInstrumentation, true);
             request.Headers.TryAddWithoutValidation("X-Datakit-Device-Time", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString());
             request.Headers.TryAddWithoutValidation("X-Datakit-Trace", Guid.NewGuid().ToString("N"));
             request.Content = await CreateContentAsync(body, cancellationToken).ConfigureAwait(false);

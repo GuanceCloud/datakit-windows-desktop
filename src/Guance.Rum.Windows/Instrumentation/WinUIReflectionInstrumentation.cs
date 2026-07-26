@@ -23,8 +23,15 @@ internal static class WinUIReflectionInstrumentation
         }
 
         WindowAttachments.Add(window, new AttachmentMarker());
+        var started = 0;
+        var closed = 0;
         AddEventHandler(window, "Activated", () =>
         {
+            if (Volatile.Read(ref closed) != 0 || Interlocked.Exchange(ref started, 1) != 0)
+            {
+                return;
+            }
+
             if (TryGetActiveClient(out var active))
             {
                 active.StartView(name);
@@ -34,7 +41,7 @@ internal static class WinUIReflectionInstrumentation
         });
         AddEventHandler(window, "SizeChanged", () =>
         {
-            if (!TryGetActiveClient(out var active))
+            if (Volatile.Read(ref closed) != 0 || !TryGetActiveClient(out var active))
             {
                 return;
             }
@@ -44,7 +51,7 @@ internal static class WinUIReflectionInstrumentation
         });
         AddEventHandler(window, "Closed", () =>
         {
-            if (TryGetActiveClient(out var active))
+            if (Interlocked.Exchange(ref closed, 1) == 0 && TryGetActiveClient(out var active))
             {
                 active.StopView();
             }
@@ -110,7 +117,18 @@ internal static class WinUIReflectionInstrumentation
         }
 
         ElementAttachments.Add(element, new AttachmentMarker());
-        AddEventHandler(element, "Loaded", (_, _) => AttachElementTree(client, element, new HashSet<object>()));
+        if (IsWebViewCandidate(element))
+        {
+            client.AttachDiscoveredWebView(element);
+        }
+        AddEventHandler(element, "Loaded", (_, _) =>
+        {
+            if (IsWebViewCandidate(element))
+            {
+                client.AttachDiscoveredWebView(element);
+            }
+            AttachElementTree(client, element, new HashSet<object>());
+        });
 
         if (HasTypeName(element, "ButtonBase", "Button", "HyperlinkButton", "AppBarButton", "AppBarToggleButton", "CommandBarFlyoutCommandBar"))
         {
@@ -125,12 +143,14 @@ internal static class WinUIReflectionInstrumentation
 
         if (HasTypeName(element, "TextBox", "RichEditBox"))
         {
-            AddEventHandler(element, "TextChanged", (_, _) => TrackWinUIAction(client, element, "input", replayAsInput: true));
+            AddEventHandler(element, "GotFocus", (_, _) => TrackWinUIInputFocus(client, element));
+            AddEventHandler(element, "TextChanged", (_, _) => CaptureWinUIInputChange(client, element));
         }
 
         if (HasTypeName(element, "PasswordBox"))
         {
-            AddEventHandler(element, "PasswordChanged", (_, _) => TrackWinUIAction(client, element, "input", replayAsInput: true));
+            AddEventHandler(element, "GotFocus", (_, _) => TrackWinUIInputFocus(client, element));
+            AddEventHandler(element, "PasswordChanged", (_, _) => CaptureWinUIInputChange(client, element));
         }
 
         if (HasTypeName(element, "Selector", "ComboBox", "ListBox", "ListViewBase", "ListView", "GridView", "NavigationView", "TreeView"))
@@ -197,6 +217,37 @@ internal static class WinUIReflectionInstrumentation
         client.CaptureSessionReplayInteraction(actionType, name);
     }
 
+    private static void TrackWinUIInputFocus(RumClient client, object element)
+    {
+        if (CanTrackWinUIInput(element))
+        {
+            TrackWinUIAction(client, element, "input", replayAsInput: true);
+        }
+    }
+
+    private static void CaptureWinUIInputChange(RumClient client, object element)
+    {
+        if (!CanTrackWinUIInput(element) || !IsWinUIInputFocused(element) || !TryGetActiveClient(out client))
+        {
+            return;
+        }
+
+        client.CaptureSessionReplayInput(ElementName(element));
+    }
+
+    private static bool CanTrackWinUIInput(object element)
+    {
+        return ReadProperty(element, "IsEnabled") is not bool enabled || enabled
+            ? ReadProperty(element, "IsReadOnly") is not bool readOnly || !readOnly
+            : false;
+    }
+
+    private static bool IsWinUIInputFocused(object element)
+    {
+        var focusState = ReadProperty(element, "FocusState")?.ToString();
+        return !string.IsNullOrWhiteSpace(focusState) && !string.Equals(focusState, "Unfocused", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ElementName(object element)
     {
         return ReadString(element, "Name") ??
@@ -232,6 +283,10 @@ internal static class WinUIReflectionInstrumentation
         }
 
         var type = value.GetType();
+        if (type.GetRuntimeProperty("CoreWebView2") is not null)
+        {
+            return true;
+        }
         while (type is not null)
         {
             if (type.Namespace?.StartsWith("Microsoft.UI.Xaml", StringComparison.Ordinal) == true)
@@ -243,6 +298,11 @@ internal static class WinUIReflectionInstrumentation
         }
 
         return false;
+    }
+
+    private static bool IsWebViewCandidate(object element)
+    {
+        return element.GetType().GetRuntimeProperty("CoreWebView2") is not null;
     }
 
     private static bool HasTypeName(object target, params string[] typeNames)

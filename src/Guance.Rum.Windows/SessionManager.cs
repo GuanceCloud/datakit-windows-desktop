@@ -2,7 +2,7 @@ namespace Guance.Rum.Windows;
 
 internal sealed class SessionManager
 {
-    private static readonly TimeSpan SessionTimeout = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan SessionTimeout = TimeSpan.FromMinutes(15);
     private readonly object gate = new();
     private readonly SamplingController sampling;
     private long lastActivity = Clock.Timestamp();

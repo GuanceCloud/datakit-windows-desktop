@@ -1,10 +1,12 @@
 #if WINDOWS
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using WpfApplication = System.Windows.Application;
 using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
+using WpfRangeBase = System.Windows.Controls.Primitives.RangeBase;
 using WpfSelector = System.Windows.Controls.Primitives.Selector;
 using WpfTextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using WpfToggleButton = System.Windows.Controls.Primitives.ToggleButton;
@@ -15,6 +17,7 @@ namespace Guance.Rum.Windows;
 internal static partial class WindowsDesktopInstrumentation
 {
     private static readonly ConditionalWeakTable<Window, AttachmentMarker> WpfWindowAttachments = new();
+    private static readonly ConditionalWeakTable<Window, ReplaySnapshotMarker> WpfReplaySnapshotMarkers = new();
     private static readonly ConditionalWeakTable<WpfApplication, AttachmentMarker> WpfApplicationAttachments = new();
     private static readonly ConditionalWeakTable<WinForms.Form, AttachmentMarker> WinFormsFormAttachments = new();
     private static readonly ConditionalWeakTable<WinForms.Control, AttachmentMarker> WinFormsControlAttachments = new();
@@ -117,6 +120,20 @@ internal static partial class WindowsDesktopInstrumentation
         WpfClassHandlersRegistered = true;
 
         EventManager.RegisterClassHandler(
+            typeof(FrameworkElement),
+            FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) =>
+            {
+                if (sender is not null &&
+                    IsWebViewCandidate(sender) &&
+                    TryGetActiveClient(out var active))
+                {
+                    active.AttachDiscoveredWebView(sender);
+                }
+            }),
+            true);
+
+        EventManager.RegisterClassHandler(
             typeof(WpfButtonBase),
             WpfButtonBase.ClickEvent,
             new RoutedEventHandler((sender, _) =>
@@ -134,6 +151,7 @@ internal static partial class WindowsDesktopInstrumentation
                     var point = Mouse.GetPosition(ownerWindow);
                     active.CaptureSessionReplayClick(element, name, point.X, point.Y);
                 }
+                QueueWpfReplaySnapshot(sender);
             }),
             true);
 
@@ -162,13 +180,42 @@ internal static partial class WindowsDesktopInstrumentation
             true);
 
         EventManager.RegisterClassHandler(
+            typeof(WpfRangeBase),
+            WpfRangeBase.ValueChangedEvent,
+            new RoutedPropertyChangedEventHandler<double>((sender, args) =>
+            {
+                if (ReferenceEquals(sender, args.OriginalSource))
+                {
+                    TrackWpfAction(sender, "value_change");
+                }
+            }),
+            true);
+
+        EventManager.RegisterClassHandler(
             typeof(WpfTextBoxBase),
             WpfTextBoxBase.TextChangedEvent,
             new System.Windows.Controls.TextChangedEventHandler((sender, args) =>
             {
-                if (ReferenceEquals(sender, args.OriginalSource))
+                if (ReferenceEquals(sender, args.OriginalSource) &&
+                    sender is WpfTextBoxBase textBox &&
+                    CanTrackWpfInput(textBox) &&
+                    textBox.IsKeyboardFocusWithin &&
+                    TryGetActiveClient(out var active))
                 {
-                    TrackWpfAction(sender, "input", replayAsInput: true);
+                    active.CaptureSessionReplayInput(WpfElementName(textBox));
+                    QueueWpfReplaySnapshot(textBox);
+                }
+            }),
+            true);
+
+        EventManager.RegisterClassHandler(
+            typeof(WpfTextBoxBase),
+            UIElement.GotKeyboardFocusEvent,
+            new KeyboardFocusChangedEventHandler((sender, args) =>
+            {
+                if (ReferenceEquals(sender, args.OriginalSource) && sender is WpfTextBoxBase textBox && CanTrackWpfInput(textBox))
+                {
+                    TrackWpfAction(textBox, "input", replayAsInput: true);
                 }
             }),
             true);
@@ -208,6 +255,7 @@ internal static partial class WindowsDesktopInstrumentation
                     {
                         active.AddAction(shortcutName, "shortcut", TimeSpan.Zero);
                         active.CaptureSessionReplayInteraction("shortcut", shortcutName);
+                        QueueWpfReplaySnapshot(sender);
                     }
                 }
             }),
@@ -225,22 +273,17 @@ internal static partial class WindowsDesktopInstrumentation
                     {
                         active.AddAction(commandName, "command", TimeSpan.Zero);
                         active.CaptureSessionReplayInteraction("command", commandName);
+                        QueueWpfReplaySnapshot(sender);
                     }
                 }
             }),
             true);
 
-        EventManager.RegisterClassHandler(
-            typeof(UIElement),
-            UIElement.PreviewMouseDownEvent,
-            new MouseButtonEventHandler((sender, args) =>
-            {
-                if (ReferenceEquals(sender, args.OriginalSource) && sender is WpfTextBoxBase or WpfSelector)
-                {
-                    TrackWpfAction(sender, "input", replayAsInput: true);
-                }
-            }),
-            true);
+    }
+
+    private static bool CanTrackWpfInput(WpfTextBoxBase textBox)
+    {
+        return textBox.IsEnabled && !textBox.IsReadOnly;
     }
 
     private static void AttachOpenWpfWindows(RumClient client, WpfApplication app)
@@ -258,11 +301,13 @@ internal static partial class WindowsDesktopInstrumentation
             return;
         }
 
-        WpfWindowAttachments.Add(window, new AttachmentMarker());
+        var attachment = new AttachmentMarker();
+        WpfWindowAttachments.Add(window, attachment);
         window.Activated += (_, _) =>
         {
             if (TryGetActiveClient(out var active))
             {
+                attachment.ViewStarted = true;
                 active.StartView(window.TitleOrTypeName());
                 window.Dispatcher.BeginInvoke(new Action(() =>
                 {
@@ -282,11 +327,25 @@ internal static partial class WindowsDesktopInstrumentation
         };
         window.Closed += (_, _) =>
         {
+            attachment.ViewStarted = false;
+            if (WpfReplaySnapshotMarkers.TryGetValue(window, out var marker))
+            {
+                marker.Timer?.Stop();
+            }
             if (TryGetActiveClient(out var active))
             {
                 active.StopView();
             }
         };
+        window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() =>
+        {
+            if (!attachment.ViewStarted && window.IsVisible && TryGetActiveClient(out var active))
+            {
+                attachment.ViewStarted = true;
+                active.StartView(window.TitleOrTypeName());
+                active.CaptureSessionReplayFullSnapshot(window);
+            }
+        }));
     }
 
     private static void TrackWpfAction(object sender, string actionType, bool replayAsInput = false)
@@ -300,10 +359,49 @@ internal static partial class WindowsDesktopInstrumentation
         if (replayAsInput)
         {
             client.CaptureSessionReplayInput(name);
+        }
+        else
+        {
+            client.CaptureSessionReplayInteraction(actionType, name);
+        }
+
+        QueueWpfReplaySnapshot(sender);
+    }
+
+    private static void QueueWpfReplaySnapshot(object sender)
+    {
+        if (sender is not DependencyObject dependencyObject)
+        {
             return;
         }
 
-        client.CaptureSessionReplayInteraction(actionType, name);
+        var window = Window.GetWindow(dependencyObject) ?? WpfApplication.Current?.MainWindow;
+        if (window is null)
+        {
+            return;
+        }
+
+        var marker = WpfReplaySnapshotMarkers.GetValue(window, static _ => new ReplaySnapshotMarker());
+        if (marker.Timer is null)
+        {
+            marker.Timer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Background,
+                window.Dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(100)
+            };
+            marker.Timer.Tick += (_, _) =>
+            {
+                marker.Timer.Stop();
+                if (window.IsVisible && TryGetActiveClient(out var active))
+                {
+                    active.CaptureSessionReplayFullSnapshot(window);
+                }
+            };
+        }
+
+        marker.Timer.Stop();
+        marker.Timer.Start();
     }
 
     private static string WpfElementName(object sender)
@@ -431,6 +529,10 @@ internal static partial class WindowsDesktopInstrumentation
         {
             WinFormsControlAttachments.Add(control, new AttachmentMarker());
             control.KeyDown += (_, args) => TrackWinFormsShortcut(client, control, args);
+            if (IsWebViewCandidate(control))
+            {
+                client.AttachDiscoveredWebView(control);
+            }
         }
 
         if (control.ContextMenuStrip is not null)
@@ -470,7 +572,7 @@ internal static partial class WindowsDesktopInstrumentation
             control.Enter += (_, _) => TrackWinFormsInput(client, control);
             control.TextChanged += (_, _) =>
             {
-                if (TryGetActiveClient(out var active))
+                if (CanTrackWinFormsInput(control) && TryGetActiveClient(out var active))
                 {
                     active.CaptureSessionReplayInput(ControlName(control));
                 }
@@ -549,13 +651,20 @@ internal static partial class WindowsDesktopInstrumentation
 
     private static void TrackWinFormsInput(RumClient client, WinForms.Control control)
     {
-        if (!TryGetActiveClient(out client))
+        if (!CanTrackWinFormsInput(control) || !TryGetActiveClient(out client))
         {
             return;
         }
         var name = ControlName(control);
         client.AddAction(name, "input", TimeSpan.Zero);
         client.CaptureSessionReplayInput(name);
+    }
+
+    private static bool CanTrackWinFormsInput(WinForms.Control control)
+    {
+        return control.Enabled &&
+               control.ContainsFocus &&
+               (control is not WinForms.TextBoxBase textBox || !textBox.ReadOnly);
     }
 
     private static void TrackWinFormsAction(RumClient client, string name, string actionType)
@@ -597,6 +706,11 @@ internal static partial class WindowsDesktopInstrumentation
         return string.IsNullOrWhiteSpace(control.Text) ? control.GetType().Name : control.Text;
     }
 
+    private static bool IsWebViewCandidate(object control)
+    {
+        return control.GetType().GetRuntimeProperty("CoreWebView2") is not null;
+    }
+
     private static string FormName(WinForms.Form form)
     {
         return string.IsNullOrWhiteSpace(form.Text) ? form.GetType().Name : form.Text;
@@ -614,6 +728,12 @@ internal static partial class WindowsDesktopInstrumentation
 
     private sealed class AttachmentMarker
     {
+        public bool ViewStarted { get; set; }
+    }
+
+    private sealed class ReplaySnapshotMarker
+    {
+        public System.Windows.Threading.DispatcherTimer? Timer { get; set; }
     }
 }
 

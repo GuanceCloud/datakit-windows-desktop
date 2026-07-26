@@ -18,6 +18,12 @@ internal sealed class SessionReplayPrivacyOverrides
         state.TouchPrivacy = privacy;
     }
 
+    public void SetImagePrivacy(object element, SessionReplayImagePrivacy? privacy)
+    {
+        var state = states.GetOrCreateValue(element);
+        state.ImagePrivacy = privacy;
+    }
+
     public void SetHidden(object element, bool hidden)
     {
         var state = states.GetOrCreateValue(element);
@@ -33,6 +39,7 @@ internal sealed class SessionReplayPrivacyOverrides
             {
                 TextAndInputPrivacy = state.TextAndInputPrivacy ?? result.TextAndInputPrivacy,
                 TouchPrivacy = state.TouchPrivacy ?? result.TouchPrivacy,
+                ImagePrivacy = state.ImagePrivacy ?? result.ImagePrivacy,
                 Hidden = state.Hidden || result.Hidden
             };
         }
@@ -42,13 +49,14 @@ internal sealed class SessionReplayPrivacyOverrides
 
     public static ResolvedPrivacy FromConfig(RumSessionReplayConfig config)
     {
-        return new ResolvedPrivacy(config.TextAndInputPrivacy, config.TouchPrivacy, Hidden: false);
+        return new ResolvedPrivacy(config.TextAndInputPrivacy, config.TouchPrivacy, config.ImagePrivacy, Hidden: false);
     }
 
     internal sealed class OverrideState
     {
         public SessionReplayTextAndInputPrivacy? TextAndInputPrivacy { get; set; }
         public SessionReplayTouchPrivacy? TouchPrivacy { get; set; }
+        public SessionReplayImagePrivacy? ImagePrivacy { get; set; }
         public bool Hidden { get; set; }
     }
 }
@@ -56,4 +64,5 @@ internal sealed class SessionReplayPrivacyOverrides
 internal sealed record ResolvedPrivacy(
     SessionReplayTextAndInputPrivacy TextAndInputPrivacy,
     SessionReplayTouchPrivacy TouchPrivacy,
+    SessionReplayImagePrivacy ImagePrivacy,
     bool Hidden);

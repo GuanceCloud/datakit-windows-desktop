@@ -1,5 +1,6 @@
 using System.Windows;
 using Guance.Rum.Windows;
+using Guance.Rum.Windows.Samples;
 
 namespace WpfSample;
 
@@ -7,21 +8,14 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        RumSdk.Init(new RumConfig
-        {
-            DatakitUrl = "http://127.0.0.1:9529",
-            RumAppId = "rum-wpf-demo",
-            ServiceName = "wpf-sample",
-            SessionReplay = new RumSessionReplayConfig { Enabled = true },
-            Debug = true
-        });
+        RumSdk.Init(SampleRumConfig.Load("rum-wpf-demo", "wpf-sample", e.Args));
         RumSdk.EnableAutomaticInstrumentation();
         base.OnStartup(e);
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
-        await RumSdk.ShutdownAsync();
+        RumSdk.ShutdownAsync().GetAwaiter().GetResult();
         base.OnExit(e);
     }
 }
