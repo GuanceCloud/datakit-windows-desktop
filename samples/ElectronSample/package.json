@@ -2,7 +2,11 @@
   "name": "guance-rum-windows-electron-sample",
   "version": "0.1.0",
   "private": true,
+  "productName": "Guance Windows Electron RUM",
   "description": "Electron hybrid UI acceptance sample for Guance Windows RUM",
+  "config": {
+    "windowsArtifactName": "GuanceRUMWindowsElectronSample"
+  },
   "main": "src/main/main.cjs",
   "scripts": {
     "electron:install": "install-electron",
@@ -10,6 +14,10 @@
     "build": "tsc --noEmit && vite build",
     "start": "npm run electron:install && npm run build && electron .",
     "smoke": "npm run electron:install && npm run build && cross-env ELECTRON_SMOKE=1 electron .",
+    "package:win": "node scripts/package-windows.mjs",
+    "verify:package:win": "node scripts/verify-windows-package.cjs",
+    "verify:package:win:files": "node scripts/verify-windows-package.cjs --skip-runtime",
+    "acceptance:win": "npm run electron:install && npm run build && npm run package:win && npm run verify:package:win",
     "test": "vitest run",
     "check": "npm run test && npm run build"
   },
@@ -17,6 +25,7 @@
     "@cloudcare/browser-rum": "^3.3.5"
   },
   "devDependencies": {
+    "@electron/packager": "^20.0.4",
     "@types/node": "^24.0.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",

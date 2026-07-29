@@ -141,7 +141,7 @@ npm install
 npm run dev
 ```
 
-Use `npm start` for production-style `file://` loading and `npm run smoke` for the bounded Electron startup smoke. Configuration uses the same `GUANCE_RUM_*` environment variables as the managed samples. See `docs/electron-phase-1-acceptance.md` for the Dataway, DataKit, and remote-renderer flows.
+Use `npm start` for production-style `file://` loading, `npm run smoke` for the bounded Electron startup smoke, or `npm run acceptance:win` to build and verify a standalone Windows x64 desktop application under `samples/ElectronSample/release`. Configuration uses the same `GUANCE_RUM_*` environment variables as the managed samples. See `docs/electron-phase-1-acceptance.md` for the Dataway, DataKit, packaged executable, and remote-renderer flows.
 
 ## Build
 
