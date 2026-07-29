@@ -1,5 +1,7 @@
 bin/
 obj/
+node_modules/
+.vite/
 .vs/
 .vscode/
 .idea/

@@ -9,12 +9,15 @@ Windows desktop RUM SDK for reporting user behavior data to Dataway or local Dat
 - Persistent SQLite queue with retry, batching, and oldest-first discard limits.
 - Manual APIs for View, Action, Error, Resource, LongTask, user binding, global context, flush, and shutdown.
 - .NET automatic instrumentation entry points for WPF, WinForms, WinUI, `HttpClient`, unhandled exceptions, and UI-thread long tasks.
+- Electron hybrid UI acceptance sample with a Vite/file renderer, secure preload bridge, loopback resource tests, an independently instrumented remote renderer window, and the official Guance Browser RUM SDK.
 - Native C ABI for C/C++ safe automatic boundaries and manual behavior reporting.
-- Session Replay for .NET and native apps using structured rrweb-like desktop snapshots, privacy levels for text, input, touch, and images, and a dedicated replay intake.
+- Experimental Session Replay implementation for .NET and native apps. Replay validation and release support are deferred to Phase 2 and are disabled by default in every Phase 1 sample.
 - Native fallback persistence uses an on-disk FIFO file queue when SQLite is not linked, so the packaged DLL keeps failed events across process restarts.
 
 Automatic WPF, WinForms, and WinUI instrumentation captures window view lifecycle, resize replay events, button/menu clicks, text input focus and changes, selector changes, toggle changes, keyboard shortcuts where available, WPF commands, WinForms grid cell interactions, and dynamically added controls discovered during idle scans or WinUI loaded-tree scans. `HttpClient` diagnostics classify resources as `http` or `grpc` and add network instrumentation metadata when available.
-HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. Resource events also carry trace/span IDs, HTTP protocol/version metadata, and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown. Session Replay preserves WPF control backgrounds, outlines, typography, and image content; image payloads are PNG-encoded with configurable byte and dimension limits. It also enforces node count, depth, text, and attribute limits before serialization. DirectX/OpenGL/Skia and similar custom-rendered surfaces remain explicit placeholders. WebView2 uses the Android-compatible Browser SDK `records`/`slotId` protocol: the native tree contributes a `webview` slot and page DOM records are merged into that slot by the mobile replay player.
+HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. Resource events also carry trace/span IDs, HTTP protocol/version metadata, and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown.
+
+The Electron renderer uses the Web RUM contract and is accepted into the same Guance RUM application as the Windows samples when it uses the same application ID. It is identified as Windows through the browser OS dimensions and the `windows_desktop_platform=windows`, `windows_desktop_runtime=electron`, and `windows_integration_mode=hybrid` context tags; it does not impersonate the managed `df_windows_rum_sdk` identity.
 
 ## Quick Start
 
@@ -28,18 +31,8 @@ RumSdk.Init(new RumConfig
     RumAppId = "<rum-app-id>",
     ServiceName = "desktop-client",
     Env = "prod",
-    SessionReplay = new RumSessionReplayConfig
-    {
-        Enabled = true,
-        SampleRate = 1.0,
-        OnErrorSampleRate = 0.0,
-        TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs,
-        TouchPrivacy = SessionReplayTouchPrivacy.Show,
-        ImagePrivacy = SessionReplayImagePrivacy.MaskAll,
-        CaptureImages = true, // Compatibility kill switch; false always masks images.
-        MaxImageBytes = 512 * 1024,
-        MaxImageDimension = 1024
-    },
+    // Phase 1 validates RUM only. Session Replay is a Phase 2 target.
+    SessionReplay = new RumSessionReplayConfig { Enabled = false },
     Privacy = new RumPrivacyConfig
     {
         CaptureHttpHeaders = true,
@@ -114,7 +107,7 @@ catch (Exception ex)
 }
 ```
 
-Session Replay privacy can be overridden per UI element:
+Session Replay is experimental and deferred from Phase 1. Phase 2 work can opt in and override privacy per UI element:
 
 ```csharp
 RumSdk.SetSessionReplayTextAndInputPrivacy(passwordBox, SessionReplayTextAndInputPrivacy.MaskAll);
@@ -137,6 +130,18 @@ RumSdk.AddDiagnosticListener((_, item) =>
     Console.WriteLine($"{item.Level} {item.Source}: {item.Message}");
 });
 ```
+
+## Electron Hybrid Sample
+
+The Electron acceptance UI installs `@cloudcare/browser-rum` in the renderer and exercises all five Phase 1 RUM signals:
+
+```powershell
+cd samples/ElectronSample
+npm install
+npm run dev
+```
+
+Use `npm start` for production-style `file://` loading and `npm run smoke` for the bounded Electron startup smoke. Configuration uses the same `GUANCE_RUM_*` environment variables as the managed samples. See `docs/electron-phase-1-acceptance.md` for the Dataway, DataKit, and remote-renderer flows.
 
 ## Build
 
@@ -167,8 +172,10 @@ The NuGet package includes native runtime assets when the matching DLL exists be
 | `win-arm64` | `runtimes/win-arm64/native/guance_rum_native.dll` | Cross-build and package verification with `-TargetArch arm64 -SkipSmoke` |
 | `win-x86` | `runtimes/win-x86/native/guance_rum_native.dll` | Cross-build and package verification with `-TargetArch x86 -SkipSmoke` |
 
-Use `build\pack.ps1` for release validation; it restores, tests, packs, verifies all native RID assets, runs a clean NuGet consumer smoke, and writes `release-manifest.json` with artifact hashes, target frameworks, and native asset inventory. The consumer smoke now runs the console app, builds WPF and WinForms consumers, and publishes a minimal programmatic WinUI 3 consumer against the generated NuGet package. WinUI runtime launch is attempted as a best-effort check because SSH/CI sessions are often non-interactive; use `build\pack.ps1 -RequireWinUIRuntimeSmoke` on an interactive Windows desktop to make the WinUI run marker a hard gate. `build\consumer-smoke.ps1` can be run separately against an existing package, and `build\pack.ps1 -SkipConsumerSmoke` or `build\pack.ps1 -SkipWinUISmoke` are available for constrained local iteration.
+Use `build\pack.ps1` for release validation; it restores, tests, runs the Electron `npm ci`/test/build/bounded runtime smoke, packs, verifies all native RID assets, runs a clean NuGet consumer smoke, and writes `release-manifest.json` with artifact hashes, target frameworks, native asset inventory, and Electron validation status. The consumer smoke runs the console app, builds WPF and WinForms consumers, and publishes a minimal programmatic WinUI 3 consumer against the generated NuGet package. WinUI runtime launch is attempted as a best-effort check because SSH/CI sessions are often non-interactive; use `build\pack.ps1 -RequireWinUIRuntimeSmoke` on an interactive Windows desktop to make the WinUI run marker a hard gate. `build\consumer-smoke.ps1` can be run separately against an existing package. `-SkipConsumerSmoke`, `-SkipWinUISmoke`, and `-SkipElectronRuntimeSmoke` are available for constrained environments, and every skipped runtime check is recorded in the manifest.
 
 ## Dataway Contract
 
-The SDK posts `text/plain` line protocol to `v1/write/rum`. Session Replay posts `multipart/form-data` to `v1/write/rum/replay` with a zlib-compressed `segment` file field using the Android-compatible mobile segment envelope expected by the public replay intake. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. RUM and Session Replay use independent flush loops so a line-protocol outage does not block replay retries. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Session Replay also masks sensitive-looking text such as email addresses, card-like numbers, phone-like numbers, and controls whose type/name contains password, token, secret, SSN, or card markers unless text privacy is explicitly set to `Allow`. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
+The managed SDK posts `text/plain` line protocol to `v1/write/rum`. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
+
+The experimental Session Replay transport posts `multipart/form-data` to `v1/write/rum/replay`. That transport, its Android-compatible envelope, player routing, privacy, and performance gates are Phase 2 work and are not part of the Phase 1 release claim.

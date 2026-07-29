@@ -24,7 +24,7 @@ internal static class SampleRumConfig
             Env = "local",
             Version = "1.0.0",
             Debug = true,
-            SessionReplayEnabled = true,
+            SessionReplayEnabled = false,
             ReplayAndroidCompatibilityMode = false,
             ReplayTextAndInputPrivacy = nameof(SessionReplayTextAndInputPrivacy.MaskSensitiveInputs),
             ReplayTouchPrivacy = nameof(SessionReplayTouchPrivacy.Show),
@@ -51,7 +51,7 @@ internal static class SampleRumConfig
             DiagnosticListener = settings.DiagnosticConsoleEnabled == true ? LogDiagnostic : null,
             SessionReplay = new RumSessionReplayConfig
             {
-                Enabled = settings.SessionReplayEnabled ?? true,
+                Enabled = settings.SessionReplayEnabled ?? false,
                 AndroidCompatibilityMode = settings.ReplayAndroidCompatibilityMode ?? false,
                 TextAndInputPrivacy = ParseEnum(settings.ReplayTextAndInputPrivacy, SessionReplayTextAndInputPrivacy.MaskSensitiveInputs),
                 TouchPrivacy = ParseEnum(settings.ReplayTouchPrivacy, SessionReplayTouchPrivacy.Show),

@@ -7,7 +7,7 @@
   "env": "local",
   "version": "1.0.0",
   "debug": true,
-  "sessionReplayEnabled": true,
+  "sessionReplayEnabled": false,
   "replayTextAndInputPrivacy": "MaskSensitiveInputs",
   "replayTouchPrivacy": "Show",
   "replayImagePrivacy": "MaskNone",
