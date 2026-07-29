@@ -1,5 +1,6 @@
 import { datafluxRum } from "@cloudcare/browser-rum";
 import "./styles.css";
+import { loadDesktopBootstrap } from "./bootstrap-loader";
 import type { DesktopBootstrap } from "./contracts";
 import { buildRumConfig } from "./rum-config";
 
@@ -406,14 +407,11 @@ function showToast(message: string, tone: "success" | "warning" | "danger" = "su
 
 async function initialize(): Promise<void> {
   const bridge = window.guanceDesktop;
-  const bootstrap = bridge
-    ? await bridge.getBootstrap()
-    : await fetch("./bootstrap").then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Remote bootstrap failed with HTTP ${response.status}.`);
-        }
-        return response.json() as Promise<DesktopBootstrap>;
-      });
+  const bootstrap = await loadDesktopBootstrap(
+    bridge,
+    window.location,
+    window.fetch.bind(window),
+  );
   appRoot.dataset.acceptanceUserId = bootstrap.rum.userId;
   appRoot.dataset.rumInitialized = "false";
   appRoot.dataset.rumSdkEventTypes = "";
