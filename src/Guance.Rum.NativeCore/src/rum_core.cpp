@@ -13,6 +13,9 @@
 #include <sstream>
 
 #if defined(GUANCE_RUM_WINDOWS)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <oleauto.h>
 #include <uiautomation.h>
@@ -24,6 +27,8 @@ namespace {
 
 constexpr int64_t kReplaySegmentFlushMilliseconds = 5000;
 constexpr int64_t kReplayCoalesceMilliseconds = 200;
+constexpr const char* kWindowsReplaySource = "windows";
+constexpr const char* kWindowsSdkName = "df_windows_rum_sdk";
 
 int64_t non_negative_duration(int64_t duration_ns) {
     return std::max<int64_t>(duration_ns, 0);
@@ -972,6 +977,9 @@ void RumCore::add_long_task(int64_t duration_ns, const char* stack) {
 
 void RumCore::start_session_replay() {
     std::lock_guard lock(mutex_);
+    if (!config_.session_replay_enabled) {
+        return;
+    }
     session_replay_sampled_ = true;
     session_replay_recording_ = true;
     capture_session_replay_snapshot();
@@ -1142,14 +1150,14 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
             << ",\"records_count\":" << records_count
             << ",\"index_in_view\":" << replay_index_in_view_++
             << ",\"has_full_snapshot\":" << (has_full_snapshot ? "true" : "false")
-            << ",\"source\":\"android\",\"records\":" << records_json << "}";
+            << ",\"source\":\"" << kWindowsReplaySource << "\",\"records\":" << records_json << "}";
     const auto segment_json = segment.str();
     std::string body;
     body.reserve(segment_json.size() + 1024);
     body += multipart_field(boundary, "records_count", std::to_string(records_count));
     body += multipart_field(boundary, "index_in_view", std::to_string(replay_index_in_view_ - 1));
-    body += multipart_field(boundary, "source", "android");
-    body += multipart_field(boundary, "sdk_name", "guance-rum-windows-native");
+    body += multipart_field(boundary, "source", kWindowsReplaySource);
+    body += multipart_field(boundary, "sdk_name", kWindowsSdkName);
     body += multipart_field(boundary, "sdk_version", config_.version);
     body += multipart_field(boundary, "start", std::to_string(start_ms));
     body += multipart_field(boundary, "end", std::to_string(end_ms));
@@ -1277,7 +1285,7 @@ RumEvent RumCore::base_event(const std::string& measurement, int64_t timestamp_n
     event.tags["app_id"] = config_.rum_app_id;
     event.tags["service"] = config_.service_name;
     event.tags["env"] = config_.env;
-    event.tags["sdk_name"] = "guance-rum-windows-native";
+    event.tags["sdk_name"] = kWindowsSdkName;
     event.tags["session_id"] = session_id_;
     event.fields["session_sample_rate"] = config_.sample_rate;
     event.fields["session_on_error_sample_rate"] = config_.session_error_sample_rate;

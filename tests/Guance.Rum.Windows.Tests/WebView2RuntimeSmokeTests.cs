@@ -157,6 +157,7 @@ public sealed class WebView2RuntimeSmokeTests
     }
 
     [WebViewRuntimeFact]
+    [Trait("Category", "Phase2")]
     public async Task WebView2Runtime_MergesBrowserReplayIntoNativeWebViewSlot()
     {
         var configuredUrl = Environment.GetEnvironmentVariable(TestUrlEnvironmentVariable);
@@ -288,6 +289,7 @@ public sealed class WebView2RuntimeSmokeTests
     }
 
     [WebViewDatawayValidationFact]
+    [Trait("Category", "Phase2")]
     public async Task WebView2Runtime_UploadsMergedReplayToDataway()
     {
         var configuredUrl = Environment.GetEnvironmentVariable(TestUrlEnvironmentVariable);
@@ -318,7 +320,6 @@ public sealed class WebView2RuntimeSmokeTests
                 SessionReplay = new RumSessionReplayConfig
                 {
                     Enabled = true,
-                    AndroidCompatibilityMode = true,
                     SampleRate = 1,
                     FlushInterval = TimeSpan.FromHours(1),
                     TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskSensitiveInputs,
@@ -576,8 +577,7 @@ public sealed class WebView2RuntimeSmokeTests
                 FlushInterval = TimeSpan.FromHours(1),
                 SessionReplay = new RumSessionReplayConfig
                 {
-                    Enabled = sessionReplayEnabled,
-                    AndroidCompatibilityMode = sessionReplayEnabled
+                    Enabled = sessionReplayEnabled
                 }
             },
             rumQueue,

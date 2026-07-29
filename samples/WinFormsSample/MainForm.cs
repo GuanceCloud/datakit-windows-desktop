@@ -119,7 +119,13 @@ public sealed class MainForm : Form
 
     private TabPage BuildSessionReplayPage()
     {
-        var page = CreatePage("Session Replay");
+        var page = CreatePage("Session Replay (Phase 2)");
+        page.Enabled = false;
+        AddPageControl(page, new Label
+        {
+            Text = "Session Replay is disabled for the Phase 1 release.",
+            AutoSize = true
+        });
         AddPageControl(page, CreateLabeledInput("Replay Input", replayPrivacyBox));
         replayHiddenTarget.BorderStyle = BorderStyle.FixedSingle;
         replayHiddenTarget.Height = 48;
@@ -444,20 +450,12 @@ public sealed class MainForm : Form
 
     private void OnStartReplayClicked(object? sender, EventArgs e)
     {
-        RunSample("Start replay", () =>
-        {
-            RumSdk.StartSessionReplayRecording();
-            AppendLog("Session Replay recording started.");
-        });
+        AppendLog("Session Replay is disabled for the Phase 1 release.");
     }
 
     private void OnStopReplayClicked(object? sender, EventArgs e)
     {
-        RunSample("Stop replay", () =>
-        {
-            RumSdk.StopSessionReplayRecording();
-            AppendLog("Session Replay recording stopped.");
-        });
+        AppendLog("Session Replay is disabled for the Phase 1 release.");
     }
 
     private void OnMaskReplayTextClicked(object? sender, EventArgs e)

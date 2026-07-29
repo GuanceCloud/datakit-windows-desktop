@@ -3,7 +3,7 @@ namespace Guance.Rum.Windows;
 internal static class RumConstants
 {
     public const string WindowsSdkName = "df_windows_rum_sdk";
-    public const string AndroidSdkName = "df_android_rum_sdk";
+    public const string WindowsSource = "windows";
 
     public const string RumWritePath = "v1/write/rum";
     public const string RumReplayWritePath = "v1/write/rum/replay";

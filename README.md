@@ -107,7 +107,7 @@ catch (Exception ex)
 }
 ```
 
-Session Replay is experimental and deferred from Phase 1. Phase 2 work can opt in and override privacy per UI element:
+Session Replay is experimental and deferred from Phase 1. Phase 1 samples hard-disable it, and manual start cannot override a disabled `RumSessionReplayConfig`. Phase 2 work must explicitly initialize with `Enabled = true` before using the following APIs:
 
 ```csharp
 RumSdk.SetSessionReplayTextAndInputPrivacy(passwordBox, SessionReplayTextAndInputPrivacy.MaskAll);
@@ -178,4 +178,4 @@ Use `build\pack.ps1` for release validation; it restores, tests, runs the Electr
 
 The managed SDK posts `text/plain` line protocol to `v1/write/rum`. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
 
-The experimental Session Replay transport posts `multipart/form-data` to `v1/write/rum/replay`. That transport, its Android-compatible envelope, player routing, privacy, and performance gates are Phase 2 work and are not part of the Phase 1 release claim.
+The experimental Session Replay transport posts Windows-identified `multipart/form-data` (`sdk_name=df_windows_rum_sdk`, `source=windows`) to `v1/write/rum/replay`. Console routing, playback, privacy, and performance gates are Phase 2 work and are not part of the Phase 1 release claim.

@@ -209,10 +209,18 @@ int main() {
     config.env = "local";
     config.version = "0.1.0";
     config.sample_rate = 1.0;
-    config.session_replay_enabled = 1;
     config.session_replay_sample_rate = 1.0;
     config.max_queue_items = 100;
 
+    guance_rum_handle disabled_handle = guance_rum_init(&config);
+    assert(disabled_handle != nullptr);
+    guance_rum_start_session_replay(disabled_handle);
+    guance_rum_diagnostics disabled_diagnostics{};
+    assert(guance_rum_get_diagnostics(disabled_handle, &disabled_diagnostics) == 1);
+    assert(disabled_diagnostics.session_replay_sampled == 0);
+    guance_rum_shutdown(disabled_handle);
+
+    config.session_replay_enabled = 1;
     guance_rum_handle handle = guance_rum_init(&config);
     assert(handle != nullptr);
 
@@ -241,7 +249,8 @@ int main() {
     assert(contains(request, "Content-Type: multipart/form-data; boundary="));
     assert(contains(request, "name=\"segment\"; filename=\""));
     assert(contains(request, "name=\"source\""));
-    assert(contains(request, "windows"));
+    assert(contains(request, "name=\"source\"\r\n\r\nwindows\r\n"));
+    assert(contains(request, "name=\"sdk_name\"\r\n\r\ndf_windows_rum_sdk\r\n"));
     assert(contains(request, "name=\"has_full_snapshot\""));
     assert(contains(request, "true"));
     assert(contains(request, "data-guance-hwnd"));
@@ -254,6 +263,8 @@ int main() {
     assert(!contains(requests[1], "secret-value"));
     assert(contains(requests[1], "\"source\":\"resize\""));
     assert(contains(requests[2], "POST /v1/write/rum"));
+    assert(contains(requests[2], "sdk_name=df_windows_rum_sdk"));
+    assert(!contains(requests[2], "df_android_rum_sdk"));
     assert(contains(requests[2], "resource_request_size=64i"));
     assert(contains(requests[2], "resource_type=http"));
     assert(contains(requests[2], "trace_id=trace-native"));

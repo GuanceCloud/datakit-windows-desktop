@@ -36,7 +36,7 @@ internal sealed class SessionReplaySegmentBuilder
 
     public (string ContentType, byte[] Body) Build()
     {
-        var segmentPayload = BuildMobileSegment();
+        var segmentPayload = BuildWindowsSegment();
         var serializedSegment = JsonSerializer.SerializeToUtf8Bytes(segmentPayload, JsonOptions);
         var segment = new byte[serializedSegment.Length + 1];
         serializedSegment.CopyTo(segment, 0);
@@ -48,7 +48,7 @@ internal sealed class SessionReplaySegmentBuilder
 
         WriteField(output, boundary, "records_count", records.Count.ToString());
         WriteField(output, boundary, "index_in_view", indexInView.ToString());
-        WriteField(output, boundary, "source", "android");
+        WriteField(output, boundary, "source", RumConstants.WindowsSource);
         WriteField(output, boundary, "sdk_name", context.SdkName);
         WriteField(output, boundary, "sdk_version", context.SdkVersion);
         WriteField(output, boundary, "start", startMilliseconds.ToString());
@@ -82,7 +82,7 @@ internal sealed class SessionReplaySegmentBuilder
         return null;
     }
 
-    private Dictionary<string, object?> BuildMobileSegment()
+    private Dictionary<string, object?> BuildWindowsSegment()
     {
         return new Dictionary<string, object?>
         {
@@ -94,7 +94,7 @@ internal sealed class SessionReplaySegmentBuilder
             ["records_count"] = records.Count,
             ["index_in_view"] = indexInView,
             ["has_full_snapshot"] = hasFullSnapshot,
-            ["source"] = "android",
+            ["source"] = RumConstants.WindowsSource,
             ["records"] = records
         };
     }

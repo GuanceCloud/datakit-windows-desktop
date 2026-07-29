@@ -690,7 +690,7 @@ public sealed class RumClient : IAsyncDisposable
                 "container",
                 JsonSerializer.Serialize(new Dictionary<string, string>
                 {
-                    ["source"] = "android",
+                    ["source"] = RumConstants.WindowsSource,
                     ["view_id"] = hostViewId
                 }));
         }
@@ -803,7 +803,7 @@ public sealed class RumClient : IAsyncDisposable
             .WithTag(RumConstants.Service, config.ServiceName)
             .WithTag(RumConstants.Env, config.Env.ToLowerInvariant())
             .WithTag(RumConstants.Version, config.Version)
-            .WithTag(RumConstants.SdkName, GetReportedSdkName())
+            .WithTag(RumConstants.SdkName, RumConstants.WindowsSdkName)
             .WithTag(RumConstants.SdkVersion, typeof(RumClient).Assembly.GetName().Version?.ToString() ?? "0.1.0")
             .WithTag(RumConstants.ApplicationUuid, platformInfo.ApplicationUuid)
             .WithTag(RumConstants.Os, platformInfo.Os)
@@ -1181,15 +1181,8 @@ public sealed class RumClient : IAsyncDisposable
             config.ServiceName,
             config.Env,
             config.Version,
-            GetReportedSdkName(),
+            RumConstants.WindowsSdkName,
             typeof(RumClient).Assembly.GetName().Version?.ToString() ?? "0.1.0");
-    }
-
-    private string GetReportedSdkName()
-    {
-        return config.SessionReplay.Enabled && config.SessionReplay.AndroidCompatibilityMode
-            ? RumConstants.AndroidSdkName
-            : RumConstants.WindowsSdkName;
     }
 
     private void IncrementAction(ActiveViewSnapshot? view)

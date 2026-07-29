@@ -3,11 +3,6 @@ namespace Guance.Rum.Windows;
 public sealed class RumSessionReplayConfig
 {
     public bool Enabled { get; init; }
-    /// <summary>
-    /// Temporarily reports the session as Android so the existing mobile wireframe player can be used for integration testing.
-    /// Keep disabled for normal Windows telemetry.
-    /// </summary>
-    public bool AndroidCompatibilityMode { get; init; }
     public double SampleRate { get; init; } = 1.0;
     public double OnErrorSampleRate { get; init; }
     public SessionReplayTextAndInputPrivacy TextAndInputPrivacy { get; init; } = SessionReplayTextAndInputPrivacy.MaskAll;

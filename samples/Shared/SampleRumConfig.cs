@@ -24,11 +24,6 @@ internal static class SampleRumConfig
             Env = "local",
             Version = "1.0.0",
             Debug = true,
-            SessionReplayEnabled = false,
-            ReplayAndroidCompatibilityMode = false,
-            ReplayTextAndInputPrivacy = nameof(SessionReplayTextAndInputPrivacy.MaskSensitiveInputs),
-            ReplayTouchPrivacy = nameof(SessionReplayTouchPrivacy.Show),
-            ReplayImagePrivacy = nameof(SessionReplayImagePrivacy.MaskNone),
             DiagnosticConsoleEnabled = true,
             DiagnosticFirstChanceExceptions = false
         };
@@ -51,11 +46,7 @@ internal static class SampleRumConfig
             DiagnosticListener = settings.DiagnosticConsoleEnabled == true ? LogDiagnostic : null,
             SessionReplay = new RumSessionReplayConfig
             {
-                Enabled = settings.SessionReplayEnabled ?? false,
-                AndroidCompatibilityMode = settings.ReplayAndroidCompatibilityMode ?? false,
-                TextAndInputPrivacy = ParseEnum(settings.ReplayTextAndInputPrivacy, SessionReplayTextAndInputPrivacy.MaskSensitiveInputs),
-                TouchPrivacy = ParseEnum(settings.ReplayTouchPrivacy, SessionReplayTouchPrivacy.Show),
-                ImagePrivacy = ParseEnum(settings.ReplayImagePrivacy, SessionReplayImagePrivacy.MaskNone)
+                Enabled = false
             }
         };
     }
@@ -88,11 +79,6 @@ internal static class SampleRumConfig
             Env = Environment.GetEnvironmentVariable("GUANCE_RUM_ENV"),
             Version = Environment.GetEnvironmentVariable("GUANCE_RUM_VERSION"),
             Debug = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DEBUG")),
-            SessionReplayEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY")),
-            ReplayAndroidCompatibilityMode = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_ANDROID_COMPATIBILITY")),
-            ReplayTextAndInputPrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_TEXT_AND_INPUT_PRIVACY"),
-            ReplayTouchPrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_TOUCH_PRIVACY"),
-            ReplayImagePrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_IMAGE_PRIVACY"),
             DiagnosticConsoleEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DIAGNOSTIC_CONSOLE")),
             DiagnosticFirstChanceExceptions = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS"))
         });
@@ -130,18 +116,6 @@ internal static class SampleRumConfig
                 case "--debug":
                     commandLine.Debug = ParseBool(value);
                     break;
-                case "--session-replay":
-                    commandLine.SessionReplayEnabled = ParseBool(value);
-                    break;
-                case "--replay-text-and-input-privacy":
-                    commandLine.ReplayTextAndInputPrivacy = value;
-                    break;
-                case "--replay-touch-privacy":
-                    commandLine.ReplayTouchPrivacy = value;
-                    break;
-                case "--replay-image-privacy":
-                    commandLine.ReplayImagePrivacy = value;
-                    break;
                 case "--diagnostic-console":
                     commandLine.DiagnosticConsoleEnabled = ParseBool(value);
                     break;
@@ -175,11 +149,6 @@ internal static class SampleRumConfig
         target.Env = Coalesce(source.Env, target.Env);
         target.Version = Coalesce(source.Version, target.Version);
         target.Debug = source.Debug ?? target.Debug;
-        target.SessionReplayEnabled = source.SessionReplayEnabled ?? target.SessionReplayEnabled;
-        target.ReplayAndroidCompatibilityMode = source.ReplayAndroidCompatibilityMode ?? target.ReplayAndroidCompatibilityMode;
-        target.ReplayTextAndInputPrivacy = Coalesce(source.ReplayTextAndInputPrivacy, target.ReplayTextAndInputPrivacy);
-        target.ReplayTouchPrivacy = Coalesce(source.ReplayTouchPrivacy, target.ReplayTouchPrivacy);
-        target.ReplayImagePrivacy = Coalesce(source.ReplayImagePrivacy, target.ReplayImagePrivacy);
         target.DiagnosticConsoleEnabled = source.DiagnosticConsoleEnabled ?? target.DiagnosticConsoleEnabled;
         target.DiagnosticFirstChanceExceptions = source.DiagnosticFirstChanceExceptions ?? target.DiagnosticFirstChanceExceptions;
     }
@@ -287,25 +256,6 @@ internal static class SampleRumConfig
         return bool.TryParse(value, out var result) ? result : null;
     }
 
-    private static TEnum ParseEnum<TEnum>(string? value, TEnum fallback) where TEnum : struct, Enum
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return fallback;
-        }
-
-        var normalized = value.Trim().Replace("-", "", StringComparison.Ordinal).Replace("_", "", StringComparison.Ordinal);
-        foreach (var name in Enum.GetNames<TEnum>())
-        {
-            if (string.Equals(name, normalized, StringComparison.OrdinalIgnoreCase))
-            {
-                return Enum.Parse<TEnum>(name);
-            }
-        }
-
-        throw new InvalidOperationException($"Invalid {typeof(TEnum).Name} value: {value}");
-    }
-
     private sealed class LocalRumSettings
     {
         public string? DatawayUrl { get; set; }
@@ -316,11 +266,6 @@ internal static class SampleRumConfig
         public string? Env { get; set; }
         public string? Version { get; set; }
         public bool? Debug { get; set; }
-        public bool? SessionReplayEnabled { get; set; }
-        public bool? ReplayAndroidCompatibilityMode { get; set; }
-        public string? ReplayTextAndInputPrivacy { get; set; }
-        public string? ReplayTouchPrivacy { get; set; }
-        public string? ReplayImagePrivacy { get; set; }
         public bool? DiagnosticConsoleEnabled { get; set; }
         public bool? DiagnosticFirstChanceExceptions { get; set; }
     }

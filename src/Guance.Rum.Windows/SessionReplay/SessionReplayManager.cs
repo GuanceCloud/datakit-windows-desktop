@@ -60,6 +60,11 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
     public void Start()
     {
+        if (!config.SessionReplay.Enabled)
+        {
+            return;
+        }
+
         lock (gate)
         {
             recordingEnabled = true;
@@ -119,7 +124,7 @@ internal sealed class SessionReplayManager : IAsyncDisposable
         {
             ["type"] = 11,
             ["timestamp"] = timestamp,
-            ["data"] = BuildMobileIncrementalData(eventType, target, x, y, timestamp, value)
+            ["data"] = BuildIncrementalData(eventType, target, x, y, timestamp, value)
         };
         LogIncrementalEvent(eventType, target, x, y, value, record);
 
@@ -619,7 +624,7 @@ internal sealed class SessionReplayManager : IAsyncDisposable
         return document.RootElement.Clone();
     }
 
-    private static Dictionary<string, object?> BuildMobileIncrementalData(string eventType, string? target, double x, double y, long timestampMilliseconds, string? value)
+    private static Dictionary<string, object?> BuildIncrementalData(string eventType, string? target, double x, double y, long timestampMilliseconds, string? value)
     {
         if (eventType == "click")
         {

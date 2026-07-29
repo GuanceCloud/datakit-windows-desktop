@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Guance.Rum.Windows.Tests;
 
+[Trait("Category", "Phase2")]
 public sealed class SessionReplayTests
 {
     [Fact]
@@ -67,7 +68,7 @@ public sealed class SessionReplayTests
         Assert.Contains("name=\"app_id\"\r\n\r\napp\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"session_id\"\r\n\r\nsession\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"view_id\"\r\n\r\nview\r\n", text, StringComparison.Ordinal);
-        Assert.Contains("name=\"source\"\r\n\r\nandroid\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("name=\"source\"\r\n\r\nwindows\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"index_in_view\"\r\n\r\n7\r\n", text, StringComparison.Ordinal);
         Assert.Contains("name=\"has_full_snapshot\"\r\n\r\ntrue\r\n", text, StringComparison.Ordinal);
         Assert.Contains($"name=\"raw_segment_size\"\r\n\r\n{segment.Length}\r\n", text, StringComparison.Ordinal);
@@ -76,7 +77,7 @@ public sealed class SessionReplayTests
         Assert.Contains("\"application\":{\"id\":\"app\"}", segmentText, StringComparison.Ordinal);
         Assert.Contains("\"session\":{\"id\":\"session\"}", segmentText, StringComparison.Ordinal);
         Assert.Contains("\"view\":{\"id\":\"view\"}", segmentText, StringComparison.Ordinal);
-        Assert.Contains("\"source\":\"android\"", segmentText, StringComparison.Ordinal);
+        Assert.Contains("\"source\":\"windows\"", segmentText, StringComparison.Ordinal);
         Assert.Contains("\"records\":[", segmentText, StringComparison.Ordinal);
         Assert.Contains("\"type\":10", segmentText, StringComparison.Ordinal);
         Assert.Contains("\"wireframes\":[", segmentText, StringComparison.Ordinal);
@@ -85,7 +86,7 @@ public sealed class SessionReplayTests
     }
 
     [Fact]
-    public void SegmentBuilder_NormalizesGuidIdsForMobileSchema()
+    public void SegmentBuilder_NormalizesGuidIdsForWindowsSchema()
     {
         var appId = Guid.NewGuid();
         var sessionId = Guid.NewGuid();

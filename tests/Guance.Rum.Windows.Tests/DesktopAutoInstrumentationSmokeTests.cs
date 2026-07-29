@@ -27,6 +27,7 @@ namespace Guance.Rum.Windows.Tests;
 public sealed class DesktopAutoInstrumentationSmokeTests
 {
     [Fact]
+    [Trait("Category", "Phase2")]
     public async Task WpfAutoInstrumentation_CapturesActionResizeAndReplay()
     {
         await RunStaAsync(async () =>
@@ -389,6 +390,7 @@ public sealed class DesktopAutoInstrumentationSmokeTests
     }
 
     [Fact]
+    [Trait("Category", "Phase2")]
     public async Task WinFormsAutoInstrumentation_CapturesActionResizeAndReplay()
     {
         await RunStaAsync(async () =>

@@ -264,7 +264,8 @@ public sealed class WebViewInstrumentationTests
     }
 
     [Fact]
-    public void BridgeScript_ExposesAndroidCompatibleSessionReplayRecordsCapability()
+    [Trait("Category", "Phase2")]
+    public void BridgeScript_ExposesSessionReplayRecordsCapability()
     {
         var script = WebViewBridgeScript.Create(
             "test-token",
@@ -279,6 +280,7 @@ public sealed class WebViewInstrumentationTests
     }
 
     [Fact]
+    [Trait("Category", "Phase2")]
     public async Task AttachedWebView_MergesNativeAndBrowserReplayWithSameSlotId()
     {
         var rumQueue = new MemoryRumQueue();
@@ -349,7 +351,8 @@ public sealed class WebViewInstrumentationTests
         Assert.Contains(rumLines, item =>
             item.Line.StartsWith("view,", StringComparison.Ordinal) &&
             item.Line.Contains("is_web_view=True", StringComparison.Ordinal) &&
-            item.Line.Contains("container=", StringComparison.Ordinal));
+            item.Line.Contains("container=", StringComparison.Ordinal) &&
+            item.Line.Contains("container={\"source\":\"windows\"", StringComparison.Ordinal));
         Assert.DoesNotContain(rumLines, item => item.Line.Contains("browser-secret", StringComparison.Ordinal));
         Assert.DoesNotContain(rumLines, item => item.Line.Contains("untrusted-", StringComparison.Ordinal));
         Assert.Contains(rumLines, item =>
@@ -449,8 +452,7 @@ public sealed class WebViewInstrumentationTests
                 FlushInterval = TimeSpan.FromHours(1),
                 SessionReplay = new RumSessionReplayConfig
                 {
-                    Enabled = sessionReplayEnabled,
-                    AndroidCompatibilityMode = sessionReplayEnabled
+                    Enabled = sessionReplayEnabled
                 }
             },
             rumQueue,

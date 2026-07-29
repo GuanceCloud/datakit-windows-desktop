@@ -59,7 +59,7 @@ public sealed class RumClientDiagnosticsTests
     }
 
     [Fact]
-    public async Task AndroidReplayCompatibilityMode_UsesAndroidSdkNameForRumEvents()
+    public async Task RumEvents_DoNotUseAndroidSdkName()
     {
         var rumQueue = new MemoryRumQueue();
         await using var client = new RumClient(
@@ -68,24 +68,19 @@ public sealed class RumClientDiagnosticsTests
                 DatakitUrl = "http://127.0.0.1:9529",
                 RumAppId = "app",
                 Env = "local",
-                FlushInterval = TimeSpan.FromMinutes(5),
-                SessionReplay = new RumSessionReplayConfig
-                {
-                    Enabled = true,
-                    AndroidCompatibilityMode = true
-                }
+                FlushInterval = TimeSpan.FromMinutes(5)
             },
             rumQueue,
             new RetryRumTransport(),
             new MemoryReplayQueue(),
             new RetryReplayTransport());
 
-        client.AddAction("Compatibility", "custom", TimeSpan.FromMilliseconds(1));
+        client.AddAction("Windows identity", "custom", TimeSpan.FromMilliseconds(1));
         await client.FlushAsync();
 
         var line = Assert.Single(rumQueue.Items).Line;
-        Assert.Contains("sdk_name=df_android_rum_sdk", line, StringComparison.Ordinal);
-        Assert.DoesNotContain("sdk_name=df_windows_rum_sdk", line, StringComparison.Ordinal);
+        Assert.Contains("sdk_name=df_windows_rum_sdk", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("sdk_name=df_android_rum_sdk", line, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -359,6 +354,7 @@ public sealed class RumClientDiagnosticsTests
     }
 
     [Fact]
+    [Trait("Category", "Phase2")]
     public async Task RumEvents_MarkSessionHasReplayWhenReplaySessionIsSampled()
     {
         var rumQueue = new MemoryRumQueue();
@@ -415,6 +411,7 @@ public sealed class RumClientDiagnosticsTests
     }
 
     [Fact]
+    [Trait("Category", "Phase2")]
     public async Task ErrorEvent_MarksSessionHasReplayWhenReplayIsSampledOnError()
     {
         var rumQueue = new MemoryRumQueue();
@@ -466,6 +463,7 @@ public sealed class RumClientDiagnosticsTests
     }
 
     [Fact]
+    [Trait("Category", "Phase2")]
     public async Task SdkSessionReplayUploadRequest_SuppressesAutomaticResourceInstrumentation()
     {
         HttpRequestMessage? captured = null;
