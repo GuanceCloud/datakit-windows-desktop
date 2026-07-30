@@ -133,7 +133,7 @@ RumSdk.AddDiagnosticListener((_, item) =>
 
 ## Electron Hybrid Sample
 
-The Electron acceptance UI installs `@cloudcare/browser-rum` in the renderer and exercises all five Phase 1 RUM signals:
+The Electron acceptance UI pins Electron `22.3.27`, installs `@cloudcare/browser-rum` in the renderer, and exercises all five Phase 1 RUM signals. Its Windows x64 compatibility artifact targets Windows 7 SP1 through Windows 11; Electron 22 is end-of-life and receives no further security updates. The managed SDK remains a Windows 10+ target.
 
 ```powershell
 cd samples/ElectronSample

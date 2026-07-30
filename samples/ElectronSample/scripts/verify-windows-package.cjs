@@ -15,6 +15,7 @@ const packageDirectory = path.join(
 const executablePath = path.join(packageDirectory, `${applicationName}.exe`);
 const appArchivePath = path.join(packageDirectory, "resources", "app.asar");
 const settingsExamplePath = path.join(packageDirectory, "rum.local.json.example");
+const electronVersionPath = path.join(packageDirectory, "version");
 const skipRuntime = process.argv.includes("--skip-runtime");
 
 function fail(message) {
@@ -34,9 +35,24 @@ if (!fs.existsSync(settingsExamplePath)) {
   fail(`missing local settings example: ${settingsExamplePath}`);
 }
 
+if (!fs.existsSync(electronVersionPath)) {
+  fail(`missing Electron version marker: ${electronVersionPath}`);
+}
+
+const expectedElectronVersion = packageMetadata.devDependencies.electron;
+const packagedElectronVersion = fs.readFileSync(electronVersionPath, "utf8").trim();
+if (expectedElectronVersion !== "22.3.27") {
+  fail(`Electron compatibility baseline must be 22.3.27, got ${expectedElectronVersion}`);
+}
+if (packagedElectronVersion !== expectedElectronVersion) {
+  fail(
+    `packaged Electron version ${packagedElectronVersion} does not match ${expectedElectronVersion}`,
+  );
+}
+
 if (skipRuntime) {
   console.log(
-    `[electron-package-verify] files passed, runtime skipped: ${path.relative(sampleRoot, executablePath)}`,
+    `[electron-package-verify] files passed with Electron ${packagedElectronVersion}, runtime skipped: ${path.relative(sampleRoot, executablePath)}`,
   );
   process.exit(0);
 }

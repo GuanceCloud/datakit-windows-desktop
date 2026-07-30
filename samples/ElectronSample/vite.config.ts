@@ -6,7 +6,7 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
-    target: "chrome136",
+    target: "chrome108",
   },
   server: {
     host: "127.0.0.1",

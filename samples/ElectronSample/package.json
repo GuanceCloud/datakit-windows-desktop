@@ -9,7 +9,7 @@
   },
   "main": "src/main/main.cjs",
   "scripts": {
-    "electron:install": "install-electron",
+    "electron:install": "node node_modules/electron/install.js",
     "dev": "npm run electron:install && npm run build && concurrently --kill-others --success command-electron --names renderer,electron \"vite --host 127.0.0.1\" \"wait-on http-get://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "tsc --noEmit && vite build",
     "start": "npm run electron:install && npm run build && electron .",
@@ -25,17 +25,17 @@
     "@cloudcare/browser-rum": "^3.3.5"
   },
   "devDependencies": {
-    "@electron/packager": "^20.0.4",
+    "@electron/packager": "20.0.4",
     "@types/node": "^24.0.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^43.2.0",
+    "electron": "22.3.27",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.0.18",
     "wait-on": "^8.0.3"
   },
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.12"
   }
 }
