@@ -155,8 +155,29 @@ function resolveRumIngestionConfiguration(reader, defaultDatakitUrl) {
   return { datawayUrl: "", datakitUrl: defaultDatakitUrl };
 }
 
+function resolveWebViewUrl(reader) {
+  return (
+    reader.readString(
+      "GUANCE_RUM_ELECTRON_REMOTE_URL",
+      "electronRemoteUrl",
+    ) ||
+    reader.readString("GUANCE_RUM_WEBVIEW_URL", "webViewUrl")
+  );
+}
+
+function isSupportedWebViewUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   createLocalRumSettingsReader,
+  isSupportedWebViewUrl,
   loadLocalRumSettings,
   resolveRumIngestionConfiguration,
+  resolveWebViewUrl,
 };

@@ -10,11 +10,40 @@ const packageMetadata = JSON.parse(
   fs.readFileSync(path.join(sampleRoot, "package.json"), "utf8"),
 );
 const applicationName = packageMetadata.config.windowsArtifactName;
+const nativeSourceDirectory = path.resolve(
+  sampleRoot,
+  "..",
+  "..",
+  "src",
+  "Guance.Rum.NativeCore",
+  "bin",
+  "win-x64",
+);
+const nativeFiles = [
+  "guance_rum_native.dll",
+  "guance_rum_electron_bridge.exe",
+];
+const expectedApplicationPath = path.join(
+  sampleRoot,
+  "release",
+  `${applicationName}-win32-x64`,
+);
+const localSettingsPath = path.join(expectedApplicationPath, "rum.local.json");
+const preservedLocalSettings = fs.existsSync(localSettingsPath)
+  ? fs.readFileSync(localSettingsPath)
+  : undefined;
 const settingsExamplePath = path.resolve(
   sampleRoot,
   "..",
   "rum.local.json.example",
 );
+
+for (const nativeFile of nativeFiles) {
+  const sourcePath = path.join(nativeSourceDirectory, nativeFile);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`Missing native RUM bridge artifact: ${sourcePath}`);
+  }
+}
 
 const applicationPaths = await packager({
   dir: sampleRoot,
@@ -47,9 +76,20 @@ const applicationPaths = await packager({
 });
 
 for (const applicationPath of applicationPaths) {
+  const nativeTargetDirectory = path.join(applicationPath, "resources", "native");
+  fs.mkdirSync(nativeTargetDirectory, { recursive: true });
+  for (const nativeFile of nativeFiles) {
+    fs.copyFileSync(
+      path.join(nativeSourceDirectory, nativeFile),
+      path.join(nativeTargetDirectory, nativeFile),
+    );
+  }
   fs.copyFileSync(
     settingsExamplePath,
     path.join(applicationPath, "rum.local.json.example"),
   );
-  console.log(`[electron-package] ${applicationPath}`);
+  if (preservedLocalSettings) {
+    fs.writeFileSync(path.join(applicationPath, "rum.local.json"), preservedLocalSettings);
+  }
+  console.log(`[electron-package] ${applicationPath} (Electron + C++ RUM bridge)`);
 }

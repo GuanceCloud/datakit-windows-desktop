@@ -75,6 +75,17 @@ int guance_rum_get_diagnostics(guance_rum_handle handle, guance_rum_diagnostics*
     return 1;
 }
 
+int guance_rum_write_line(guance_rum_handle handle, const char* line, size_t length) {
+    if (handle == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->write_line(line, length) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
 void guance_rum_set_user(guance_rum_handle handle, const char* id, const char* name, const char* email) {
     if (handle != nullptr) {
         static_cast<RumCore*>(handle)->set_user(id, name, email);

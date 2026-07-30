@@ -18,6 +18,7 @@ coverage/
 *.db-shm
 *.db-wal
 build/native/
+.build/
 out/
 dist/
 dist-*/

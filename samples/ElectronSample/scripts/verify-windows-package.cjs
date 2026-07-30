@@ -16,6 +16,9 @@ const executablePath = path.join(packageDirectory, `${applicationName}.exe`);
 const appArchivePath = path.join(packageDirectory, "resources", "app.asar");
 const settingsExamplePath = path.join(packageDirectory, "rum.local.json.example");
 const electronVersionPath = path.join(packageDirectory, "version");
+const nativeDirectory = path.join(packageDirectory, "resources", "native");
+const nativeHostPath = path.join(nativeDirectory, "guance_rum_electron_bridge.exe");
+const nativeCorePath = path.join(nativeDirectory, "guance_rum_native.dll");
 const skipRuntime = process.argv.includes("--skip-runtime");
 
 function fail(message) {
@@ -37,6 +40,12 @@ if (!fs.existsSync(settingsExamplePath)) {
 
 if (!fs.existsSync(electronVersionPath)) {
   fail(`missing Electron version marker: ${electronVersionPath}`);
+}
+if (!fs.existsSync(nativeHostPath)) {
+  fail(`missing native RUM bridge host: ${nativeHostPath}`);
+}
+if (!fs.existsSync(nativeCorePath)) {
+  fail(`missing native RUM core: ${nativeCorePath}`);
 }
 
 const expectedElectronVersion = packageMetadata.devDependencies.electron;
@@ -79,6 +88,9 @@ if (smoke.status !== 0) {
 
 for (const marker of [
   "[electron-smoke]",
+  "[electron-main][rum-bridge] main-renderer -> C++",
+  "[Guance.RUM.Native.BrowserBridge] enqueued ",
+  "[Guance.RUM.NativeBridge] flush enqueued=",
   '"rumInitialized":true',
   '"resourceStatus":"HTTP 503"',
   '"userCorrelation":true',

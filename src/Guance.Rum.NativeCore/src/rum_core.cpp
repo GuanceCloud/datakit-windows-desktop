@@ -29,6 +29,49 @@ constexpr int64_t kReplaySegmentFlushMilliseconds = 5000;
 constexpr int64_t kReplayCoalesceMilliseconds = 200;
 constexpr const char* kWindowsReplaySource = "windows";
 constexpr const char* kWindowsSdkName = "df_windows_rum_sdk";
+constexpr std::size_t kMaxBridgeLineBytes = 1024 * 1024;
+
+std::optional<std::string> bridge_measurement(const char* line, std::size_t length) {
+    if (line == nullptr ||
+        length < 4 ||
+        length > kMaxBridgeLineBytes ||
+        line[length - 1] != '\n') {
+        return std::nullopt;
+    }
+
+    const auto payload_end = length - 1;
+    std::size_t measurement_end = payload_end;
+    for (std::size_t index = 0; index < payload_end; ++index) {
+        const char character = line[index];
+        if (character == '\0' || character == '\r' || character == '\n') {
+            return std::nullopt;
+        }
+        if (measurement_end == payload_end && (character == ',' || character == ' ')) {
+            measurement_end = index;
+        }
+    }
+
+    if (measurement_end == 0 || measurement_end == payload_end) {
+        return std::nullopt;
+    }
+
+    const std::string measurement(line, measurement_end);
+    if (measurement != "view" &&
+        measurement != "action" &&
+        measurement != "resource" &&
+        measurement != "error" &&
+        measurement != "long_task") {
+        return std::nullopt;
+    }
+
+    const auto fields_start = std::find(line + measurement_end, line + payload_end, ' ');
+    if (fields_start == line + payload_end ||
+        std::find(fields_start + 1, line + payload_end, ' ') == line + payload_end) {
+        return std::nullopt;
+    }
+
+    return measurement;
+}
 
 int64_t non_negative_duration(int64_t duration_ns) {
     return std::max<int64_t>(duration_ns, 0);
@@ -695,6 +738,26 @@ NativeDiagnostics RumCore::diagnostics() const {
     snapshot.session_replay_sampled = session_replay_sampled_;
     snapshot.session_replay_error_sampled = session_replay_error_sampled_;
     return snapshot;
+}
+
+bool RumCore::write_line(const char* line, std::size_t length) {
+    const auto measurement = bridge_measurement(line, length);
+    if (!measurement) {
+        return false;
+    }
+    if (!sampled_for(*measurement)) {
+        return true;
+    }
+
+    queue_->enqueue(std::string(line, length));
+    rum_events_enqueued_.fetch_add(1);
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native.BrowserBridge] enqueued "
+                  << *measurement
+                  << " (" << length << " bytes)"
+                  << std::endl;
+    }
+    return true;
 }
 
 void RumCore::set_user(const char* id, const char* name, const char* email) {

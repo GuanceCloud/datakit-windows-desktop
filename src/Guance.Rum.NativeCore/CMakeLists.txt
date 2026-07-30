@@ -30,13 +30,32 @@ target_include_directories(native_line_protocol_smoke PRIVATE include src)
 target_compile_features(native_line_protocol_smoke PRIVATE cxx_std_17)
 
 if(WIN32)
+    add_executable(guance_rum_electron_bridge src/electron_bridge_host.cpp)
+    target_include_directories(guance_rum_electron_bridge PRIVATE include)
+    target_compile_features(guance_rum_electron_bridge PRIVATE cxx_std_17)
+    target_compile_definitions(guance_rum_electron_bridge PRIVATE WINVER=0x0601 _WIN32_WINNT=0x0601)
+    target_link_libraries(guance_rum_electron_bridge PRIVATE guance_rum_native)
+    set_target_properties(guance_rum_electron_bridge PROPERTIES
+        OUTPUT_NAME "guance_rum_electron_bridge")
+
+    add_executable(native_browser_bridge_smoke tests/native_browser_bridge_smoke.cpp)
+    target_include_directories(native_browser_bridge_smoke PRIVATE include)
+    target_compile_features(native_browser_bridge_smoke PRIVATE cxx_std_17)
+    target_link_libraries(native_browser_bridge_smoke PRIVATE guance_rum_native)
+
     add_executable(native_win32_replay_smoke tests/native_win32_replay_smoke.cpp)
     target_include_directories(native_win32_replay_smoke PRIVATE include)
     target_compile_features(native_win32_replay_smoke PRIVATE cxx_std_17)
     target_link_libraries(native_win32_replay_smoke PRIVATE guance_rum_native ws2_32)
 
     set(GUANCE_RUM_NATIVE_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/win-x64")
-    foreach(target_name guance_rum_native native_line_protocol_smoke native_win32_replay_smoke)
+    target_compile_definitions(guance_rum_native PRIVATE WINVER=0x0601 _WIN32_WINNT=0x0601)
+    if(MSVC)
+        set_property(TARGET guance_rum_native guance_rum_electron_bridge
+            PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+
+    foreach(target_name guance_rum_native guance_rum_electron_bridge native_line_protocol_smoke native_browser_bridge_smoke native_win32_replay_smoke)
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${GUANCE_RUM_NATIVE_RUNTIME_DIR}"
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${GUANCE_RUM_NATIVE_RUNTIME_DIR}"

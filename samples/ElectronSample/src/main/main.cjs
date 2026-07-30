@@ -16,15 +16,23 @@ const {
 } = require("electron");
 const {
   createLocalRumSettingsReader,
+  isSupportedWebViewUrl,
   loadLocalRumSettings,
   resolveRumIngestionConfiguration,
+  resolveWebViewUrl,
 } = require("./local-rum-settings.cjs");
+const RUM_BRIDGE_CHANNEL = "rum:browser-event";
+const {
+  NativeRumHost,
+  resolveNativeRumPaths,
+} = require("./native-rum-host.cjs");
 
 const DEV_RENDERER_URL = process.env.ELECTRON_RENDERER_URL;
 const IS_SMOKE = process.env.ELECTRON_SMOKE === "1";
 const SAMPLE_ROOT = path.resolve(__dirname, "..", "..");
 const DIST_ROOT = path.join(SAMPLE_ROOT, "dist");
 const ACCEPTANCE_USER_ID = `desktop-${crypto.randomUUID()}`;
+const NATIVE_SESSION_ID = crypto.randomUUID().replaceAll("-", "");
 const SMOKE_TIMEOUT_MS = 15_000;
 
 if (IS_SMOKE) {
@@ -36,6 +44,8 @@ let mainWindow;
 let remoteWindow;
 let apiServer;
 let apiBaseUrl;
+let nativeRumHost;
+let nativeRumShutdownPromise;
 let localRumSettingsReader = createLocalRumSettingsReader({
   environment: process.env,
   settings: {},
@@ -69,6 +79,100 @@ function readBooleanConfiguration(environmentName, jsonName, fallback = false) {
 
 function readNumberConfiguration(environmentName, jsonName, fallback) {
   return localRumSettingsReader.readNumber(environmentName, jsonName, fallback);
+}
+
+function createNativeRumConfiguration() {
+  const { datawayUrl, datakitUrl } = resolveRumIngestionConfiguration(
+    localRumSettingsReader,
+    IS_SMOKE ? "http://127.0.0.1:9" : "http://127.0.0.1:9529",
+  );
+  const applicationId = readConfiguration(
+    "GUANCE_RUM_APP_ID",
+    "rumAppId",
+    IS_SMOKE ? "electron-smoke" : "",
+  );
+  const service = readConfiguration(
+    "GUANCE_RUM_SERVICE_NAME",
+    "serviceName",
+    "guance-rum-windows-electron",
+  );
+  const environment = readConfiguration("GUANCE_RUM_ENV", "env", "local");
+  const version = readConfiguration("GUANCE_RUM_VERSION", "version", app.getVersion());
+  const sampleRate = Math.min(
+    1,
+    Math.max(
+      0,
+      readNumberConfiguration("GUANCE_RUM_SAMPLE_RATE", "sessionSampleRate", 100) / 100,
+    ),
+  );
+
+  return {
+    datawayUrl,
+    datakitUrl,
+    clientToken: readConfiguration("GUANCE_RUM_CLIENT_TOKEN", "clientToken"),
+    applicationId,
+    service,
+    env: environment,
+    version,
+    cachePath: path.join(app.getPath("userData"), "native-rum-queue.db"),
+    proxyUrl: readConfiguration("GUANCE_RUM_PROXY_URL", "proxyUrl"),
+    sampleRate,
+    httpTimeoutMs: 10_000,
+    debug: readBooleanConfiguration("GUANCE_RUM_DEBUG", "debug", true),
+    trustedContext: {
+      tags: {
+        app_id: applicationId,
+        service,
+        env: environment,
+        version,
+        sdk_name: "df_windows_rum_sdk",
+        sdk_version: app.getVersion(),
+        session_id: NATIVE_SESSION_ID,
+        is_electron: "true",
+      },
+      fields: {
+        session_has_replay: false,
+        session_sample_rate: sampleRate,
+        session_on_error_sample_rate: 0,
+      },
+    },
+  };
+}
+
+function initializeNativeRumHost() {
+  const configuration = createNativeRumConfiguration();
+  if (
+    !configuration.applicationId ||
+    (!configuration.datawayUrl && !configuration.datakitUrl)
+  ) {
+    console.warn("[electron-main][rum-bridge] disabled: missing ingestion URL or app id");
+    return;
+  }
+
+  const paths = resolveNativeRumPaths({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    sampleRoot: SAMPLE_ROOT,
+  });
+  nativeRumHost = new NativeRumHost({
+    paths,
+    configuration,
+    trustedContext: configuration.trustedContext,
+  });
+  nativeRumHost.start();
+  console.log(
+    `[electron-main][rum-bridge] Browser RUM -> C++ Core enabled (${paths.executablePath})`,
+  );
+}
+
+function shutdownNativeRumHost() {
+  if (nativeRumShutdownPromise) {
+    return nativeRumShutdownPromise;
+  }
+  const host = nativeRumHost;
+  nativeRumHost = undefined;
+  nativeRumShutdownPromise = host?.shutdown() || Promise.resolve();
+  return nativeRumShutdownPromise;
 }
 
 function createBootstrap(isRemoteRenderer = false) {
@@ -123,6 +227,7 @@ function createBootstrap(isRemoteRenderer = false) {
       remoteUrl: readConfiguration(
         "GUANCE_RUM_ELECTRON_REMOTE_URL",
         "electronRemoteUrl",
+        resolveWebViewUrl(localRumSettingsReader),
       ),
       remoteAvailable: true,
       isRemoteRenderer,
@@ -268,13 +373,7 @@ function isAllowedDevelopmentRendererUrl(value) {
 }
 
 function isAllowedRemoteUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" ||
-      (url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname));
-  } catch {
-    return false;
-  }
+  return isSupportedWebViewUrl(value);
 }
 
 function isAllowedNavigation(candidate, allowedEntry) {
@@ -310,6 +409,23 @@ function isTrustedMainEvent(event) {
   );
 }
 
+function trustedRumRenderer(event) {
+  for (const [label, window] of [
+    ["main-renderer", mainWindow],
+    ["remote-renderer", remoteWindow],
+  ]) {
+    if (
+      window &&
+      !window.isDestroyed() &&
+      event.sender === window.webContents &&
+      event.senderFrame === window.webContents.mainFrame
+    ) {
+      return label;
+    }
+  }
+  return undefined;
+}
+
 function handleTrusted(channel, handler) {
   ipcMain.handle(channel, (event, ...args) => {
     if (!isTrustedMainEvent(event)) {
@@ -328,13 +444,10 @@ function onTrusted(channel, handler) {
 }
 
 async function createRemoteWindow({ forceBuiltIn = false } = {}) {
-  const configuredUrl = readConfiguration(
-    "GUANCE_RUM_ELECTRON_REMOTE_URL",
-    "electronRemoteUrl",
-  );
+  const configuredUrl = resolveWebViewUrl(localRumSettingsReader);
   const remoteUrl = !forceBuiltIn && configuredUrl ? configuredUrl : `${apiBaseUrl}/remote/`;
   if (!isAllowedRemoteUrl(remoteUrl)) {
-    return { opened: false, reason: "Only HTTPS or loopback HTTP remote URLs are allowed." };
+    return { opened: false, reason: "Only HTTP or HTTPS WebView URLs are allowed." };
   }
 
   if (remoteWindow && !remoteWindow.isDestroyed()) {
@@ -351,6 +464,8 @@ async function createRemoteWindow({ forceBuiltIn = false } = {}) {
     title: "Hybrid Remote Workspace",
     backgroundColor: "#07110f",
     webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      additionalArguments: ["--guance-rum-only-preload"],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -381,6 +496,12 @@ async function createRemoteWindow({ forceBuiltIn = false } = {}) {
 }
 
 function registerIpc() {
+  ipcMain.on(RUM_BRIDGE_CHANNEL, (event, serializedEvent) => {
+    const renderer = trustedRumRenderer(event);
+    if (renderer) {
+      nativeRumHost?.send(serializedEvent, renderer);
+    }
+  });
   handleTrusted("app:get-bootstrap", () => createBootstrap(false));
   onTrusted("window:minimize", () => mainWindow?.minimize());
   handleTrusted("window:toggle-maximize", () => {
@@ -437,7 +558,7 @@ function configureSmoke(window) {
       log(message);
     }
     process.exitCode = exitCode;
-    app.exit(exitCode);
+    void shutdownNativeRumHost().finally(() => app.exit(exitCode));
   };
   const timeout = setTimeout(() => {
     finish(1, `[electron-smoke] timed out after ${SMOKE_TIMEOUT_MS}ms`);
@@ -624,6 +745,7 @@ function createMainWindow() {
 
 app.whenReady().then(async () => {
   initializeLocalRumSettings();
+  initializeNativeRumHost();
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
@@ -649,7 +771,11 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (nativeRumHost) {
+    event.preventDefault();
+    void shutdownNativeRumHost().finally(() => app.quit());
+  }
   if (apiServer) {
     apiServer.close();
     apiServer = undefined;

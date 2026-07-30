@@ -64,6 +64,7 @@ public:
     void flush();
     void shutdown();
     NativeDiagnostics diagnostics() const;
+    bool write_line(const char* line, std::size_t length);
     void set_user(const char* id, const char* name, const char* email);
     void clear_user();
     void add_global_context(const char* key, const char* value);

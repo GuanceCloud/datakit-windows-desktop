@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(_WIN32) && defined(GUANCE_RUM_BUILDING_DLL)
@@ -76,6 +77,7 @@ GUANCE_RUM_EXPORT guance_rum_handle guance_rum_init(const guance_rum_config* con
 GUANCE_RUM_EXPORT void guance_rum_shutdown(guance_rum_handle handle);
 GUANCE_RUM_EXPORT void guance_rum_flush(guance_rum_handle handle);
 GUANCE_RUM_EXPORT int guance_rum_get_diagnostics(guance_rum_handle handle, guance_rum_diagnostics* diagnostics);
+GUANCE_RUM_EXPORT int guance_rum_write_line(guance_rum_handle handle, const char* line, size_t length);
 
 GUANCE_RUM_EXPORT void guance_rum_set_user(guance_rum_handle handle, const char* id, const char* name, const char* email);
 GUANCE_RUM_EXPORT void guance_rum_clear_user(guance_rum_handle handle);

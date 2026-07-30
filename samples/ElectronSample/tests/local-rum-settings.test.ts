@@ -108,6 +108,23 @@ describe("loadLocalRumSettings", () => {
     });
   });
 
+  it("uses the shared webViewUrl for Electron mixed mode and allows LAN HTTP", () => {
+    const {
+      createLocalRumSettingsReader,
+      isSupportedWebViewUrl,
+      resolveWebViewUrl,
+    } = require("../src/main/local-rum-settings.cjs");
+    const reader = createLocalRumSettingsReader({
+      environment: {},
+      settings: {
+        webViewUrl: "http://private.example.test:8000",
+      },
+    });
+
+    expect(resolveWebViewUrl(reader)).toBe("http://private.example.test:8000");
+    expect(isSupportedWebViewUrl(resolveWebViewUrl(reader))).toBe(true);
+  });
+
   it("only accepts an executable-sidecar JSON file in packaged mode", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "guance-electron-packaged-config-"));
     temporaryDirectories.push(root);
