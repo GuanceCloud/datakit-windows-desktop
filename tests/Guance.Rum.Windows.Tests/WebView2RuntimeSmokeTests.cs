@@ -9,6 +9,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using Guance.Rum.Windows.Queue;
+using Guance.Rum.Windows.Samples;
 using Guance.Rum.Windows.SessionReplay;
 using Guance.Rum.Windows.Transport;
 using Microsoft.Web.WebView2.Wpf;
@@ -27,11 +28,12 @@ public sealed class WebView2RuntimeSmokeTests
     [WebViewRuntimeFact]
     public async Task WebView2Runtime_CollectsConfiguredPageInteractionErrorAndRequest()
     {
-        var configuredUrl = Environment.GetEnvironmentVariable(TestUrlEnvironmentVariable);
+        var settings = LoadRuntimeSettings();
+        var configuredUrl = settings.WebViewUrl;
         Assert.True(
             Uri.TryCreate(configuredUrl, UriKind.Absolute, out var testUri) &&
             testUri.Scheme is "http" or "https",
-            $"{TestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.");
+            $"webViewUrl/{TestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.");
 
         await RunStaAsync(() =>
         {
@@ -160,11 +162,12 @@ public sealed class WebView2RuntimeSmokeTests
     [Trait("Category", "Phase2")]
     public async Task WebView2Runtime_MergesBrowserReplayIntoNativeWebViewSlot()
     {
-        var configuredUrl = Environment.GetEnvironmentVariable(TestUrlEnvironmentVariable);
+        var settings = LoadRuntimeSettings();
+        var configuredUrl = settings.WebViewUrl;
         Assert.True(
             Uri.TryCreate(configuredUrl, UriKind.Absolute, out var testUri) &&
             testUri.Scheme is "http" or "https",
-            $"{TestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.");
+            $"webViewUrl/{TestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.");
 
         await RunStaAsync(() =>
         {
@@ -292,14 +295,15 @@ public sealed class WebView2RuntimeSmokeTests
     [Trait("Category", "Phase2")]
     public async Task WebView2Runtime_UploadsMergedReplayToDataway()
     {
-        var configuredUrl = Environment.GetEnvironmentVariable(TestUrlEnvironmentVariable);
-        var datawayUrl = Environment.GetEnvironmentVariable(DatawayUrlEnvironmentVariable);
-        var clientToken = Environment.GetEnvironmentVariable(ClientTokenEnvironmentVariable);
-        var appId = Environment.GetEnvironmentVariable(AppIdEnvironmentVariable);
+        var settings = LoadRuntimeSettings();
+        var configuredUrl = settings.WebViewUrl;
+        var datawayUrl = settings.Rum.DatawayUrl;
+        var clientToken = settings.Rum.ClientToken;
+        var appId = settings.Rum.RumAppId;
         Assert.True(
             Uri.TryCreate(configuredUrl, UriKind.Absolute, out var testUri) &&
             testUri.Scheme is "http" or "https",
-            $"{TestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.");
+            $"webViewUrl/{TestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.");
 
         var validationRunId = "webview-slot-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
         await RunStaAsync(() =>
@@ -463,9 +467,9 @@ public sealed class WebView2RuntimeSmokeTests
     {
         public WebViewRuntimeFactAttribute()
         {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(TestUrlEnvironmentVariable)))
+            if (string.IsNullOrWhiteSpace(LoadRuntimeSettings().WebViewUrl))
             {
-                Skip = $"{TestUrlEnvironmentVariable} is not set; WebView2 runtime smoke test skipped.";
+                Skip = $"webViewUrl or {TestUrlEnvironmentVariable} is not set; WebView2 runtime smoke test skipped.";
             }
         }
     }
@@ -474,21 +478,34 @@ public sealed class WebView2RuntimeSmokeTests
     {
         public WebViewDatawayValidationFactAttribute()
         {
-            var required = new[]
+            var settings = LoadRuntimeSettings();
+            var missing = new List<string>();
+            if (string.IsNullOrWhiteSpace(settings.WebViewUrl))
             {
-                TestUrlEnvironmentVariable,
-                DatawayUrlEnvironmentVariable,
-                ClientTokenEnvironmentVariable,
-                AppIdEnvironmentVariable
-            };
-            var missing = required
-                .Where(name => string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name)))
-                .ToArray();
-            if (missing.Length > 0)
+                missing.Add($"webViewUrl/{TestUrlEnvironmentVariable}");
+            }
+            if (string.IsNullOrWhiteSpace(settings.Rum.DatawayUrl))
             {
-                Skip = "Missing environment variables: " + string.Join(", ", missing);
+                missing.Add($"datawayUrl/{DatawayUrlEnvironmentVariable}");
+            }
+            if (string.IsNullOrWhiteSpace(settings.Rum.ClientToken))
+            {
+                missing.Add($"clientToken/{ClientTokenEnvironmentVariable}");
+            }
+            if (string.IsNullOrWhiteSpace(settings.Rum.RumAppId))
+            {
+                missing.Add($"rumAppId/{AppIdEnvironmentVariable}");
+            }
+            if (missing.Count > 0)
+            {
+                Skip = "Missing RUM settings: " + string.Join(", ", missing);
             }
         }
+    }
+
+    private static SampleRumSettings LoadRuntimeSettings()
+    {
+        return SampleRumConfig.Resolve("", "", Array.Empty<string>());
     }
 
     private static bool ContainsMeasurements(IRumQueue queue, params string[] measurements)

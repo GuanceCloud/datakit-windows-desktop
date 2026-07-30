@@ -14,6 +14,11 @@ const {
   Notification,
   session,
 } = require("electron");
+const {
+  createLocalRumSettingsReader,
+  loadLocalRumSettings,
+  resolveRumIngestionConfiguration,
+} = require("./local-rum-settings.cjs");
 
 const DEV_RENDERER_URL = process.env.ELECTRON_RENDERER_URL;
 const IS_SMOKE = process.env.ELECTRON_SMOKE === "1";
@@ -31,27 +36,44 @@ let mainWindow;
 let remoteWindow;
 let apiServer;
 let apiBaseUrl;
+let localRumSettingsReader = createLocalRumSettingsReader({
+  environment: process.env,
+  settings: {},
+});
 
-function readEnvironment(name, fallback = "") {
-  const value = process.env[name];
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+function initializeLocalRumSettings() {
+  const local = IS_SMOKE
+    ? { filePath: undefined, settings: {} }
+    : loadLocalRumSettings({
+        currentDirectory: process.cwd(),
+        appPath: app.getAppPath(),
+        executablePath: process.execPath,
+        isPackaged: app.isPackaged,
+      });
+  localRumSettingsReader = createLocalRumSettingsReader({
+    environment: process.env,
+    settings: local.settings,
+  });
+  if (local.filePath) {
+    console.log(`[electron-main] loaded local RUM settings from ${local.filePath}`);
+  }
 }
 
-function readBooleanEnvironment(name, fallback = false) {
-  const value = readEnvironment(name).toLowerCase();
-  if (value === "true" || value === "1") {
-    return true;
-  }
-  if (value === "false" || value === "0") {
-    return false;
-  }
-  return fallback;
+function readConfiguration(environmentName, jsonName, fallback = "") {
+  return localRumSettingsReader.readString(environmentName, jsonName, fallback);
+}
+
+function readBooleanConfiguration(environmentName, jsonName, fallback = false) {
+  return localRumSettingsReader.readBoolean(environmentName, jsonName, fallback);
+}
+
+function readNumberConfiguration(environmentName, jsonName, fallback) {
+  return localRumSettingsReader.readNumber(environmentName, jsonName, fallback);
 }
 
 function createBootstrap(isRemoteRenderer = false) {
-  const datawayUrl = readEnvironment("GUANCE_RUM_DATAWAY_URL");
-  const datakitUrl = readEnvironment(
-    "GUANCE_RUM_DATAKIT_URL",
+  const { datawayUrl, datakitUrl } = resolveRumIngestionConfiguration(
+    localRumSettingsReader,
     IS_SMOKE ? "http://127.0.0.1:9" : "http://127.0.0.1:9529",
   );
 
@@ -73,20 +95,35 @@ function createBootstrap(isRemoteRenderer = false) {
           : "packaged-file",
     },
     rum: {
-      applicationId: readEnvironment("GUANCE_RUM_APP_ID", IS_SMOKE ? "electron-smoke" : ""),
-      clientToken: readEnvironment("GUANCE_RUM_CLIENT_TOKEN"),
+      applicationId: readConfiguration(
+        "GUANCE_RUM_APP_ID",
+        "rumAppId",
+        IS_SMOKE ? "electron-smoke" : "",
+      ),
+      clientToken: readConfiguration("GUANCE_RUM_CLIENT_TOKEN", "clientToken"),
       site: datawayUrl,
       datakitOrigin: datawayUrl ? "" : datakitUrl,
-      service: readEnvironment("GUANCE_RUM_SERVICE_NAME", "guance-rum-windows-electron"),
-      env: readEnvironment("GUANCE_RUM_ENV", "local"),
-      version: readEnvironment("GUANCE_RUM_VERSION", app.getVersion()),
-      debug: readBooleanEnvironment("GUANCE_RUM_DEBUG", true),
-      sessionSampleRate: Number(readEnvironment("GUANCE_RUM_SAMPLE_RATE", "100")),
+      service: readConfiguration(
+        "GUANCE_RUM_SERVICE_NAME",
+        "serviceName",
+        "guance-rum-windows-electron",
+      ),
+      env: readConfiguration("GUANCE_RUM_ENV", "env", "local"),
+      version: readConfiguration("GUANCE_RUM_VERSION", "version", app.getVersion()),
+      debug: readBooleanConfiguration("GUANCE_RUM_DEBUG", "debug", true),
+      sessionSampleRate: readNumberConfiguration(
+        "GUANCE_RUM_SAMPLE_RATE",
+        "sessionSampleRate",
+        100,
+      ),
       userId: ACCEPTANCE_USER_ID,
     },
     hybrid: {
       localOrigin: isRemoteRenderer ? apiBaseUrl : DEV_RENDERER_URL || "file://",
-      remoteUrl: readEnvironment("GUANCE_RUM_ELECTRON_REMOTE_URL"),
+      remoteUrl: readConfiguration(
+        "GUANCE_RUM_ELECTRON_REMOTE_URL",
+        "electronRemoteUrl",
+      ),
       remoteAvailable: true,
       isRemoteRenderer,
       apiBaseUrl,
@@ -291,7 +328,10 @@ function onTrusted(channel, handler) {
 }
 
 async function createRemoteWindow({ forceBuiltIn = false } = {}) {
-  const configuredUrl = readEnvironment("GUANCE_RUM_ELECTRON_REMOTE_URL");
+  const configuredUrl = readConfiguration(
+    "GUANCE_RUM_ELECTRON_REMOTE_URL",
+    "electronRemoteUrl",
+  );
   const remoteUrl = !forceBuiltIn && configuredUrl ? configuredUrl : `${apiBaseUrl}/remote/`;
   if (!isAllowedRemoteUrl(remoteUrl)) {
     return { opened: false, reason: "Only HTTPS or loopback HTTP remote URLs are allowed." };
@@ -574,12 +614,16 @@ function createMainWindow() {
   }
   void mainWindow.loadURL(rendererEntry);
 
-  if (readBooleanEnvironment("GUANCE_RUM_ELECTRON_DEVTOOLS")) {
+  if (readBooleanConfiguration(
+    "GUANCE_RUM_ELECTRON_DEVTOOLS",
+    "electronDevTools",
+  )) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 }
 
 app.whenReady().then(async () => {
+  initializeLocalRumSettings();
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);

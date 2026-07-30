@@ -338,7 +338,7 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <TextBlock x:Name="WebViewTestStatus"
-                               Text="Set GUANCE_RUM_WEBVIEW_TEST_URL to load the WebView2 smoke page."
+                               Text="Set webViewUrl in rum.local.json or GUANCE_RUM_WEBVIEW_TEST_URL to load the WebView2 smoke page."
                                Margin="0,0,0,10"
                                Foreground="#475569"
                                TextWrapping="Wrap" />

@@ -11,6 +11,8 @@ npm install
 npm run dev
 ```
 
+The Electron and managed samples share `../rum.local.json`. Copy `../rum.local.json.example`, then edit the ignored local file. Environment variables override matching JSON values. A packaged application reads `rum.local.json` beside the executable.
+
 Build and verify the standalone Windows x64 desktop application:
 
 ```powershell

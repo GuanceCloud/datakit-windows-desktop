@@ -7,12 +7,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using Guance.Rum.Windows;
+using Guance.Rum.Windows.Samples;
 
 namespace WpfSample;
 
 public partial class MainWindow : Window
 {
-    private const string WebViewTestUrlEnvironmentVariable = "GUANCE_RUM_WEBVIEW_TEST_URL";
     private readonly HttpClient httpClient = new(RumSdk.CreateHttpMessageHandler());
     private int sampleCounter;
     private bool diagnosticListenerAttached;
@@ -106,10 +106,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var configuredUrl = Environment.GetEnvironmentVariable(WebViewTestUrlEnvironmentVariable);
+        var configuredUrl = SampleRumConfig.WebViewUrl;
         if (string.IsNullOrWhiteSpace(configuredUrl))
         {
-            WebViewTestStatus.Text = $"WebView2 smoke page skipped: {WebViewTestUrlEnvironmentVariable} is not set.";
+            WebViewTestStatus.Text = "WebView2 smoke page skipped: set webViewUrl in rum.local.json or GUANCE_RUM_WEBVIEW_TEST_URL.";
             AppendLog(WebViewTestStatus.Text);
             return;
         }
@@ -117,7 +117,7 @@ public partial class MainWindow : Window
         if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var uri) ||
             uri.Scheme is not ("http" or "https"))
         {
-            WebViewTestStatus.Text = $"{WebViewTestUrlEnvironmentVariable} must be an absolute HTTP or HTTPS URL.";
+            WebViewTestStatus.Text = "webViewUrl must be an absolute HTTP or HTTPS URL.";
             AppendLog(WebViewTestStatus.Text);
             return;
         }

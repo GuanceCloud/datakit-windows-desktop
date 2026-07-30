@@ -14,6 +14,7 @@ const packageDirectory = path.join(
 );
 const executablePath = path.join(packageDirectory, `${applicationName}.exe`);
 const appArchivePath = path.join(packageDirectory, "resources", "app.asar");
+const settingsExamplePath = path.join(packageDirectory, "rum.local.json.example");
 const skipRuntime = process.argv.includes("--skip-runtime");
 
 function fail(message) {
@@ -27,6 +28,10 @@ if (!fs.existsSync(executablePath)) {
 
 if (!fs.existsSync(appArchivePath)) {
   fail(`missing application archive: ${appArchivePath}`);
+}
+
+if (!fs.existsSync(settingsExamplePath)) {
+  fail(`missing local settings example: ${settingsExamplePath}`);
 }
 
 if (skipRuntime) {

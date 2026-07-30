@@ -14,7 +14,30 @@ internal static class SampleRumConfig
     private const string LocalSettingsFileName = "rum.local.json";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    public static string? WebViewUrl { get; private set; }
+
     public static RumConfig Load(string defaultRumAppId, string defaultServiceName, string[]? args = null)
+    {
+        var settings = ResolveLocalSettings(defaultRumAppId, defaultServiceName, args);
+        ConfigureExceptionDiagnostics(settings);
+        var resolved = CreateResolvedSettings(settings, defaultRumAppId, defaultServiceName);
+        WebViewUrl = resolved.WebViewUrl;
+        return resolved.Rum;
+    }
+
+    public static SampleRumSettings Resolve(
+        string defaultRumAppId,
+        string defaultServiceName,
+        string[]? args = null)
+    {
+        var settings = ResolveLocalSettings(defaultRumAppId, defaultServiceName, args);
+        return CreateResolvedSettings(settings, defaultRumAppId, defaultServiceName);
+    }
+
+    private static LocalRumSettings ResolveLocalSettings(
+        string defaultRumAppId,
+        string defaultServiceName,
+        string[]? args)
     {
         var settings = new LocalRumSettings
         {
@@ -31,9 +54,15 @@ internal static class SampleRumConfig
         ApplyJsonSettings(settings);
         ApplyEnvironment(settings);
         ApplyCommandLine(settings, args ?? Environment.GetCommandLineArgs().Skip(1).ToArray());
-        ConfigureExceptionDiagnostics(settings);
+        return settings;
+    }
 
-        return new RumConfig
+    private static SampleRumSettings CreateResolvedSettings(
+        LocalRumSettings settings,
+        string defaultRumAppId,
+        string defaultServiceName)
+    {
+        var rum = new RumConfig
         {
             DatawayUrl = EmptyToNull(settings.DatawayUrl),
             DatakitUrl = EmptyToNull(settings.DatakitUrl),
@@ -49,6 +78,7 @@ internal static class SampleRumConfig
                 Enabled = false
             }
         };
+        return new SampleRumSettings(rum, EmptyToNull(settings.WebViewUrl));
     }
 
     private static void ApplyJsonSettings(LocalRumSettings settings)
@@ -80,7 +110,8 @@ internal static class SampleRumConfig
             Version = Environment.GetEnvironmentVariable("GUANCE_RUM_VERSION"),
             Debug = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DEBUG")),
             DiagnosticConsoleEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DIAGNOSTIC_CONSOLE")),
-            DiagnosticFirstChanceExceptions = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS"))
+            DiagnosticFirstChanceExceptions = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS")),
+            WebViewUrl = Environment.GetEnvironmentVariable("GUANCE_RUM_WEBVIEW_TEST_URL")
         });
     }
 
@@ -122,6 +153,9 @@ internal static class SampleRumConfig
                 case "--first-chance-exceptions":
                     commandLine.DiagnosticFirstChanceExceptions = ParseBool(value);
                     break;
+                case "--webview-url":
+                    commandLine.WebViewUrl = value;
+                    break;
             }
         }
 
@@ -151,6 +185,7 @@ internal static class SampleRumConfig
         target.Debug = source.Debug ?? target.Debug;
         target.DiagnosticConsoleEnabled = source.DiagnosticConsoleEnabled ?? target.DiagnosticConsoleEnabled;
         target.DiagnosticFirstChanceExceptions = source.DiagnosticFirstChanceExceptions ?? target.DiagnosticFirstChanceExceptions;
+        target.WebViewUrl = Coalesce(source.WebViewUrl, target.WebViewUrl);
     }
 
     private static void ConfigureExceptionDiagnostics(LocalRumSettings settings)
@@ -217,10 +252,17 @@ internal static class SampleRumConfig
             var directory = new DirectoryInfo(start);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, LocalSettingsFileName);
-                if (File.Exists(candidate))
+                foreach (var relativePath in new[]
                 {
-                    return candidate;
+                    LocalSettingsFileName,
+                    Path.Combine("samples", LocalSettingsFileName)
+                })
+                {
+                    var candidate = Path.Combine(directory.FullName, relativePath);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
                 }
 
                 directory = directory.Parent;
@@ -268,6 +310,7 @@ internal static class SampleRumConfig
         public bool? Debug { get; set; }
         public bool? DiagnosticConsoleEnabled { get; set; }
         public bool? DiagnosticFirstChanceExceptions { get; set; }
+        public string? WebViewUrl { get; set; }
     }
 
     private const int AttachParentProcess = -1;
@@ -281,3 +324,5 @@ internal static class SampleRumConfig
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetConsoleWindow();
 }
+
+internal sealed record SampleRumSettings(RumConfig Rum, string? WebViewUrl);

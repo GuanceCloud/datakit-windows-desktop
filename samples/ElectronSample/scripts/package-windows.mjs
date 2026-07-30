@@ -10,6 +10,11 @@ const packageMetadata = JSON.parse(
   fs.readFileSync(path.join(sampleRoot, "package.json"), "utf8"),
 );
 const applicationName = packageMetadata.config.windowsArtifactName;
+const settingsExamplePath = path.resolve(
+  sampleRoot,
+  "..",
+  "rum.local.json.example",
+);
 
 const applicationPaths = await packager({
   dir: sampleRoot,
@@ -42,5 +47,9 @@ const applicationPaths = await packager({
 });
 
 for (const applicationPath of applicationPaths) {
+  fs.copyFileSync(
+    settingsExamplePath,
+    path.join(applicationPath, "rum.local.json.example"),
+  );
   console.log(`[electron-package] ${applicationPath}`);
 }

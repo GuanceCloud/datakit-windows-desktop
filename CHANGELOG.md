@@ -7,6 +7,7 @@
 - Adds WPF, WinForms, WinUI 3, `HttpClient`, unhandled exception, and UI-thread block collection.
 - Adds a complex Electron hybrid UI acceptance sample using the official Browser RUM SDK, with Vite/file rendering, a secure native bridge, deterministic resources, and all five Phase 1 RUM signals.
 - Adds a verified, standalone Windows x64 Electron application artifact for browser-independent desktop acceptance.
+- Unifies managed and Electron sample configuration through `rum.local.json`, including `webViewUrl` for WebView2 acceptance and an executable-sidecar configuration flow for packaged Electron.
 - Packages native runtime assets for `win-x64`, `win-arm64`, and `win-x86` when corresponding DLLs are built before packing.
 - Hardens native WinHTTP upload diagnostics/configuration and extends the native C ABI with scoped actions and resource metadata.
 - Retains the experimental Session Replay implementation for Phase 2; all Phase 1 samples keep it disabled by default.
