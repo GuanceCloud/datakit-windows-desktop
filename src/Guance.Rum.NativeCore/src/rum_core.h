@@ -1,6 +1,8 @@
 #pragma once
 
 #include "guance_rum.h"
+#include "crash_envelope.h"
+#include "hang_state_machine.h"
 #include "line_protocol.h"
 #include "queue_store.h"
 
@@ -14,6 +16,8 @@
 #include <vector>
 
 namespace guance::rum {
+
+class NativeMonitoring;
 
 struct Config {
     std::string dataway_url;
@@ -61,6 +65,7 @@ struct NativeDiagnostics {
 class RumCore {
 public:
     explicit RumCore(Config config);
+    ~RumCore();
     void flush();
     void shutdown();
     NativeDiagnostics diagnostics() const;
@@ -89,6 +94,14 @@ public:
     void set_session_replay_text_privacy(uintptr_t hwnd, guance_rum_session_replay_text_privacy privacy);
     void set_session_replay_touch_privacy(uintptr_t hwnd, guance_rum_session_replay_touch_privacy privacy);
     void set_session_replay_hidden(uintptr_t hwnd, bool hidden);
+    bool enable_native_monitoring(const guance_rum_native_monitoring_config& config);
+    void disable_native_monitoring();
+    void add_ui_hang_event(const HangEvent& event, const std::string& stack);
+    bool add_recovered_crash(
+        const CrashEnvelope& envelope,
+        const std::filesystem::path& minidump_path);
+    std::filesystem::path default_native_crash_path() const;
+    void log_native_monitoring(const std::string& message) const;
 
 private:
     struct View {
@@ -143,7 +156,7 @@ private:
     };
 
     RumEvent base_event(const std::string& measurement, int64_t timestamp_ns);
-    void enqueue(RumEvent event);
+    bool enqueue(RumEvent event);
     bool sampled_for(const std::string& measurement) const;
     void capture_session_replay_snapshot();
     std::string build_session_replay_snapshot_record(int64_t timestamp_ms);
@@ -166,6 +179,7 @@ private:
     std::unordered_map<std::string, Resource> resources_;
     std::unique_ptr<QueueStore> queue_;
     std::unique_ptr<QueueStore> replay_queue_;
+    std::unique_ptr<NativeMonitoring> native_monitoring_;
     std::vector<ReplaySegment> replay_error_buffer_;
     std::vector<ReplayPendingRecord> replay_pending_records_;
     std::vector<uintptr_t> replay_windows_;

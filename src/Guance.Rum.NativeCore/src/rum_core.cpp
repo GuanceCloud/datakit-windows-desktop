@@ -1,4 +1,6 @@
 #include "rum_core.h"
+
+#include "native_monitoring.h"
 #include "transport.h"
 
 #include <algorithm>
@@ -645,6 +647,11 @@ RumCore::RumCore(Config config)
     session_replay_recording_ = config_.session_replay_enabled && (session_replay_sampled_ || session_replay_error_sampled_);
     queue_ = std::make_unique<QueueStore>(config_.cache_path, config_.max_queue_items, config_.max_queue_bytes);
     replay_queue_ = std::make_unique<QueueStore>(replay_queue_path(config_.cache_path), config_.max_queue_items, config_.max_queue_bytes);
+    native_monitoring_ = std::make_unique<NativeMonitoring>(*this);
+}
+
+RumCore::~RumCore() {
+    disable_native_monitoring();
 }
 
 void RumCore::flush() {
@@ -723,6 +730,7 @@ void RumCore::flush() {
 }
 
 void RumCore::shutdown() {
+    disable_native_monitoring();
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native] shutdown stopping active view" << std::endl;
     }
@@ -733,6 +741,21 @@ void RumCore::shutdown() {
     flush();
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native] shutdown flush completed" << std::endl;
+    }
+}
+
+bool RumCore::enable_native_monitoring(const guance_rum_native_monitoring_config& config) {
+    const bool enabled = native_monitoring_ && native_monitoring_->enable(config);
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native.Monitoring] enable "
+                  << (enabled ? "completed" : "rejected") << std::endl;
+    }
+    return enabled;
+}
+
+void RumCore::disable_native_monitoring() {
+    if (native_monitoring_) {
+        native_monitoring_->disable();
     }
 }
 
@@ -1107,6 +1130,123 @@ void RumCore::add_long_task(int64_t duration_ns, const char* stack) {
     enqueue(std::move(event));
 }
 
+void RumCore::add_ui_hang_event(const HangEvent& hang, const std::string& stack) {
+    std::lock_guard lock(mutex_);
+    const auto duration_ns = non_negative_duration(hang.duration_ms) * 1'000'000;
+    const auto threshold_ns = non_negative_duration(hang.threshold_ms) * 1'000'000;
+
+    if (hang.kind == HangEventKind::LongTask) {
+        if (config_.debug) {
+            std::cout << "[Guance.RUM.Native.Monitoring] UI recovered incident="
+                      << hang.incident_id << " kind=long_task duration_ms="
+                      << hang.duration_ms << std::endl;
+        }
+        RumEvent event = base_event("long_task", unix_time_before(duration_ns));
+        event.tags["long_task_detection"] = "ui_watchdog";
+        event.tags["hang_id"] = hang.incident_id;
+        if (active_view_) {
+            event.tags["view_id"] = active_view_->id;
+            event.tags["view_name"] = active_view_->name;
+            event.tags["view_referrer"] = active_view_->referrer;
+            active_view_->long_task_count++;
+        }
+        if (const auto action = current_action_locked()) {
+            event.tags["action_id"] = action->id;
+            event.tags["action_name"] = action->name;
+            const auto it = active_actions_.find(action->id);
+            if (it != active_actions_.end()) {
+                it->second.long_task_count++;
+            }
+        }
+        event.fields["duration"] = duration_ns;
+        event.fields["long_task_stack"] = stack;
+        event.fields["long_task_threshold"] = threshold_ns;
+        enqueue(std::move(event));
+        return;
+    }
+
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native.Monitoring] UI recovered incident="
+                  << hang.incident_id << " kind=hang duration_ms="
+                  << hang.duration_ms << std::endl;
+    }
+    RumEvent event = base_event("error", unix_time_before(duration_ns));
+    event.tags["error_type"] = "ApplicationNotResponding";
+    event.tags["error_source"] = "logger";
+    event.tags["error_situation"] = "run";
+    event.tags["error_origin"] = "ui_watchdog";
+    event.tags["hang_id"] = hang.incident_id;
+    if (active_view_) {
+        event.tags["view_id"] = active_view_->id;
+        event.tags["view_name"] = active_view_->name;
+        event.tags["view_referrer"] = active_view_->referrer;
+        active_view_->error_count++;
+    }
+    if (const auto action = current_action_locked()) {
+        event.tags["action_id"] = action->id;
+        event.tags["action_name"] = action->name;
+        const auto it = active_actions_.find(action->id);
+        if (it != active_actions_.end()) {
+            it->second.error_count++;
+        }
+    }
+    event.fields["error_message"] = std::string{"UI thread was unresponsive"};
+    event.fields["error_stack"] = stack;
+    event.fields["duration"] = duration_ns;
+    event.fields["hang_threshold"] = threshold_ns;
+    enqueue(std::move(event));
+}
+
+bool RumCore::add_recovered_crash(
+    const CrashEnvelope& crash,
+    const std::filesystem::path& minidump_path) {
+    std::lock_guard lock(mutex_);
+    RumEvent event = base_event("error", crash.timestamp_ns);
+    const bool cpp_terminate = (crash.flags & CrashEnvelopeCppTerminate) != 0;
+    event.tags["error_type"] = cpp_terminate ? "CppTerminate" : "NativeCrash";
+    event.tags["error_source"] = "logger";
+    event.tags["error_situation"] = "startup";
+    event.tags["error_origin"] = "native_crash_recovery";
+    event.fields["error_message"] = cpp_terminate
+        ? std::string{"Previous run ended in std::terminate"}
+        : std::string{"Previous run ended in an unhandled native exception"};
+
+    std::ostringstream stack;
+    const auto instruction_pointer = crash.instruction_pointer != 0
+        ? crash.instruction_pointer
+        : crash.exception_address;
+    if (instruction_pointer != 0) {
+        stack << "0x" << std::hex << instruction_pointer;
+    }
+    event.fields["error_stack"] = stack.str();
+    event.fields["crash_previous_run"] = true;
+    event.fields["crash_exception_code"] = static_cast<int64_t>(crash.exception_code_value);
+    event.fields["crash_exception_address"] = static_cast<int64_t>(crash.exception_address);
+    event.fields["crash_process_id"] = static_cast<int64_t>(crash.process_id);
+    event.fields["crash_thread_id"] = static_cast<int64_t>(crash.thread_id);
+    event.fields["crash_timestamp"] = crash.timestamp_ns;
+    event.fields["crash_has_minidump"] =
+        (crash.flags & CrashEnvelopeHasMinidump) != 0 && !minidump_path.empty();
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native.Monitoring] recovered previous-run crash type="
+                  << (cpp_terminate ? "CppTerminate" : "NativeCrash") << std::endl;
+    }
+    return enqueue(std::move(event));
+}
+
+std::filesystem::path RumCore::default_native_crash_path() const {
+    const auto queue_path = config_.cache_path.empty()
+        ? std::filesystem::path(default_queue_path())
+        : std::filesystem::path(config_.cache_path);
+    return queue_path.parent_path() / "crashes";
+}
+
+void RumCore::log_native_monitoring(const std::string& message) const {
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native.Monitoring] " << message << std::endl;
+    }
+}
+
 void RumCore::start_session_replay() {
     std::lock_guard lock(mutex_);
     if (!config_.session_replay_enabled) {
@@ -1433,12 +1573,15 @@ RumEvent RumCore::base_event(const std::string& measurement, int64_t timestamp_n
     return event;
 }
 
-void RumCore::enqueue(RumEvent event) {
+bool RumCore::enqueue(RumEvent event) {
     if (!sampled_for(event.measurement)) {
-        return;
+        // Sampling is a terminal decision. Recovered crash envelopes must not
+        // be retried forever when the application intentionally samples them out.
+        return true;
     }
+    const bool persisted = queue_->enqueue(format_line_protocol(event));
     rum_events_enqueued_.fetch_add(1);
-    queue_->enqueue(format_line_protocol(event));
+    return persisted;
 }
 
 void RumCore::record_rum_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms) {

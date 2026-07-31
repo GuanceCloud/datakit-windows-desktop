@@ -1,5 +1,7 @@
 #include "rum_core.h"
 
+#include "native_crash_reporter.h"
+
 #include <memory>
 #include <string>
 
@@ -24,6 +26,22 @@ void guance_rum_config_init(guance_rum_config* config) {
     config->http_timeout_ms = 10000;
     config->session_replay_segment_record_limit = 500;
     config->session_replay_segment_bytes_limit = 1024 * 1024;
+}
+
+void guance_rum_native_monitoring_config_init(
+    guance_rum_native_monitoring_config* config) {
+    if (config == nullptr) {
+        return;
+    }
+    *config = guance_rum_native_monitoring_config{};
+    config->struct_size = sizeof(guance_rum_native_monitoring_config);
+    config->version = GUANCE_RUM_NATIVE_MONITORING_CONFIG_VERSION;
+    config->ui_probe_interval_ms = 250;
+    config->long_task_threshold_ms = 500;
+    config->hang_threshold_ms = 5'000;
+    config->hang_report_cooldown_ms = 5'000;
+    config->max_crash_files = 3;
+    config->max_crash_file_bytes = 32LL * 1024 * 1024;
 }
 
 guance_rum_handle guance_rum_init(const guance_rum_config* config) {
@@ -84,6 +102,34 @@ int guance_rum_write_line(guance_rum_handle handle, const char* line, size_t len
     } catch (...) {
         return 0;
     }
+}
+
+int guance_rum_enable_native_monitoring(
+    guance_rum_handle handle,
+    const guance_rum_native_monitoring_config* config) {
+    if (handle == nullptr || config == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->enable_native_monitoring(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+void guance_rum_disable_native_monitoring(guance_rum_handle handle) {
+    if (handle == nullptr) {
+        return;
+    }
+    try {
+        static_cast<RumCore*>(handle)->disable_native_monitoring();
+    } catch (...) {
+        // Public C ABI calls must not propagate C++ exceptions.
+    }
+}
+
+void guance_rum_capture_cpp_terminate(void) {
+    guance::rum::NativeCrashReporter::capture_cpp_terminate_now();
 }
 
 void guance_rum_set_user(guance_rum_handle handle, const char* id, const char* name, const char* email) {

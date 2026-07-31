@@ -19,6 +19,7 @@ namespace {
 constexpr std::size_t kMaxInputLineBytes = 1024 * 1024;
 constexpr auto kFlushInterval = std::chrono::seconds(1);
 constexpr const char* kLaunchCommandPrefix = "@guance-launch\t";
+constexpr const char* kErrorCommandPrefix = "@guance-error\t";
 
 std::string utf8_from_wide(const std::wstring& value) {
     if (value.empty()) {
@@ -162,7 +163,7 @@ void log_diagnostics(
         << std::endl;
 }
 
-enum class LaunchCommandResult {
+enum class ControlCommandResult {
     not_command,
     accepted,
     rejected
@@ -178,34 +179,34 @@ bool parse_int64(const std::string& value, int64_t& result) {
     }
 }
 
-LaunchCommandResult handle_launch_command(
+ControlCommandResult handle_launch_command(
     guance_rum_handle handle,
     const std::string& line,
     bool debug) {
     if (line.rfind(kLaunchCommandPrefix, 0) != 0) {
-        return LaunchCommandResult::not_command;
+        return ControlCommandResult::not_command;
     }
 
     std::istringstream input(line);
     std::string part;
     if (!std::getline(input, part, '\t') || part != "@guance-launch") {
-        return LaunchCommandResult::rejected;
+        return ControlCommandResult::rejected;
     }
     std::unordered_map<std::string, std::string> fields;
     while (std::getline(input, part, '\t')) {
         const auto separator = part.find('=');
         if (separator == std::string::npos ||
             !fields.emplace(part.substr(0, separator), part.substr(separator + 1)).second) {
-            return LaunchCommandResult::rejected;
+            return ControlCommandResult::rejected;
         }
     }
     if (fields.size() != 6) {
-        return LaunchCommandResult::rejected;
+        return ControlCommandResult::rejected;
     }
 
     const auto type = fields.find("type");
     if (type == fields.end() || (type->second != "cold" && type->second != "hot")) {
-        return LaunchCommandResult::rejected;
+        return ControlCommandResult::rejected;
     }
 
     guance_rum_launch launch{};
@@ -223,7 +224,7 @@ LaunchCommandResult handle_launch_command(
         !parse_int64(
             fields["first_frame_duration_ns"],
             launch.first_frame_duration_ns)) {
-        return LaunchCommandResult::rejected;
+        return ControlCommandResult::rejected;
     }
     guance_rum_add_launch_action(handle, &launch);
     if (debug) {
@@ -233,7 +234,98 @@ LaunchCommandResult handle_launch_command(
             << " duration_ns=" << launch.duration_ns
             << std::endl;
     }
-    return LaunchCommandResult::accepted;
+    return ControlCommandResult::accepted;
+}
+
+int hex_value(char value) {
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'a' && value <= 'f') {
+        return value - 'a' + 10;
+    }
+    if (value >= 'A' && value <= 'F') {
+        return value - 'A' + 10;
+    }
+    return -1;
+}
+
+bool percent_decode(const std::string& input, std::string& output) {
+    output.clear();
+    output.reserve(input.size());
+    for (std::size_t index = 0; index < input.size(); index++) {
+        if (input[index] != '%') {
+            output.push_back(input[index]);
+            continue;
+        }
+        if (index + 2 >= input.size()) {
+            return false;
+        }
+        const int high = hex_value(input[index + 1]);
+        const int low = hex_value(input[index + 2]);
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        const char decoded = static_cast<char>((high << 4) | low);
+        if (decoded == '\0' || decoded == '\r' || decoded == '\n') {
+            return false;
+        }
+        output.push_back(decoded);
+        index += 2;
+    }
+    return true;
+}
+
+ControlCommandResult handle_error_command(
+    guance_rum_handle handle,
+    const std::string& line,
+    bool debug) {
+    if (line.rfind(kErrorCommandPrefix, 0) != 0) {
+        return ControlCommandResult::not_command;
+    }
+
+    std::istringstream input(line);
+    std::string part;
+    if (!std::getline(input, part, '\t') || part != "@guance-error") {
+        return ControlCommandResult::rejected;
+    }
+    std::unordered_map<std::string, std::string> fields;
+    while (std::getline(input, part, '\t')) {
+        const auto separator = part.find('=');
+        if (separator == std::string::npos ||
+            !fields.emplace(part.substr(0, separator), part.substr(separator + 1)).second) {
+            return ControlCommandResult::rejected;
+        }
+    }
+    if (fields.size() != 2) {
+        return ControlCommandResult::rejected;
+    }
+
+    const auto type = fields.find("type");
+    const bool supported_type = type != fields.end() &&
+                                (type->second == "ElectronRendererProcessGone" ||
+                                 type->second == "ElectronRendererUnresponsive");
+    std::string message;
+    if (!supported_type ||
+        !percent_decode(fields["message"], message) ||
+        message.empty() ||
+        message.size() > 2048) {
+        return ControlCommandResult::rejected;
+    }
+
+    guance_rum_add_error(
+        handle,
+        "",
+        message.c_str(),
+        type->second.c_str(),
+        "logger");
+    if (debug) {
+        std::cout
+            << "[Guance.RUM.NativeBridge] Electron process failure"
+            << " type=" << type->second
+            << std::endl;
+    }
+    return ControlCommandResult::accepted;
 }
 
 } // namespace
@@ -304,11 +396,19 @@ int main() {
                 continue;
             }
             const auto launch_result = handle_launch_command(handle, line, host.debug);
-            if (launch_result == LaunchCommandResult::accepted) {
+            if (launch_result == ControlCommandResult::accepted) {
                 continue;
             }
-            if (launch_result == LaunchCommandResult::rejected) {
+            if (launch_result == ControlCommandResult::rejected) {
                 std::cerr << "[Guance.RUM.NativeBridge] rejected invalid launch command" << std::endl;
+                continue;
+            }
+            const auto error_result = handle_error_command(handle, line, host.debug);
+            if (error_result == ControlCommandResult::accepted) {
+                continue;
+            }
+            if (error_result == ControlCommandResult::rejected) {
+                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid error command" << std::endl;
                 continue;
             }
             line.push_back('\n');

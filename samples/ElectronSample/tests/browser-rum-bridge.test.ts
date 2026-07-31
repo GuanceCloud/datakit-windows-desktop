@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ const {
   NativeRumHost,
   createNativeEnvironment,
 } = require("../src/main/native-rum-host.cjs");
+const { monitorElectronWindow } = require("../src/main/electron-process-monitor.cjs");
 const preloadSource = readFileSync(
   new URL("../src/main/preload.cjs", import.meta.url),
   "utf8",
@@ -133,6 +135,37 @@ describe("Browser RUM WebView-compatible bridge", () => {
 });
 
 describe("Electron native host adapter", () => {
+  it("reports renderer termination and one recovered unresponsive incident", () => {
+    const window = new EventEmitter() as EventEmitter & { webContents: EventEmitter };
+    window.webContents = new EventEmitter();
+    const sendProcessFailure = vi.fn();
+    let now = 1_000;
+
+    monitorElectronWindow(window, {
+      label: "main-renderer",
+      sendProcessFailure,
+      now: () => now,
+    });
+
+    window.emit("unresponsive");
+    now = 1_750;
+    window.emit("unresponsive");
+    window.emit("responsive");
+    window.emit("responsive");
+    window.webContents.emit("render-process-gone", {}, { reason: "crashed", exitCode: 11 });
+    window.emit("responsive");
+
+    expect(sendProcessFailure).toHaveBeenCalledTimes(2);
+    expect(sendProcessFailure.mock.calls[0][0]).toEqual({
+      type: "ElectronRendererUnresponsive",
+      message: "main-renderer was unresponsive for 750 ms",
+    });
+    expect(sendProcessFailure.mock.calls[1][0]).toEqual({
+      type: "ElectronRendererProcessGone",
+      message: "main-renderer process ended: reason=crashed exit_code=11",
+    });
+  });
+
   it("passes configuration through a private child-process environment", () => {
     const environment = createNativeEnvironment(
       {
@@ -192,13 +225,26 @@ describe("Electron native host adapter", () => {
       applicationDurationNanoseconds: 20n,
       firstFrameDurationNanoseconds: 20n,
     })).toBe(true);
-    expect(write).toHaveBeenCalledTimes(2);
+    expect(nativeHost.sendProcessFailure({
+      type: "ElectronRendererProcessGone",
+      message: "renderer crashed\t(exit 11)",
+    })).toBe(true);
+    expect(nativeHost.sendProcessFailure({
+      type: "NotTrusted",
+      message: "must be rejected",
+    })).toBe(false);
+    expect(write).toHaveBeenCalledTimes(3);
     expect(write.mock.calls[0][0]).toContain("app_id=win_sample");
     expect(write.mock.calls[0][1]).toBe("utf8");
     expect(write.mock.calls[1]).toEqual([
       "@guance-launch\ttype=cold\tstart_time_ns=100\tduration_ns=60\t" +
         "pre_application_duration_ns=20\tapplication_duration_ns=20\t" +
         "first_frame_duration_ns=20\n",
+      "utf8",
+    ]);
+    expect(write.mock.calls[2]).toEqual([
+      "@guance-error\ttype=ElectronRendererProcessGone\t" +
+        "message=renderer%20crashed%09(exit%2011)\n",
       "utf8",
     ]);
   });

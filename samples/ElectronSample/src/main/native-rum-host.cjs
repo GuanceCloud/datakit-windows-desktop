@@ -8,6 +8,10 @@ const { browserRumEventToLine } = require("./browser-rum-line-protocol.cjs");
 const NATIVE_HOST_FILE = "guance_rum_electron_bridge.exe";
 const NATIVE_CORE_FILE = "guance_rum_native.dll";
 const MAX_INT64 = 9_223_372_036_854_775_807n;
+const PROCESS_FAILURE_TYPES = new Set([
+  "ElectronRendererProcessGone",
+  "ElectronRendererUnresponsive",
+]);
 
 function launchInteger(value, name) {
   const text = String(value);
@@ -199,6 +203,42 @@ class NativeRumHost {
       this.rejected += 1;
       this.logger.error(
         `[electron-main][rum-bridge] rejected launch payload: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+      return false;
+    }
+  }
+
+  sendProcessFailure({ type, message }) {
+    if (!this.child?.stdin?.writable) {
+      this.rejected += 1;
+      this.logger.error("[electron-main][rum-bridge] native host is unavailable");
+      return false;
+    }
+
+    try {
+      if (!PROCESS_FAILURE_TYPES.has(type)) {
+        throw new Error("process failure type is not trusted.");
+      }
+      if (typeof message !== "string" || message.length === 0 || message.length > 512) {
+        throw new Error("process failure message must contain 1 to 512 characters.");
+      }
+      const command =
+        `@guance-error\ttype=${type}\tmessage=${encodeURIComponent(message)}\n`;
+      this.child.stdin.write(command, "utf8");
+      this.accepted += 1;
+      if (this.configuration.debug) {
+        this.logger.log(
+          `[electron-main][rum-bridge] Electron process failure -> C++ ${type} ` +
+          `accepted=${this.accepted}`,
+        );
+      }
+      return true;
+    } catch (error) {
+      this.rejected += 1;
+      this.logger.error(
+        `[electron-main][rum-bridge] rejected process failure: ${
           error instanceof Error ? error.message : "unknown error"
         }`,
       );

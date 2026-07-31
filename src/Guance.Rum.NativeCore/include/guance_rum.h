@@ -58,6 +58,27 @@ typedef struct guance_rum_diagnostics {
     int session_replay_error_sampled;
 } guance_rum_diagnostics;
 
+#define GUANCE_RUM_NATIVE_MONITORING_CONFIG_VERSION 1u
+
+typedef struct guance_rum_native_monitoring_config {
+    uint32_t struct_size;
+    uint32_t version;
+
+    int enable_ui_hang_monitoring;
+    int enable_native_crash_reporting;
+
+    uintptr_t main_window_handle;
+    int ui_probe_interval_ms;
+    int long_task_threshold_ms;
+    int hang_threshold_ms;
+    int hang_report_cooldown_ms;
+
+    const char* crash_cache_path;
+    int enable_minidump;
+    int max_crash_files;
+    int64_t max_crash_file_bytes;
+} guance_rum_native_monitoring_config;
+
 typedef enum guance_rum_launch_type {
     GUANCE_RUM_LAUNCH_COLD = 0,
     GUANCE_RUM_LAUNCH_HOT = 1
@@ -92,6 +113,13 @@ GUANCE_RUM_EXPORT void guance_rum_shutdown(guance_rum_handle handle);
 GUANCE_RUM_EXPORT void guance_rum_flush(guance_rum_handle handle);
 GUANCE_RUM_EXPORT int guance_rum_get_diagnostics(guance_rum_handle handle, guance_rum_diagnostics* diagnostics);
 GUANCE_RUM_EXPORT int guance_rum_write_line(guance_rum_handle handle, const char* line, size_t length);
+GUANCE_RUM_EXPORT void guance_rum_native_monitoring_config_init(
+    guance_rum_native_monitoring_config* config);
+GUANCE_RUM_EXPORT int guance_rum_enable_native_monitoring(
+    guance_rum_handle handle,
+    const guance_rum_native_monitoring_config* config);
+GUANCE_RUM_EXPORT void guance_rum_disable_native_monitoring(guance_rum_handle handle);
+GUANCE_RUM_EXPORT void guance_rum_capture_cpp_terminate(void);
 
 GUANCE_RUM_EXPORT void guance_rum_set_user(guance_rum_handle handle, const char* id, const char* name, const char* email);
 GUANCE_RUM_EXPORT void guance_rum_clear_user(guance_rum_handle handle);

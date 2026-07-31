@@ -83,21 +83,25 @@ QueueStore::~QueueStore() {
 #endif
 }
 
-void QueueStore::enqueue(const std::string& line) {
+bool QueueStore::enqueue(const std::string& line) {
     std::lock_guard lock(mutex_);
 #if defined(GUANCE_RUM_HAS_SQLITE)
     if (db_ != nullptr) {
         sqlite3_stmt* stmt = nullptr;
+        bool stored = false;
         if (sqlite3_prepare_v2(db_, "INSERT INTO rum_queue(line, created_at_unix_ms) VALUES (?1, strftime('%s','now') * 1000)", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, line.c_str(), static_cast<int>(line.size()), SQLITE_TRANSIENT);
-            sqlite3_step(stmt);
+            stored = sqlite3_step(stmt) == SQLITE_DONE;
         }
         sqlite3_finalize(stmt);
-        trim();
-        return;
+        if (stored) {
+            trim();
+            return true;
+        }
+        return false;
     }
 #endif
-    fallback_enqueue(line);
+    return fallback_enqueue(line);
 }
 
 std::vector<QueuedLine> QueueStore::peek(int limit) {
@@ -193,7 +197,7 @@ void QueueStore::open() {
     }
 }
 
-void QueueStore::fallback_enqueue(const std::string& line) {
+bool QueueStore::fallback_enqueue(const std::string& line) {
     const auto id = ++next_memory_id_;
     const auto final_path = fallback_directory() / queue_file_name(id);
     const auto temp_path = fallback_directory() / (queue_file_name(id) + ".tmp");
@@ -206,8 +210,11 @@ void QueueStore::fallback_enqueue(const std::string& line) {
     if (ec) {
         std::filesystem::remove(temp_path, ec);
         memory_lines_.push_back({id, line});
+        trim();
+        return false;
     }
     trim();
+    return true;
 }
 
 std::filesystem::path QueueStore::fallback_directory() const {

@@ -11,6 +11,7 @@ Windows desktop RUM SDK for reporting user behavior data to Dataway or local Dat
 - .NET automatic instrumentation entry points for WPF, WinForms, WinUI, `HttpClient`, unhandled exceptions, and UI-thread long tasks.
 - Electron hybrid UI acceptance sample with a Vite/file renderer, secure preload bridge, loopback resource tests, an independently instrumented remote renderer window, and the official Guance Browser RUM SDK.
 - Native C ABI for C/C++ safe automatic boundaries and manual behavior reporting.
+- Opt-in native Win32 UI hang detection plus next-start recovery reporting for unhandled SEH and `std::terminate`; minimal crash dumps are local-only and disabled by default.
 - Experimental Session Replay implementation for .NET and native apps. Replay validation and release support are deferred to Phase 2 and are disabled by default in every Phase 1 sample.
 - Native fallback persistence uses an on-disk FIFO file queue when SQLite is not linked, so the packaged DLL keeps failed events across process restarts.
 
@@ -157,6 +158,25 @@ Native core:
 cmake -S src/Guance.Rum.NativeCore -B build/native
 cmake --build build/native --config Release
 ```
+
+Native applications can opt into watchdog and crash recovery after creating the
+RUM handle:
+
+```cpp
+#include "guance_rum.hpp"
+
+guance_rum_native_monitoring_config monitoring;
+guance_rum_native_monitoring_config_init(&monitoring);
+monitoring.enable_ui_hang_monitoring = 1;
+monitoring.main_window_handle = reinterpret_cast<uintptr_t>(main_window);
+monitoring.enable_native_crash_reporting = 1;
+guance_rum_enable_native_monitoring(rum, &monitoring);
+```
+
+The default thresholds are 500 ms for a UI long task and 5 seconds for an
+application hang. Crash handlers only persist a bounded envelope (and,
+optionally, a local minimal dump); the RUM Error is queued on the next launch.
+See `docs/native-c-api.md` for lifecycle and C++ `std::terminate` details.
 
 On Windows machines without CMake/MSVC, the repository also includes a Zig-based validation path:
 

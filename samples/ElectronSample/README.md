@@ -6,6 +6,13 @@ Configuration, run instructions, architecture, and the acceptance flow are docum
 
 The sample pins Electron `22.3.27` and emits a Windows x64 package intended to cover Windows 7 SP1 through Windows 11. Electron 22 is end-of-life, so this compatibility build receives no Chromium, Node.js, or Electron security updates; the managed Windows SDK remains a Windows 10+ target.
 
+The main process also translates each window's `unresponsive`/`responsive` and
+`render-process-gone` signals into a strict, allow-listed native bridge command.
+Renderer hangs are reported only after recovery, with one measured duration per
+incident. Browser RUM continues to own renderer JavaScript long tasks. This
+adapter observes renderer/window process events; it does not claim to recover a
+crash of the Electron main process itself.
+
 Quick start:
 
 ```powershell

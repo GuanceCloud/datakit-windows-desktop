@@ -29,6 +29,7 @@ const {
 const {
   ElectronApplicationLaunchTracker,
 } = require("./electron-application-launch.cjs");
+const { monitorElectronWindow } = require("./electron-process-monitor.cjs");
 
 const DEV_RENDERER_URL = process.env.ELECTRON_RENDERER_URL;
 const IS_SMOKE = process.env.ELECTRON_SMOKE === "1";
@@ -502,6 +503,10 @@ async function createRemoteWindow({ forceBuiltIn = false } = {}) {
   });
   remoteWindow.removeMenu();
   secureWebContents(remoteWindow.webContents, remoteUrl);
+  monitorElectronWindow(remoteWindow, {
+    label: "remote-renderer",
+    sendProcessFailure: (failure) => nativeRumHost?.sendProcessFailure(failure),
+  });
   remoteWindow.once("ready-to-show", () => remoteWindow?.show());
   remoteWindow.on("closed", () => {
     remoteWindow = undefined;
@@ -755,6 +760,10 @@ function createMainWindow() {
 
   mainWindow.removeMenu();
   secureWebContents(mainWindow.webContents, rendererEntry);
+  monitorElectronWindow(mainWindow, {
+    label: "main-renderer",
+    sendProcessFailure: (failure) => nativeRumHost?.sendProcessFailure(failure),
+  });
   mainWindow.once("ready-to-show", () => {
     applicationLaunch.reportCold(nativeRumHost, windowCreated);
     mainWindow?.show();

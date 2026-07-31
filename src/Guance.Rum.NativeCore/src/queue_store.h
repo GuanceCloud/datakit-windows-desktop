@@ -22,14 +22,14 @@ public:
     explicit QueueStore(std::string database_path, int max_items, int64_t max_bytes);
     ~QueueStore();
 
-    void enqueue(const std::string& line);
+    bool enqueue(const std::string& line);
     std::vector<QueuedLine> peek(int limit);
     void remove(const std::vector<int64_t>& ids);
     void trim();
 
 private:
     void open();
-    void fallback_enqueue(const std::string& line);
+    bool fallback_enqueue(const std::string& line);
     std::filesystem::path fallback_directory() const;
     std::vector<QueuedLine> fallback_peek(int limit) const;
     void fallback_remove(const std::vector<int64_t>& ids);
