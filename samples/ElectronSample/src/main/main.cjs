@@ -26,6 +26,9 @@ const {
   NativeRumHost,
   resolveNativeRumPaths,
 } = require("./native-rum-host.cjs");
+const {
+  ElectronApplicationLaunchTracker,
+} = require("./electron-application-launch.cjs");
 
 const DEV_RENDERER_URL = process.env.ELECTRON_RENDERER_URL;
 const IS_SMOKE = process.env.ELECTRON_SMOKE === "1";
@@ -34,6 +37,7 @@ const DIST_ROOT = path.join(SAMPLE_ROOT, "dist");
 const ACCEPTANCE_USER_ID = `desktop-${crypto.randomUUID()}`;
 const NATIVE_SESSION_ID = crypto.randomUUID().replaceAll("-", "");
 const SMOKE_TIMEOUT_MS = 15_000;
+const applicationLaunch = new ElectronApplicationLaunchTracker();
 
 if (IS_SMOKE) {
   app.setPath("userData", path.join(os.tmpdir(), `guance-electron-smoke-${process.pid}`));
@@ -46,6 +50,7 @@ let apiServer;
 let apiBaseUrl;
 let nativeRumHost;
 let nativeRumShutdownPromise;
+let launchLifecycleInstalled = false;
 let localRumSettingsReader = createLocalRumSettingsReader({
   environment: process.env,
   settings: {},
@@ -159,10 +164,34 @@ function initializeNativeRumHost() {
     configuration,
     trustedContext: configuration.trustedContext,
   });
+  applicationLaunch.markSdkInitialized();
   nativeRumHost.start();
   console.log(
     `[electron-main][rum-bridge] Browser RUM -> C++ Core enabled (${paths.executablePath})`,
   );
+}
+
+function installLaunchLifecycle() {
+  if (launchLifecycleInstalled) {
+    return;
+  }
+  launchLifecycleInstalled = true;
+
+  app.on("browser-window-blur", () => {
+    setImmediate(() => {
+      if (!BrowserWindow.getFocusedWindow()) {
+        applicationLaunch.enterBackground();
+      }
+    });
+  });
+  app.on("browser-window-focus", (_event, window) => {
+    const foreground = applicationLaunch.beginForeground();
+    if (!foreground) {
+      return;
+    }
+
+    void applicationLaunch.reportHotAfterFrame(nativeRumHost, window, foreground);
+  });
 }
 
 function shutdownNativeRumHost() {
@@ -722,10 +751,14 @@ function createMainWindow() {
       sandbox: true,
     },
   });
+  const windowCreated = applicationLaunch.markWindowCreated();
 
   mainWindow.removeMenu();
   secureWebContents(mainWindow.webContents, rendererEntry);
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.once("ready-to-show", () => {
+    applicationLaunch.reportCold(nativeRumHost, windowCreated);
+    mainWindow?.show();
+  });
   mainWindow.on("closed", () => {
     mainWindow = undefined;
   });
@@ -746,6 +779,7 @@ function createMainWindow() {
 app.whenReady().then(async () => {
   initializeLocalRumSettings();
   initializeNativeRumHost();
+  installLaunchLifecycle();
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);

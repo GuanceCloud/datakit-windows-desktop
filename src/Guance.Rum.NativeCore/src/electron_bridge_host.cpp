@@ -8,14 +8,17 @@
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace {
 
 constexpr std::size_t kMaxInputLineBytes = 1024 * 1024;
 constexpr auto kFlushInterval = std::chrono::seconds(1);
+constexpr const char* kLaunchCommandPrefix = "@guance-launch\t";
 
 std::string utf8_from_wide(const std::wstring& value) {
     if (value.empty()) {
@@ -159,6 +162,80 @@ void log_diagnostics(
         << std::endl;
 }
 
+enum class LaunchCommandResult {
+    not_command,
+    accepted,
+    rejected
+};
+
+bool parse_int64(const std::string& value, int64_t& result) {
+    try {
+        std::size_t consumed = 0;
+        result = std::stoll(value, &consumed);
+        return consumed == value.size();
+    } catch (...) {
+        return false;
+    }
+}
+
+LaunchCommandResult handle_launch_command(
+    guance_rum_handle handle,
+    const std::string& line,
+    bool debug) {
+    if (line.rfind(kLaunchCommandPrefix, 0) != 0) {
+        return LaunchCommandResult::not_command;
+    }
+
+    std::istringstream input(line);
+    std::string part;
+    if (!std::getline(input, part, '\t') || part != "@guance-launch") {
+        return LaunchCommandResult::rejected;
+    }
+    std::unordered_map<std::string, std::string> fields;
+    while (std::getline(input, part, '\t')) {
+        const auto separator = part.find('=');
+        if (separator == std::string::npos ||
+            !fields.emplace(part.substr(0, separator), part.substr(separator + 1)).second) {
+            return LaunchCommandResult::rejected;
+        }
+    }
+    if (fields.size() != 6) {
+        return LaunchCommandResult::rejected;
+    }
+
+    const auto type = fields.find("type");
+    if (type == fields.end() || (type->second != "cold" && type->second != "hot")) {
+        return LaunchCommandResult::rejected;
+    }
+
+    guance_rum_launch launch{};
+    launch.type = type->second == "hot"
+        ? GUANCE_RUM_LAUNCH_HOT
+        : GUANCE_RUM_LAUNCH_COLD;
+    if (!parse_int64(fields["start_time_ns"], launch.start_time_ns) ||
+        !parse_int64(fields["duration_ns"], launch.duration_ns) ||
+        !parse_int64(
+            fields["pre_application_duration_ns"],
+            launch.pre_application_duration_ns) ||
+        !parse_int64(
+            fields["application_duration_ns"],
+            launch.application_duration_ns) ||
+        !parse_int64(
+            fields["first_frame_duration_ns"],
+            launch.first_frame_duration_ns)) {
+        return LaunchCommandResult::rejected;
+    }
+    guance_rum_add_launch_action(handle, &launch);
+    if (debug) {
+        std::cout
+            << "[Guance.RUM.NativeBridge] launch"
+            << " type=launch_" << type->second
+            << " duration_ns=" << launch.duration_ns
+            << std::endl;
+    }
+    return LaunchCommandResult::accepted;
+}
+
 } // namespace
 
 int main() {
@@ -224,6 +301,14 @@ int main() {
         while (std::getline(std::cin, line)) {
             if (line.size() >= kMaxInputLineBytes) {
                 std::cerr << "[Guance.RUM.NativeBridge] rejected oversized input line" << std::endl;
+                continue;
+            }
+            const auto launch_result = handle_launch_command(handle, line, host.debug);
+            if (launch_result == LaunchCommandResult::accepted) {
+                continue;
+            }
+            if (launch_result == LaunchCommandResult::rejected) {
+                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid launch command" << std::endl;
                 continue;
             }
             line.push_back('\n');

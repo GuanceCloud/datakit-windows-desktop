@@ -23,21 +23,34 @@ internal static class WinUIReflectionInstrumentation
         }
 
         WindowAttachments.Add(window, new AttachmentMarker());
+        client.MarkApplicationWindowCreated();
         var started = 0;
         var closed = 0;
-        AddEventHandler(window, "Activated", () =>
+        AddEventHandler(window, "Activated", (_, args) =>
         {
-            if (Volatile.Read(ref closed) != 0 || Interlocked.Exchange(ref started, 1) != 0)
+            if (Volatile.Read(ref closed) != 0 || !TryGetActiveClient(out var active))
             {
                 return;
             }
 
-            if (TryGetActiveClient(out var active))
+            var activationState = args is null
+                ? null
+                : ReadProperty(args, "WindowActivationState")?.ToString();
+            if (string.Equals(activationState, "Deactivated", StringComparison.OrdinalIgnoreCase))
+            {
+                QueueBackgroundCheck(active);
+                return;
+            }
+
+            active.NotifyApplicationForegrounding();
+            if (Interlocked.Exchange(ref started, 1) == 0)
             {
                 active.StartView(name);
                 active.CaptureSessionReplayFullSnapshot(window);
                 AttachContentTree(active, window);
             }
+
+            QueueFrameCompletion(active, window);
         });
         AddEventHandler(window, "SizeChanged", () =>
         {
@@ -57,6 +70,65 @@ internal static class WinUIReflectionInstrumentation
             }
         });
         AttachContentTree(client, window);
+    }
+
+    private static void QueueBackgroundCheck(RumClient client)
+    {
+        var context = SynchronizationContext.Current;
+        if (context is null)
+        {
+            if (!WindowsApplicationActivation.IsCurrentProcessForeground())
+            {
+                client.NotifyApplicationBackgrounded();
+            }
+            return;
+        }
+
+        context.Post(static state =>
+        {
+            if (state is RumClient active &&
+                !WindowsApplicationActivation.IsCurrentProcessForeground())
+            {
+                active.NotifyApplicationBackgrounded();
+            }
+        }, client);
+    }
+
+    private static void QueueFrameCompletion(RumClient client, object window)
+    {
+        var compositionTarget = window.GetType().Assembly.GetType(
+            "Microsoft.UI.Xaml.Media.CompositionTarget");
+        var renderingEvent = compositionTarget?.GetRuntimeEvent("Rendering");
+        var handlerType = renderingEvent?.EventHandlerType;
+        if (renderingEvent is not null && handlerType is not null)
+        {
+            Delegate? handler = null;
+            handler = CreateEventHandler(handlerType, (_, _) =>
+            {
+                renderingEvent.RemoveEventHandler(null, handler);
+                if (TryGetActiveClient(out var active))
+                {
+                    active.NotifyApplicationFrameRendered();
+                }
+            });
+            renderingEvent.AddEventHandler(null, handler);
+            return;
+        }
+
+        var context = SynchronizationContext.Current;
+        if (context is null)
+        {
+            client.NotifyApplicationFrameRendered();
+            return;
+        }
+
+        context.Post(static state =>
+        {
+            if (state is RumClient active)
+            {
+                active.NotifyApplicationFrameRendered();
+            }
+        }, client);
     }
 
     private static void SetActiveClient(RumClient client)
@@ -365,12 +437,19 @@ internal static class WinUIReflectionInstrumentation
     {
         var eventInfo = target.GetType().GetRuntimeEvent(eventName);
         var handlerType = eventInfo?.EventHandlerType;
-        var invoke = handlerType?.GetRuntimeMethods().FirstOrDefault(method => method.Name == "Invoke");
-        if (eventInfo is null || handlerType is null || invoke is null)
+        if (eventInfo is null || handlerType is null)
         {
             return;
         }
 
+        eventInfo.AddEventHandler(target, CreateEventHandler(handlerType, action));
+    }
+
+    private static Delegate CreateEventHandler(
+        Type handlerType,
+        Action<object?, object?> action)
+    {
+        var invoke = handlerType.GetRuntimeMethods().First(method => method.Name == "Invoke");
         var parameters = invoke.GetParameters()
             .Select(parameter => Expression.Parameter(parameter.ParameterType, parameter.Name))
             .ToArray();
@@ -383,7 +462,7 @@ internal static class WinUIReflectionInstrumentation
             sender,
             args);
         var lambda = Expression.Lambda(handlerType, body, parameters);
-        eventInfo.AddEventHandler(target, lambda.Compile());
+        return lambda.Compile();
     }
 
     private sealed class AttachmentMarker

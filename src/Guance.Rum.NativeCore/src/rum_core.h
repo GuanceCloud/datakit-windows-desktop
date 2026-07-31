@@ -72,6 +72,7 @@ public:
     void start_view(const char* name);
     void stop_view();
     void add_action(const char* name, const char* type, int64_t duration_ns);
+    void add_launch_action(const guance_rum_launch& launch);
     std::string start_action(const char* name, const char* type);
     void stop_action(const char* action_id);
     std::string start_resource(const char* url, const char* method);
@@ -126,6 +127,7 @@ private:
         int resource_count = 0;
         int error_count = 0;
         int long_task_count = 0;
+        Fields fields;
     };
 
     struct ReplaySegment {

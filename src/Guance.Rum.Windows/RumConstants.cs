@@ -63,6 +63,13 @@ internal static class RumConstants
     public const string ActionResourceCount = "action_resource_count";
     public const string ActionErrorCount = "action_error_count";
     public const string ActionDuration = "duration";
+    public const string ActionTypeLaunchCold = "launch_cold";
+    public const string ActionTypeLaunchHot = "launch_hot";
+    public const string ActionNameLaunchCold = "app cold start";
+    public const string ActionNameLaunchHot = "app hot start";
+    public const string AppPreApplicationInitTime = "app_pre_application_init_time";
+    public const string AppApplicationInitTime = "app_application_init_time";
+    public const string AppFirstFrameInitTime = "app_first_frame_init_time";
 
     public const string ResourceId = "resource_id";
     public const string ResourceUrl = "resource_url";

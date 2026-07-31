@@ -94,6 +94,7 @@ internal static partial class WindowsDesktopInstrumentation
         {
             if (TryGetActiveClient(out var active))
             {
+                active.NotifyApplicationForegrounding();
                 AttachOpenWpfWindows(active, app);
             }
         };
@@ -108,6 +109,7 @@ internal static partial class WindowsDesktopInstrumentation
         {
             if (TryGetActiveClient(out var active))
             {
+                active.NotifyApplicationBackgrounded();
                 active.StopView();
             }
         };
@@ -303,19 +305,28 @@ internal static partial class WindowsDesktopInstrumentation
 
         var attachment = new AttachmentMarker();
         WpfWindowAttachments.Add(window, attachment);
+        client.MarkApplicationWindowCreated();
         window.Activated += (_, _) =>
         {
             if (TryGetActiveClient(out var active))
             {
                 attachment.ViewStarted = true;
                 active.StartView(window.TitleOrTypeName());
-                window.Dispatcher.BeginInvoke(new Action(() =>
+                QueueWpfFrameCompletion(window);
+                window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() =>
                 {
                     if (TryGetActiveClient(out var current))
                     {
                         current.CaptureSessionReplayFullSnapshot(window);
                     }
                 }));
+            }
+        };
+        window.ContentRendered += (_, _) =>
+        {
+            if (TryGetActiveClient(out var active))
+            {
+                active.NotifyApplicationFrameRendered();
             }
         };
         window.SizeChanged += (_, args) =>
@@ -343,9 +354,24 @@ internal static partial class WindowsDesktopInstrumentation
             {
                 attachment.ViewStarted = true;
                 active.StartView(window.TitleOrTypeName());
+                QueueWpfFrameCompletion(window);
                 active.CaptureSessionReplayFullSnapshot(window);
             }
         }));
+    }
+
+    private static void QueueWpfFrameCompletion(Window window)
+    {
+        EventHandler? rendering = null;
+        rendering = (_, _) =>
+        {
+            System.Windows.Media.CompositionTarget.Rendering -= rendering;
+            if (TryGetActiveClient(out var active))
+            {
+                active.NotifyApplicationFrameRendered();
+            }
+        };
+        System.Windows.Media.CompositionTarget.Rendering += rendering;
     }
 
     private static void TrackWpfAction(object sender, string actionType, bool replayAsInput = false)
@@ -475,15 +501,38 @@ internal static partial class WindowsDesktopInstrumentation
     {
         if (!WinFormsFormAttachments.TryGetValue(form, out _))
         {
-            WinFormsFormAttachments.Add(form, new AttachmentMarker());
+            var attachment = new AttachmentMarker();
+            WinFormsFormAttachments.Add(form, attachment);
+            client.MarkApplicationWindowCreated();
             form.Activated += (_, _) =>
             {
                 if (TryGetActiveClient(out var active))
                 {
+                    active.NotifyApplicationForegrounding();
                     active.StartView(FormName(form));
                     active.CaptureSessionReplayFullSnapshot(form);
+                    QueueWinFormsFrameCompletion(form, attachment);
                 }
             };
+            form.Deactivate += (_, _) =>
+            {
+                try
+                {
+                    form.BeginInvoke(new Action(() =>
+                    {
+                        if (!WindowsApplicationActivation.IsCurrentProcessForeground() &&
+                            TryGetActiveClient(out var active))
+                        {
+                            active.NotifyApplicationBackgrounded();
+                        }
+                    }));
+                }
+                catch (InvalidOperationException)
+                {
+                    // The form is closing, so no foreground transition can be measured.
+                }
+            };
+            form.Shown += (_, _) => QueueWinFormsFrameCompletion(form, attachment);
             form.Resize += (_, _) =>
             {
                 if (TryGetActiveClient(out var active))
@@ -499,6 +548,7 @@ internal static partial class WindowsDesktopInstrumentation
                 }
             };
             form.KeyDown += (_, args) => TrackWinFormsShortcut(client, form, args);
+            QueueWinFormsFrameCompletion(form, attachment);
         }
 
         if (form.MainMenuStrip is not null)
@@ -507,6 +557,30 @@ internal static partial class WindowsDesktopInstrumentation
         }
 
         AttachControls(client, form.Controls);
+    }
+
+    private static void QueueWinFormsFrameCompletion(
+        WinForms.Form form,
+        AttachmentMarker attachment)
+    {
+        if (!form.IsHandleCreated || form.IsDisposed || attachment.FrameCompletionQueued)
+        {
+            return;
+        }
+
+        attachment.FrameCompletionQueued = true;
+        WinForms.PaintEventHandler? painted = null;
+        painted = (_, _) =>
+        {
+            form.Paint -= painted;
+            attachment.FrameCompletionQueued = false;
+            if (!form.IsDisposed && TryGetActiveClient(out var active))
+            {
+                active.NotifyApplicationFrameRendered();
+            }
+        };
+        form.Paint += painted;
+        form.Invalidate();
     }
 
     private static void AttachControls(RumClient client, WinForms.Control.ControlCollection controls)
@@ -729,6 +803,7 @@ internal static partial class WindowsDesktopInstrumentation
     private sealed class AttachmentMarker
     {
         public bool ViewStarted { get; set; }
+        public bool FrameCompletionQueued { get; set; }
     }
 
     private sealed class ReplaySnapshotMarker

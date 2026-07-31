@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <cmath>
 #include <random>
 #include <regex>
@@ -663,7 +664,16 @@ void RumCore::flush() {
             ids.push_back(item.id);
             lines.push_back(item.line);
         }
+        if (config_.debug) {
+            std::cout << "[Guance.RUM.Native] uploading RUM batch count="
+                      << lines.size() << std::endl;
+        }
         const auto result = send_to_dataway(config_, lines);
+        if (config_.debug) {
+            std::cout << "[Guance.RUM.Native] RUM upload completed status="
+                      << result.status_code << " error=" << result.error_code
+                      << std::endl;
+        }
         record_rum_transport_result(result.delete_from_queue, result.retry_later, result.status_code, result.error_code, result.latency_ms);
         if (result.retry_later) {
             return;
@@ -713,8 +723,17 @@ void RumCore::flush() {
 }
 
 void RumCore::shutdown() {
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native] shutdown stopping active view" << std::endl;
+    }
     stop_view();
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native] shutdown flushing queues" << std::endl;
+    }
     flush();
+    if (config_.debug) {
+        std::cout << "[Guance.RUM.Native] shutdown flush completed" << std::endl;
+    }
 }
 
 NativeDiagnostics RumCore::diagnostics() const {
@@ -856,6 +875,53 @@ void RumCore::add_action(const char* name, const char* type, int64_t duration_ns
     track_action(action, safe_duration_ns);
 }
 
+void RumCore::add_launch_action(const guance_rum_launch& launch) {
+    std::lock_guard lock(mutex_);
+    const auto safe_duration_ns = non_negative_duration(launch.duration_ns);
+    const auto is_hot = launch.type == GUANCE_RUM_LAUNCH_HOT;
+    Action action{
+        uuid32(),
+        is_hot ? "app hot start" : "app cold start",
+        is_hot ? "launch_hot" : "launch_cold",
+        {},
+        {},
+        {},
+        launch.start_time_ns > 0
+            ? launch.start_time_ns
+            : unix_time_before(safe_duration_ns),
+        monotonic_time_nanoseconds()};
+    if (active_view_) {
+        action.view_id = active_view_->id;
+        action.view_name = active_view_->name;
+        action.view_referrer = active_view_->referrer;
+    }
+    if (!is_hot) {
+        const auto pre_application =
+            non_negative_duration(launch.pre_application_duration_ns);
+        const auto application =
+            non_negative_duration(launch.application_duration_ns);
+        const auto first_frame =
+            non_negative_duration(launch.first_frame_duration_ns);
+        const auto application_start =
+            pre_application > std::numeric_limits<int64_t>::max()
+                ? std::numeric_limits<int64_t>::max()
+                : pre_application;
+        const auto first_frame_start =
+            application > std::numeric_limits<int64_t>::max() - application_start
+                ? std::numeric_limits<int64_t>::max()
+                : application_start + application;
+        action.fields["app_pre_application_init_time"] =
+            "{\"start\":0,\"duration\":" + std::to_string(pre_application) + "}";
+        action.fields["app_application_init_time"] =
+            "{\"start\":" + std::to_string(application_start) +
+            ",\"duration\":" + std::to_string(application) + "}";
+        action.fields["app_first_frame_init_time"] =
+            "{\"start\":" + std::to_string(first_frame_start) +
+            ",\"duration\":" + std::to_string(first_frame) + "}";
+    }
+    track_action(action, safe_duration_ns);
+}
+
 std::string RumCore::start_action(const char* name, const char* type) {
     std::lock_guard lock(mutex_);
     Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
@@ -895,6 +961,9 @@ void RumCore::track_action(const Action& action, int64_t duration_ns) {
     event.fields["action_resource_count"] = static_cast<int64_t>(action.resource_count);
     event.fields["action_error_count"] = static_cast<int64_t>(action.error_count);
     event.fields["action_long_task_count"] = static_cast<int64_t>(action.long_task_count);
+    for (const auto& [key, value] : action.fields) {
+        event.fields[key] = value;
+    }
     if (active_view_ && active_view_->id == action.view_id) {
         active_view_->action_count++;
     }

@@ -40,6 +40,7 @@ public sealed class RumClient : IAsyncDisposable
     private readonly SessionManager session;
     private readonly RumPlatformInfo platformInfo;
     private readonly WebViewInstrumentationManager webViewInstrumentation;
+    private readonly ApplicationLaunchTracker applicationLaunch;
     private readonly ConcurrentDictionary<string, ActiveResource> resources = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ActiveAction> actions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?> globalContext = new(StringComparer.Ordinal);
@@ -95,6 +96,7 @@ public sealed class RumClient : IAsyncDisposable
         session = new SessionManager(sampling);
         platformInfo = RumPlatformInfo.Capture();
         webViewInstrumentation = new WebViewInstrumentationManager(this);
+        applicationLaunch = new ApplicationLaunchTracker(TrackApplicationLaunch);
         sessionReplay = new SessionReplayManager(config, sessionReplayQueue, sessionReplayPrivacy);
         rumRetryBackoff = new RetryBackoff(config.FlushInterval);
         sessionReplayRetryBackoff = new RetryBackoff(config.SessionReplay.FlushInterval);
@@ -141,6 +143,10 @@ public sealed class RumClient : IAsyncDisposable
         {
             var resolvedOptions = options ?? new AutomaticInstrumentationOptions();
             webViewAutoInstrumentationEnabled = resolvedOptions.EnableWebView;
+            if (resolvedOptions.EnableAppLaunch)
+            {
+                applicationLaunch.Enable();
+            }
             automaticInstrumentation = new AutomaticInstrumentation(this, resolvedOptions);
         }
         automaticInstrumentation.Start();
@@ -301,6 +307,14 @@ public sealed class RumClient : IAsyncDisposable
             TrackAction(action, Clock.DurationNanoseconds(action.Duration));
         }
     }
+
+    internal void MarkApplicationWindowCreated() => applicationLaunch.MarkWindowCreated();
+
+    internal void NotifyApplicationForegrounding() => applicationLaunch.BeginForeground();
+
+    internal void NotifyApplicationBackgrounded() => applicationLaunch.EnterBackground();
+
+    internal void NotifyApplicationFrameRendered() => applicationLaunch.CompleteFrame();
 
     public string StartResource(string url, string method, IReadOnlyDictionary<string, object?>? properties = null)
     {
@@ -1144,6 +1158,20 @@ public sealed class RumClient : IAsyncDisposable
         AddFields(rumEvent, action.Properties);
         Enqueue(rumEvent);
         IncrementAction(action.View);
+    }
+
+    private void TrackApplicationLaunch(ApplicationLaunchRecord launch)
+    {
+        session.Touch();
+        var action = new ActiveAction(
+            Guid.NewGuid().ToString("N"),
+            launch.Name,
+            launch.Type,
+            SnapshotView(),
+            launch.StartTimeNanoseconds,
+            Stopwatch.StartNew(),
+            launch.Properties);
+        TrackAction(action, launch.DurationNanoseconds);
     }
 
     private ActiveViewSnapshot? SnapshotView()

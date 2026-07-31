@@ -58,6 +58,20 @@ typedef struct guance_rum_diagnostics {
     int session_replay_error_sampled;
 } guance_rum_diagnostics;
 
+typedef enum guance_rum_launch_type {
+    GUANCE_RUM_LAUNCH_COLD = 0,
+    GUANCE_RUM_LAUNCH_HOT = 1
+} guance_rum_launch_type;
+
+typedef struct guance_rum_launch {
+    guance_rum_launch_type type;
+    int64_t start_time_ns;
+    int64_t duration_ns;
+    int64_t pre_application_duration_ns;
+    int64_t application_duration_ns;
+    int64_t first_frame_duration_ns;
+} guance_rum_launch;
+
 typedef enum guance_rum_session_replay_text_privacy {
     GUANCE_RUM_REPLAY_TEXT_ALLOW = 0,
     GUANCE_RUM_REPLAY_TEXT_MASK_SENSITIVE_INPUTS = 1,
@@ -87,6 +101,9 @@ GUANCE_RUM_EXPORT void guance_rum_add_rum_context(guance_rum_handle handle, cons
 GUANCE_RUM_EXPORT void guance_rum_start_view(guance_rum_handle handle, const char* name);
 GUANCE_RUM_EXPORT void guance_rum_stop_view(guance_rum_handle handle);
 GUANCE_RUM_EXPORT void guance_rum_add_action(guance_rum_handle handle, const char* name, const char* type, int64_t duration_ns);
+GUANCE_RUM_EXPORT void guance_rum_add_launch_action(
+    guance_rum_handle handle,
+    const guance_rum_launch* launch);
 GUANCE_RUM_EXPORT const char* guance_rum_start_action(guance_rum_handle handle, const char* name, const char* type);
 GUANCE_RUM_EXPORT void guance_rum_stop_action(guance_rum_handle handle, const char* action_id);
 GUANCE_RUM_EXPORT const char* guance_rum_start_resource(guance_rum_handle handle, const char* url, const char* method);

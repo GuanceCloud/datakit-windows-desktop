@@ -7,6 +7,19 @@ const { browserRumEventToLine } = require("./browser-rum-line-protocol.cjs");
 
 const NATIVE_HOST_FILE = "guance_rum_electron_bridge.exe";
 const NATIVE_CORE_FILE = "guance_rum_native.dll";
+const MAX_INT64 = 9_223_372_036_854_775_807n;
+
+function launchInteger(value, name) {
+  const text = String(value);
+  if (!/^\d+$/.test(text)) {
+    throw new Error(`${name} must be a non-negative integer.`);
+  }
+  const parsed = BigInt(text);
+  if (parsed > MAX_INT64) {
+    throw new Error(`${name} exceeds int64 range.`);
+  }
+  return text;
+}
 
 function resolveNativeRumPaths({
   isPackaged,
@@ -133,6 +146,59 @@ class NativeRumHost {
       this.rejected += 1;
       this.logger.error(
         `[electron-main][rum-bridge] rejected renderer payload: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+      return false;
+    }
+  }
+
+  sendLaunch({
+    type,
+    startTimeNanoseconds,
+    durationNanoseconds,
+    preApplicationDurationNanoseconds = 0,
+    applicationDurationNanoseconds = 0,
+    firstFrameDurationNanoseconds = 0,
+  }) {
+    if (!this.child?.stdin?.writable) {
+      this.rejected += 1;
+      this.logger.error("[electron-main][rum-bridge] native host is unavailable");
+      return false;
+    }
+
+    try {
+      if (type !== "cold" && type !== "hot") {
+        throw new Error("launch type must be cold or hot.");
+      }
+      const values = [
+        launchInteger(startTimeNanoseconds, "startTimeNanoseconds"),
+        launchInteger(durationNanoseconds, "durationNanoseconds"),
+        launchInteger(preApplicationDurationNanoseconds, "preApplicationDurationNanoseconds"),
+        launchInteger(applicationDurationNanoseconds, "applicationDurationNanoseconds"),
+        launchInteger(firstFrameDurationNanoseconds, "firstFrameDurationNanoseconds"),
+      ];
+      const fields = [
+        `type=${type}`,
+        `start_time_ns=${values[0]}`,
+        `duration_ns=${values[1]}`,
+        `pre_application_duration_ns=${values[2]}`,
+        `application_duration_ns=${values[3]}`,
+        `first_frame_duration_ns=${values[4]}`,
+      ];
+      this.child.stdin.write(`@guance-launch\t${fields.join("\t")}\n`, "utf8");
+      this.accepted += 1;
+      if (this.configuration.debug) {
+        this.logger.log(
+          `[electron-main][rum-bridge] Electron lifecycle -> C++ launch_${type} ` +
+          `duration_ns=${values[1]} accepted=${this.accepted}`,
+        );
+      }
+      return true;
+    } catch (error) {
+      this.rejected += 1;
+      this.logger.error(
+        `[electron-main][rum-bridge] rejected launch payload: ${
           error instanceof Error ? error.message : "unknown error"
         }`,
       );

@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -67,17 +68,59 @@ int main() {
         guance_rum_write_line(handle, multiple_lines.data(), multiple_lines.size()) == 0,
         "multiple line payload was accepted");
 
+    const guance_rum_launch cold_launch{
+        GUANCE_RUM_LAUNCH_COLD,
+        1722300000000000000,
+        300000000,
+        100000000,
+        100000000,
+        100000000};
+    guance_rum_add_launch_action(handle, &cold_launch);
+    const guance_rum_launch hot_launch{
+        GUANCE_RUM_LAUNCH_HOT,
+        1722300010000000000,
+        50000000,
+        0,
+        0,
+        0};
+    guance_rum_add_launch_action(handle, &hot_launch);
+
     guance_rum_diagnostics diagnostics{};
     require(
         guance_rum_get_diagnostics(handle, &diagnostics) == 1,
         "native diagnostics were unavailable");
     require(
-        diagnostics.rum_events_enqueued == measurements.size(),
-        "all five Phase 1 Browser RUM lines were not enqueued");
+        diagnostics.rum_events_enqueued == measurements.size() + 2,
+        "Browser RUM and launch actions were not all enqueued");
 
-    guance_rum_shutdown(handle);
     auto queue_directory = queue_path;
     queue_directory.replace_extension(".queue");
+    if (std::filesystem::exists(queue_directory)) {
+        std::string queued_lines;
+        for (const auto& entry : std::filesystem::directory_iterator(queue_directory)) {
+            std::ifstream input(entry.path(), std::ios::binary);
+            queued_lines.append(
+                std::istreambuf_iterator<char>(input),
+                std::istreambuf_iterator<char>());
+        }
+        require(
+            queued_lines.find("action_type=launch_cold") != std::string::npos &&
+                queued_lines.find("action_name=app\\ cold\\ start") != std::string::npos,
+            "cold launch action contract was not persisted");
+        require(
+            queued_lines.find(
+                "app_pre_application_init_time=\"{\\\"start\\\":0,"
+                "\\\"duration\\\":100000000}\"") != std::string::npos &&
+                queued_lines.find("app_application_init_time=") != std::string::npos &&
+                queued_lines.find("app_first_frame_init_time=") != std::string::npos,
+            "cold launch phase fields were not persisted");
+        require(
+            queued_lines.find("action_type=launch_hot") != std::string::npos &&
+                queued_lines.find("action_name=app\\ hot\\ start") != std::string::npos,
+            "hot launch action contract was not persisted");
+    }
+
+    guance_rum_shutdown(handle);
     std::error_code cleanup_error;
     std::filesystem::remove_all(queue_directory, cleanup_error);
     std::cout << "native browser bridge smoke passed\n";

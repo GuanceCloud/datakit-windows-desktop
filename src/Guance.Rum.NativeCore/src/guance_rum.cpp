@@ -128,6 +128,19 @@ void guance_rum_add_action(guance_rum_handle handle, const char* name, const cha
     }
 }
 
+void guance_rum_add_launch_action(
+    guance_rum_handle handle,
+    const guance_rum_launch* launch) {
+    if (handle == nullptr || launch == nullptr) {
+        return;
+    }
+    try {
+        static_cast<RumCore*>(handle)->add_launch_action(*launch);
+    } catch (...) {
+        // Public C ABI calls must not propagate C++ exceptions.
+    }
+}
+
 const char* guance_rum_start_action(guance_rum_handle handle, const char* name, const char* type) {
     thread_local std::string last_id;
     if (handle == nullptr) {

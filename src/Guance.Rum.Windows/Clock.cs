@@ -52,6 +52,13 @@ internal static class Clock
             : TimeSpan.FromSeconds((double)elapsedTicks / Stopwatch.Frequency);
     }
 
+    public static long ElapsedNanoseconds(long startTimestamp, long endTimestamp)
+    {
+        return endTimestamp <= startTimestamp
+            ? 0
+            : StopwatchTicksToNanoseconds(endTimestamp - startTimestamp);
+    }
+
     private static long StopwatchTicksToNanoseconds(long ticks)
     {
         if (ticks <= 0)

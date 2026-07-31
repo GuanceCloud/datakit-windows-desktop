@@ -56,6 +56,47 @@ public sealed class ExplicitDurationTests
             item.Line.Contains("resource_timing_duration=0i", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task AutomaticLaunch_EnqueuesColdActionWithAndroidCompatibleFields()
+    {
+        var rumQueue = new MemoryRumQueue();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                FlushInterval = TimeSpan.FromHours(1)
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport());
+
+        client.EnableAutomaticInstrumentation(new AutomaticInstrumentationOptions
+        {
+            EnableWpf = false,
+            EnableWinForms = false,
+            EnableWinUI = false,
+            EnableWebView = false,
+            EnableHttpClient = false,
+            EnableUnhandledException = false,
+            EnableUiThreadBlock = false,
+            EnableAppLaunch = true
+        });
+        client.MarkApplicationWindowCreated();
+        client.NotifyApplicationFrameRendered();
+        await client.FlushAsync();
+
+        var items = await rumQueue.PeekAsync(10, CancellationToken.None);
+        var launch = Assert.Single(items, item =>
+            item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+            item.Line.Contains("action_type=launch_cold", StringComparison.Ordinal)).Line;
+        Assert.Contains("action_name=app\\ cold\\ start", launch, StringComparison.Ordinal);
+        Assert.Contains("app_pre_application_init_time=", launch, StringComparison.Ordinal);
+        Assert.Contains("app_application_init_time=", launch, StringComparison.Ordinal);
+        Assert.Contains("app_first_frame_init_time=", launch, StringComparison.Ordinal);
+    }
+
     private sealed class MemoryReplayQueue : ISessionReplayQueue
     {
         public Task EnqueueAsync(string contentType, byte[] body, CancellationToken cancellationToken) => Task.CompletedTask;

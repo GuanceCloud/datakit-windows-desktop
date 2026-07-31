@@ -184,8 +184,22 @@ describe("Electron native host adapter", () => {
 
     nativeHost.start();
     expect(nativeHost.send(rumEvent(), "main-renderer")).toBe(true);
-    expect(write).toHaveBeenCalledOnce();
+    expect(nativeHost.sendLaunch({
+      type: "cold",
+      startTimeNanoseconds: 100n,
+      durationNanoseconds: 60n,
+      preApplicationDurationNanoseconds: 20n,
+      applicationDurationNanoseconds: 20n,
+      firstFrameDurationNanoseconds: 20n,
+    })).toBe(true);
+    expect(write).toHaveBeenCalledTimes(2);
     expect(write.mock.calls[0][0]).toContain("app_id=win_sample");
     expect(write.mock.calls[0][1]).toBe("utf8");
+    expect(write.mock.calls[1]).toEqual([
+      "@guance-launch\ttype=cold\tstart_time_ns=100\tduration_ns=60\t" +
+        "pre_application_duration_ns=20\tapplication_duration_ns=20\t" +
+        "first_frame_duration_ns=20\n",
+      "utf8",
+    ]);
   });
 });
