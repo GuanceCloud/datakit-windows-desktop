@@ -62,7 +62,15 @@ jobs:
       - run: dotnet build src/Guance.Rum.Windows/Guance.Rum.Windows.csproj -c Release -f net6.0-windows10.0.17763.0
       - name: Pack, verify, and consumer smoke
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File build\pack.ps1 -OutputDirectory dist
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: |
+          $packArgs = @("-ExecutionPolicy", "Bypass", "-File", "build\pack.ps1", "-OutputDirectory", "dist")
+          if ($env:REF_TYPE -eq "tag") {
+            $packArgs += @("-PackageVersion", $env:PACKAGE_VERSION)
+          }
+          powershell @packArgs
       - uses: actions/upload-artifact@v4
         with:
           name: managed-package
@@ -70,3 +78,50 @@ jobs:
             dist/*.nupkg
             dist/*.snupkg
             dist/release-manifest.json
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: windows-latest
+    needs: managed
+    environment: nuget-release
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: managed-package
+          path: dist
+      - name: Verify release package
+        id: package
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: |
+          $version = $env:PACKAGE_VERSION
+          $package = Join-Path "dist" "Guance.Rum.Windows.$version.nupkg"
+          $symbols = Join-Path "dist" "Guance.Rum.Windows.$version.snupkg"
+          if (-not (Test-Path -LiteralPath $package)) {
+            throw "Expected release package was not found: $package"
+          }
+          if (-not (Test-Path -LiteralPath $symbols)) {
+            throw "Expected symbol package was not found: $symbols"
+          }
+          "path=$((Resolve-Path -LiteralPath $package).Path)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish NuGet package
+        shell: pwsh
+        run: >
+          dotnet nuget push
+          "${{ steps.package.outputs.path }}"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --symbol-api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --source "https://api.nuget.org/v3/index.json"

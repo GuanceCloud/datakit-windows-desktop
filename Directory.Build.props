@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <RepositoryUrl>https://github.com/GuanceCloud/rum-windows-sdk</RepositoryUrl>
+    <RepositoryUrl>https://github.com/GuanceCloud/datakit-windows-desktop</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <HasGitMetadata Condition="Exists('$(MSBuildThisFileDirectory).git')">true</HasGitMetadata>
     <EnableSourceControlManagerQueries Condition="'$(HasGitMetadata)' != 'true'">false</EnableSourceControlManagerQueries>
