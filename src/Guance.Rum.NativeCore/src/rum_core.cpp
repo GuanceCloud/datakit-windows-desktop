@@ -1004,8 +1004,42 @@ std::optional<RumCore::Action> RumCore::current_action_locked() const {
 }
 
 std::string RumCore::start_resource(const char* url, const char* method) {
+    return start_resource_impl(url, method, false);
+}
+
+std::string RumCore::start_auto_resource(const char* url, const char* method) {
+    return start_resource_impl(url, method, true);
+}
+
+std::string RumCore::start_resource_impl(
+    const char* url,
+    const char* method,
+    bool automatic) {
+    const std::string original_url = str_or_empty(url);
+    const std::string resource_method = str_or_empty(method);
+    ResourceCollectionConfig collection_config;
+    {
+        std::lock_guard lock(mutex_);
+        collection_config = resource_collection_config_;
+    }
+    if (automatic &&
+        !should_collect_resource(collection_config, original_url, resource_method)) {
+        return {};
+    }
+
+    Resource resource{
+        uuid32(),
+        sanitize_resource_url(original_url, collection_config),
+        resource_method,
+        {},
+        {},
+        {},
+        {},
+        unix_time_nanoseconds(),
+        monotonic_time_nanoseconds()
+    };
+
     std::lock_guard lock(mutex_);
-    Resource resource{uuid32(), str_or_empty(url), str_or_empty(method), {}, {}, {}, {}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
     if (active_view_) {
         resource.view_id = active_view_->id;
         resource.view_name = active_view_->name;
@@ -1017,6 +1051,18 @@ std::string RumCore::start_resource(const char* url, const char* method) {
     const auto id = resource.id;
     resources_[id] = resource;
     return id;
+}
+
+bool RumCore::configure_resource_collection(
+    const guance_rum_resource_collection_config& config) {
+    ResourceCollectionConfig parsed;
+    if (!resource_collection_config_from_c(config, parsed)) {
+        return false;
+    }
+
+    std::lock_guard lock(mutex_);
+    resource_collection_config_ = std::move(parsed);
+    return true;
 }
 
 void RumCore::stop_resource(const char* resource_id, int status_code, int64_t response_size) {
@@ -1063,10 +1109,10 @@ void RumCore::stop_resource_ext(const char* resource_id, int status_code, int64_
     event.tags["span_id"] = str_or_empty(span_id);
     event.tags["resource_http_protocol"] = str_or_empty(http_protocol);
     event.fields["duration"] = elapsed_since(resource.started_monotonic_ns);
-    if (response_size > 0) {
+    if (response_size >= 0) {
         event.fields["resource_size"] = response_size;
     }
-    if (request_size > 0) {
+    if (request_size >= 0) {
         event.fields["resource_request_size"] = request_size;
     }
     enqueue(std::move(event));

@@ -1,4 +1,5 @@
 #include "transport.h"
+#include "resource_collection.h"
 
 #include <cctype>
 #include <chrono>
@@ -84,6 +85,7 @@ TransportResult retry_result(int status_code, std::string message, int error_cod
 }
 
 TransportResult post_body(const Config& config, const std::string& path, const std::string& content_type, const std::string& body) {
+    ResourceCollectionSuppressionScope resource_suppression;
     const auto started = std::chrono::steady_clock::now();
 #if defined(GUANCE_RUM_WINDOWS)
     const auto url = widen(build_url(config, path));

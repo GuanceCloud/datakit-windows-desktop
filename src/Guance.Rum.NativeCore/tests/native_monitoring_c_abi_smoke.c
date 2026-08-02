@@ -15,5 +15,17 @@ int main(void) {
     assert(config.hang_threshold_ms == 5000);
     assert(guance_rum_enable_native_monitoring(NULL, &config) == 0);
     guance_rum_disable_native_monitoring(NULL);
+
+    guance_rum_resource_collection_config resources;
+    guance_rum_resource_collection_config_init(&resources);
+    assert(resources.struct_size == sizeof(resources));
+    assert(resources.version == GUANCE_RUM_RESOURCE_COLLECTION_CONFIG_VERSION);
+    assert(resources.enabled == 1);
+    assert(resources.capture_url_query == 1);
+    assert(resources.redact_all_url_query_values == 0);
+    assert(resources.redacted_value != NULL);
+    assert(resources.redacted_query_parameter_names != NULL);
+    assert(resources.redacted_query_parameter_name_count > 0);
+    assert(guance_rum_configure_resource_collection(NULL, &resources) == 0);
     return 0;
 }

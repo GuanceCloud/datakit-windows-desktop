@@ -5,6 +5,7 @@
 #include "hang_state_machine.h"
 #include "line_protocol.h"
 #include "queue_store.h"
+#include "resource_collection.h"
 
 #include <atomic>
 #include <memory>
@@ -81,8 +82,10 @@ public:
     std::string start_action(const char* name, const char* type);
     void stop_action(const char* action_id);
     std::string start_resource(const char* url, const char* method);
+    std::string start_auto_resource(const char* url, const char* method);
     void stop_resource(const char* resource_id, int status_code, int64_t response_size);
     void stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol);
+    bool configure_resource_collection(const guance_rum_resource_collection_config& config);
     void add_error(const char* stack, const char* message, const char* error_type, const char* source);
     void add_long_task(int64_t duration_ns, const char* stack);
     void start_session_replay();
@@ -168,6 +171,7 @@ private:
     std::optional<Action> current_action_locked() const;
     void record_rum_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     void record_replay_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
+    std::string start_resource_impl(const char* url, const char* method, bool automatic);
 
     Config config_;
     std::string session_id_;
@@ -180,6 +184,7 @@ private:
     std::unique_ptr<QueueStore> queue_;
     std::unique_ptr<QueueStore> replay_queue_;
     std::unique_ptr<NativeMonitoring> native_monitoring_;
+    ResourceCollectionConfig resource_collection_config_ = default_resource_collection_config();
     std::vector<ReplaySegment> replay_error_buffer_;
     std::vector<ReplayPendingRecord> replay_pending_records_;
     std::vector<uintptr_t> replay_windows_;

@@ -44,6 +44,23 @@ void guance_rum_native_monitoring_config_init(
     config->max_crash_file_bytes = 32LL * 1024 * 1024;
 }
 
+void guance_rum_resource_collection_config_init(
+    guance_rum_resource_collection_config* config) {
+    if (config == nullptr) {
+        return;
+    }
+    *config = guance_rum_resource_collection_config{};
+    config->struct_size = sizeof(guance_rum_resource_collection_config);
+    config->version = GUANCE_RUM_RESOURCE_COLLECTION_CONFIG_VERSION;
+    config->enabled = 1;
+    config->capture_url_query = 1;
+    config->redacted_value = "<redacted>";
+    config->redacted_query_parameter_names =
+        guance::rum::default_redacted_query_parameter_names();
+    config->redacted_query_parameter_name_count =
+        guance::rum::default_redacted_query_parameter_name_count();
+}
+
 guance_rum_handle guance_rum_init(const guance_rum_config* config) {
     try {
         return new RumCore(guance::rum::from_c_config(config));
@@ -112,6 +129,19 @@ int guance_rum_enable_native_monitoring(
     }
     try {
         return static_cast<RumCore*>(handle)->enable_native_monitoring(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_rum_configure_resource_collection(
+    guance_rum_handle handle,
+    const guance_rum_resource_collection_config* config) {
+    if (handle == nullptr || config == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->configure_resource_collection(*config) ? 1 : 0;
     } catch (...) {
         return 0;
     }
@@ -209,13 +239,38 @@ const char* guance_rum_start_resource(guance_rum_handle handle, const char* url,
         last_id.clear();
         return last_id.c_str();
     }
-    last_id = static_cast<RumCore*>(handle)->start_resource(url, method);
+    try {
+        last_id = static_cast<RumCore*>(handle)->start_resource(url, method);
+    } catch (...) {
+        last_id.clear();
+    }
+    return last_id.c_str();
+}
+
+const char* guance_rum_start_auto_resource(
+    guance_rum_handle handle,
+    const char* url,
+    const char* method) {
+    thread_local std::string last_id;
+    if (handle == nullptr) {
+        last_id.clear();
+        return last_id.c_str();
+    }
+    try {
+        last_id = static_cast<RumCore*>(handle)->start_auto_resource(url, method);
+    } catch (...) {
+        last_id.clear();
+    }
     return last_id.c_str();
 }
 
 void guance_rum_stop_resource(guance_rum_handle handle, const char* resource_id, int status_code, int64_t response_size) {
     if (handle != nullptr) {
-        static_cast<RumCore*>(handle)->stop_resource(resource_id, status_code, response_size);
+        try {
+            static_cast<RumCore*>(handle)->stop_resource(resource_id, status_code, response_size);
+        } catch (...) {
+            // Public C ABI calls must not propagate C++ exceptions.
+        }
     }
 }
 
@@ -230,7 +285,11 @@ void guance_rum_stop_resource_ext(
     const char* span_id,
     const char* http_protocol) {
     if (handle != nullptr) {
-        static_cast<RumCore*>(handle)->stop_resource_ext(resource_id, status_code, response_size, request_size, resource_type, trace_id, span_id, http_protocol);
+        try {
+            static_cast<RumCore*>(handle)->stop_resource_ext(resource_id, status_code, response_size, request_size, resource_type, trace_id, span_id, http_protocol);
+        } catch (...) {
+            // Public C ABI calls must not propagate C++ exceptions.
+        }
     }
 }
 

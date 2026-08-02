@@ -79,6 +79,32 @@ typedef struct guance_rum_native_monitoring_config {
     int64_t max_crash_file_bytes;
 } guance_rum_native_monitoring_config;
 
+#define GUANCE_RUM_RESOURCE_COLLECTION_CONFIG_VERSION 1u
+
+typedef int (*guance_rum_resource_should_collect_callback)(
+    const char* url,
+    const char* method,
+    void* user_data);
+
+/* String and name-list values are copied by configure_resource_collection.
+ * The callback and user_data are retained and must remain valid until the SDK
+ * is reconfigured or shut down. The callback is synchronous and may be called
+ * concurrently from multiple request threads. */
+typedef struct guance_rum_resource_collection_config {
+    uint32_t struct_size;
+    uint32_t version;
+
+    int enabled;
+    int capture_url_query;
+    int redact_all_url_query_values;
+    const char* redacted_value;
+    const char* const* redacted_query_parameter_names;
+    uint32_t redacted_query_parameter_name_count;
+
+    guance_rum_resource_should_collect_callback should_collect;
+    void* user_data;
+} guance_rum_resource_collection_config;
+
 typedef enum guance_rum_launch_type {
     GUANCE_RUM_LAUNCH_COLD = 0,
     GUANCE_RUM_LAUNCH_HOT = 1
@@ -115,6 +141,11 @@ GUANCE_RUM_EXPORT int guance_rum_get_diagnostics(guance_rum_handle handle, guanc
 GUANCE_RUM_EXPORT int guance_rum_write_line(guance_rum_handle handle, const char* line, size_t length);
 GUANCE_RUM_EXPORT void guance_rum_native_monitoring_config_init(
     guance_rum_native_monitoring_config* config);
+GUANCE_RUM_EXPORT void guance_rum_resource_collection_config_init(
+    guance_rum_resource_collection_config* config);
+GUANCE_RUM_EXPORT int guance_rum_configure_resource_collection(
+    guance_rum_handle handle,
+    const guance_rum_resource_collection_config* config);
 GUANCE_RUM_EXPORT int guance_rum_enable_native_monitoring(
     guance_rum_handle handle,
     const guance_rum_native_monitoring_config* config);
@@ -135,6 +166,7 @@ GUANCE_RUM_EXPORT void guance_rum_add_launch_action(
 GUANCE_RUM_EXPORT const char* guance_rum_start_action(guance_rum_handle handle, const char* name, const char* type);
 GUANCE_RUM_EXPORT void guance_rum_stop_action(guance_rum_handle handle, const char* action_id);
 GUANCE_RUM_EXPORT const char* guance_rum_start_resource(guance_rum_handle handle, const char* url, const char* method);
+GUANCE_RUM_EXPORT const char* guance_rum_start_auto_resource(guance_rum_handle handle, const char* url, const char* method);
 GUANCE_RUM_EXPORT void guance_rum_stop_resource(guance_rum_handle handle, const char* resource_id, int status_code, int64_t response_size);
 GUANCE_RUM_EXPORT void guance_rum_stop_resource_ext(
     guance_rum_handle handle,

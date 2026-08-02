@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <exception>
 #include <mutex>
+#include <string>
+#include <utility>
 
 namespace guance::rum::detail {
 
@@ -76,6 +78,115 @@ inline void shutdown_cpp(guance_rum_handle handle) {
 }
 
 } // namespace guance::rum::detail
+
+namespace guance::rum {
+
+enum class ResourceCollectionKind {
+    manual,
+    automatic
+};
+
+// The SDK handle is non-owning and must remain valid until this scope is
+// completed or destroyed. A scope must not be accessed concurrently.
+class ResourceScope final {
+public:
+    ResourceScope(
+        guance_rum_handle handle,
+        const char* url,
+        const char* method,
+        const char* resource_type = "native",
+        ResourceCollectionKind kind = ResourceCollectionKind::manual) noexcept
+        : handle_(handle) {
+        const char* started_id = nullptr;
+        try {
+            resource_type_ = resource_type == nullptr ? std::string{} : std::string(resource_type);
+            started_id = kind == ResourceCollectionKind::automatic
+                ? (guance_rum_start_auto_resource)(handle_, url, method)
+                : (guance_rum_start_resource)(handle_, url, method);
+            if (started_id != nullptr) {
+                resource_id_ = started_id;
+            }
+        } catch (...) {
+            if (started_id != nullptr && started_id[0] != '\0') {
+                (guance_rum_stop_resource)(handle_, started_id, 0, -1);
+            }
+            handle_ = nullptr;
+            resource_id_.clear();
+            resource_type_.clear();
+        }
+    }
+
+    ~ResourceScope() {
+        fail();
+    }
+
+    ResourceScope(const ResourceScope&) = delete;
+    ResourceScope& operator=(const ResourceScope&) = delete;
+
+    ResourceScope(ResourceScope&& other) noexcept
+        : handle_(std::exchange(other.handle_, nullptr)),
+          resource_id_(std::move(other.resource_id_)),
+          resource_type_(std::move(other.resource_type_)) {
+        other.resource_id_.clear();
+        other.resource_type_.clear();
+    }
+
+    ResourceScope& operator=(ResourceScope&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        fail();
+        handle_ = std::exchange(other.handle_, nullptr);
+        resource_id_ = std::move(other.resource_id_);
+        resource_type_ = std::move(other.resource_type_);
+        other.resource_id_.clear();
+        other.resource_type_.clear();
+        return *this;
+    }
+
+    [[nodiscard]] bool active() const noexcept {
+        return handle_ != nullptr && !resource_id_.empty();
+    }
+
+    [[nodiscard]] const char* id() const noexcept {
+        return resource_id_.c_str();
+    }
+
+    void complete(
+        int status_code,
+        int64_t response_size = -1,
+        int64_t request_size = -1,
+        const char* trace_id = nullptr,
+        const char* span_id = nullptr,
+        const char* http_protocol = nullptr) noexcept {
+        if (!active()) {
+            return;
+        }
+        (guance_rum_stop_resource_ext)(
+            handle_,
+            resource_id_.c_str(),
+            status_code,
+            response_size,
+            request_size,
+            resource_type_.empty() ? nullptr : resource_type_.c_str(),
+            trace_id,
+            span_id,
+            http_protocol);
+        handle_ = nullptr;
+        resource_id_.clear();
+    }
+
+    void fail() noexcept {
+        complete(0);
+    }
+
+private:
+    guance_rum_handle handle_ = nullptr;
+    std::string resource_id_;
+    std::string resource_type_;
+};
+
+} // namespace guance::rum
 
 #define guance_rum_enable_native_monitoring(handle, config) \
     ::guance::rum::detail::enable_native_monitoring_cpp((handle), (config))
