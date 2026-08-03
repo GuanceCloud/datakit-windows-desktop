@@ -41,8 +41,18 @@ public sealed class WebViewInstrumentationTests
             token,
             type = "action",
             name = "Place order",
-            actionType = "click",
+            actionType = "submit",
             durationMs = 12.5
+        });
+        webView.Core.PostBridgeMessage(pageUrl, new
+        {
+            channel = "guance-rum-webview",
+            version = 1,
+            token,
+            type = "action",
+            name = "Keyboard order",
+            actionType = "key",
+            durationMs = 0
         });
         webView.Core.PostBridgeMessage(pageUrl, new
         {
@@ -95,7 +105,19 @@ public sealed class WebViewInstrumentationTests
         Assert.Contains(lines, line =>
             line.StartsWith("action,", StringComparison.Ordinal) &&
             line.Contains("action_name=Place\\ order", StringComparison.Ordinal) &&
+            line.Contains("action_type=click", StringComparison.Ordinal) &&
             line.Contains("action_source=\"webview\"", StringComparison.Ordinal));
+        Assert.Contains(lines, line =>
+            line.StartsWith("action,", StringComparison.Ordinal) &&
+            line.Contains("action_name=Keyboard\\ order", StringComparison.Ordinal) &&
+            line.Contains("action_type=key", StringComparison.Ordinal) &&
+            line.Contains("action_source=\"webview\"", StringComparison.Ordinal));
+        Assert.All(
+            lines.Where(line => line.StartsWith("action,", StringComparison.Ordinal)),
+            line => Assert.True(
+                line.Contains(",action_type=click,", StringComparison.Ordinal) ||
+                line.Contains(",action_type=key,", StringComparison.Ordinal),
+                $"Unexpected automatic WebView action type: {line}"));
         Assert.Contains(lines, line =>
             line.StartsWith("error,", StringComparison.Ordinal) &&
             line.Contains("error_source=webview", StringComparison.Ordinal) &&
@@ -241,7 +263,7 @@ public sealed class WebViewInstrumentationTests
     }
 
     [Fact]
-    public void BridgeScript_SeparatesClickChangeAndSubmitActionSources()
+    public void BridgeScript_ClassifiesClickChangeAndSubmitByInputSource()
     {
         var script = WebViewBridgeScript.Create("test-token");
 
@@ -256,6 +278,11 @@ public sealed class WebViewInstrumentationTests
         Assert.Contains("if (!element)", script, StringComparison.Ordinal);
         Assert.Contains("isSubmitControl", script, StringComparison.Ordinal);
         Assert.Contains("isChangeControl", script, StringComparison.Ordinal);
+        Assert.Contains("on(document, 'pointerdown'", script, StringComparison.Ordinal);
+        Assert.Contains("on(document, 'keydown'", script, StringComparison.Ordinal);
+        Assert.Contains("actionType: currentActionType()", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("actionType: 'input'", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("actionType: 'submit'", script, StringComparison.Ordinal);
         Assert.Contains("title: text(document.title)", script, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "text(document.title) || String(location.href)",

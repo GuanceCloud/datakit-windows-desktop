@@ -10,6 +10,8 @@ internal static class WinUIReflectionInstrumentation
     private static readonly ConditionalWeakTable<object, AttachmentMarker> ElementAttachments = new();
     private static readonly object ActiveClientGate = new();
     private static WeakReference<RumClient>? ActiveClient;
+    [ThreadStatic]
+    private static bool KeyboardInputActive;
 
     public static void Attach(RumClient client, object window, string? viewName)
     {
@@ -189,6 +191,9 @@ internal static class WinUIReflectionInstrumentation
         }
 
         ElementAttachments.Add(element, new AttachmentMarker());
+        AddEventHandler(element, "PointerPressed", (_, _) => KeyboardInputActive = false);
+        AddEventHandler(element, "KeyDown", (_, _) => KeyboardInputActive = true);
+        AddEventHandler(element, "KeyUp", (_, _) => QueueKeyboardInputReset());
         if (IsWebViewCandidate(element))
         {
             client.AttachDiscoveredWebView(element);
@@ -272,21 +277,40 @@ internal static class WinUIReflectionInstrumentation
         }
     }
 
-    private static void TrackWinUIAction(RumClient client, object element, string actionType, bool replayAsInput = false)
+    private static void TrackWinUIAction(
+        RumClient client,
+        object element,
+        string replayInteractionType,
+        bool replayAsInput = false)
     {
         if (!TryGetActiveClient(out client))
         {
             return;
         }
         var name = ElementName(element);
-        client.AddAction(name, actionType, TimeSpan.Zero);
+        client.AddAction(
+            name,
+            KeyboardInputActive ? RumConstants.ActionTypeKey : RumConstants.ActionTypeClick,
+            TimeSpan.Zero);
         if (replayAsInput)
         {
             client.CaptureSessionReplayInput(name);
             return;
         }
 
-        client.CaptureSessionReplayInteraction(actionType, name);
+        client.CaptureSessionReplayInteraction(replayInteractionType, name);
+    }
+
+    private static void QueueKeyboardInputReset()
+    {
+        var context = SynchronizationContext.Current;
+        if (context is null)
+        {
+            KeyboardInputActive = false;
+            return;
+        }
+
+        context.Post(_ => KeyboardInputActive = false, null);
     }
 
     private static void TrackWinUIInputFocus(RumClient client, object element)

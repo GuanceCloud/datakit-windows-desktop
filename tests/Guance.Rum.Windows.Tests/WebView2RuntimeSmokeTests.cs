@@ -98,19 +98,25 @@ public sealed class WebView2RuntimeSmokeTests
                     "submit.textContent='Single submit';" +
                     "form.appendChild(submit);" +
                     "document.body.appendChild(form);" +
-                    "submit.click();");
+                    "submit.click();" +
+                    "const keyboardButton=document.createElement('button');" +
+                    "keyboardButton.setAttribute('aria-label','Keyboard action');" +
+                    "document.body.appendChild(keyboardButton);" +
+                    "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));" +
+                    "keyboardButton.click();" +
+                    "document.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',bubbles:true}));");
                 PumpUntil(
                     () => controlCheck.IsCompleted,
                     TimeSpan.FromSeconds(10),
                     "WebView2 did not execute the single-action control check.");
                 controlCheck.GetAwaiter().GetResult();
                 PumpUntil(
-                    () => CountMeasurements(rumQueue, "action") >= actionCountBeforeControlCheck + 2,
+                    () => CountMeasurements(rumQueue, "action") >= actionCountBeforeControlCheck + 3,
                     TimeSpan.FromSeconds(10),
                     "WebView2 bridge did not collect the control actions.");
                 PumpFor(TimeSpan.FromMilliseconds(250));
                 Assert.Equal(
-                    actionCountBeforeControlCheck + 2,
+                    actionCountBeforeControlCheck + 3,
                     CountMeasurements(rumQueue, "action"));
 
                 var interaction = webView.ExecuteScriptAsync(
@@ -135,6 +141,10 @@ public sealed class WebView2RuntimeSmokeTests
                 Assert.Contains(lines, item =>
                     item.Line.StartsWith("action,", StringComparison.Ordinal) &&
                     item.Line.Contains("action_name=Send\\ HTTP\\ Request", StringComparison.Ordinal));
+                Assert.Contains(lines, item =>
+                    item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+                    item.Line.Contains("action_name=Keyboard\\ action", StringComparison.Ordinal) &&
+                    item.Line.Contains("action_type=key", StringComparison.Ordinal));
                 Assert.Contains(lines, item =>
                     item.Line.StartsWith("error,", StringComparison.Ordinal) &&
                     item.Line.Contains("error_source=webview", StringComparison.Ordinal));

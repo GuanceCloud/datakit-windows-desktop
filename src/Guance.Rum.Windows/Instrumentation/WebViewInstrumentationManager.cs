@@ -335,7 +335,9 @@ internal sealed class WebViewInstrumentationManager : IDisposable
                     context["action_source"] = "webview";
                     client.AddAction(
                         message.Name!,
-                        message.ActionType!,
+                        string.Equals(message.ActionType, RumConstants.ActionTypeKey, StringComparison.Ordinal)
+                            ? RumConstants.ActionTypeKey
+                            : RumConstants.ActionTypeClick,
                         TimeSpan.FromMilliseconds(message.DurationMilliseconds),
                         context);
                     break;

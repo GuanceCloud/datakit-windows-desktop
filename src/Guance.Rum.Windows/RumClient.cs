@@ -84,7 +84,13 @@ public sealed class RumClient : IAsyncDisposable
     {
     }
 
-    internal RumClient(RumConfig config, IRumQueue queue, IDatawayTransport transport, ISessionReplayQueue sessionReplayQueue, ISessionReplayTransport sessionReplayTransport)
+    internal RumClient(
+        RumConfig config,
+        IRumQueue queue,
+        IDatawayTransport transport,
+        ISessionReplayQueue sessionReplayQueue,
+        ISessionReplayTransport sessionReplayTransport,
+        IApplicationLaunchClock? applicationLaunchClock = null)
     {
         config.Validate();
         this.config = config;
@@ -96,7 +102,7 @@ public sealed class RumClient : IAsyncDisposable
         session = new SessionManager(sampling);
         platformInfo = RumPlatformInfo.Capture();
         webViewInstrumentation = new WebViewInstrumentationManager(this);
-        applicationLaunch = new ApplicationLaunchTracker(TrackApplicationLaunch);
+        applicationLaunch = new ApplicationLaunchTracker(TrackApplicationLaunch, applicationLaunchClock);
         sessionReplay = new SessionReplayManager(config, sessionReplayQueue, sessionReplayPrivacy);
         rumRetryBackoff = new RetryBackoff(config.FlushInterval);
         sessionReplayRetryBackoff = new RetryBackoff(config.SessionReplay.FlushInterval);

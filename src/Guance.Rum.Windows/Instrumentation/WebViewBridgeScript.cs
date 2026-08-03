@@ -59,6 +59,19 @@ internal static class WebViewBridgeScript
         target.addEventListener(eventName, handler, options);
         cleanupCallbacks.push(() => target.removeEventListener(eventName, handler, options));
     };
+    let activeActionType = 'click';
+    const currentActionType = () => activeActionType;
+    on(document, 'pointerdown', () => {
+        activeActionType = 'click';
+    }, true);
+    on(document, 'keydown', () => {
+        activeActionType = 'key';
+    }, true);
+    on(document, 'keyup', () => {
+        queueMicrotask(() => {
+            activeActionType = 'click';
+        });
+    }, true);
     const post = (type, data) => {
         try {
             if (!active ||
@@ -221,18 +234,18 @@ internal static class WebViewBridgeScript
         }
         post('action', {
             name: targetName(element),
-            actionType: 'click',
+            actionType: currentActionType(),
             durationMs: 0
         });
     }, true);
     on(document, 'change', event => post('action', {
         name: targetName(event.target),
-        actionType: 'input',
+        actionType: currentActionType(),
         durationMs: 0
     }), true);
     on(document, 'submit', event => post('action', {
         name: targetName(event.target),
-        actionType: 'submit',
+        actionType: currentActionType(),
         durationMs: 0
     }), true);
 

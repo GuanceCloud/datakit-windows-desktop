@@ -97,6 +97,51 @@ public sealed class ExplicitDurationTests
         Assert.Contains("app_first_frame_init_time=", launch, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AutomaticLaunch_EnqueuesHotActionAfterLongBackground()
+    {
+        var rumQueue = new MemoryRumQueue();
+        var launchClock = new FakeApplicationLaunchClock();
+        await using var client = new RumClient(
+            new RumConfig
+            {
+                DatakitUrl = "http://127.0.0.1:9529",
+                RumAppId = "app",
+                FlushInterval = TimeSpan.FromHours(1)
+            },
+            rumQueue,
+            new RetryRumTransport(),
+            new MemoryReplayQueue(),
+            new RetryReplayTransport(),
+            launchClock);
+
+        client.EnableAutomaticInstrumentation(new AutomaticInstrumentationOptions
+        {
+            EnableWpf = false,
+            EnableWinForms = false,
+            EnableWinUI = false,
+            EnableWebView = false,
+            EnableHttpClient = false,
+            EnableUnhandledException = false,
+            EnableUiThreadBlock = false,
+            EnableAppLaunch = true
+        });
+        client.MarkApplicationWindowCreated();
+        client.NotifyApplicationFrameRendered();
+        client.NotifyApplicationBackgrounded();
+        launchClock.Advance(TimeSpan.FromSeconds(10));
+        client.NotifyApplicationForegrounding();
+        launchClock.Advance(TimeSpan.FromMilliseconds(50));
+        client.NotifyApplicationFrameRendered();
+        await client.FlushAsync();
+
+        var items = await rumQueue.PeekAsync(10, CancellationToken.None);
+        var launch = Assert.Single(items, item =>
+            item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+            item.Line.Contains("action_type=launch_hot", StringComparison.Ordinal)).Line;
+        Assert.Contains("action_name=app\\ hot\\ start", launch, StringComparison.Ordinal);
+    }
+
     private sealed class MemoryReplayQueue : ISessionReplayQueue
     {
         public Task EnqueueAsync(string contentType, byte[] body, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -119,5 +164,25 @@ public sealed class ExplicitDurationTests
         public Task<SendResult> SendAsync(QueuedSessionReplaySegment segment, CancellationToken cancellationToken) =>
             Task.FromResult(SendResult.Retry(500, "hold queue for assertions"));
         public void Dispose() { }
+    }
+
+    private sealed class FakeApplicationLaunchClock : IApplicationLaunchClock
+    {
+        private long unixNanoseconds = 200;
+        private long monotonicNanoseconds = 20;
+
+        public long ProcessStartUnixNanoseconds => 100;
+
+        public ApplicationLaunchMoment Now() => new(unixNanoseconds, monotonicNanoseconds);
+
+        public long ElapsedNanoseconds(long startTimestamp, long endTimestamp) =>
+            Math.Max(0, endTimestamp - startTimestamp);
+
+        public void Advance(TimeSpan duration)
+        {
+            var nanoseconds = duration.Ticks * 100;
+            unixNanoseconds += nanoseconds;
+            monotonicNanoseconds += nanoseconds;
+        }
     }
 }

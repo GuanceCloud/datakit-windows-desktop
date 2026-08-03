@@ -38,6 +38,7 @@ public sealed class DesktopAutoInstrumentationSmokeTests
             await using var client = CreateClient(rumQueue, replayQueue);
 
             var button = new WpfButton { Name = "SmokeButton", Content = "Save" };
+            var keyboardButton = new WpfButton { Name = "KeyboardButton", Content = "Open" };
             var textBox = new WpfTextBox { Name = "SmokeInput", Text = "initial" };
             var readOnlyTextBox = new WpfTextBox { Name = "ReadOnlyLog", Text = "ready", IsReadOnly = true };
             var slider = new WpfSlider { Name = "ReplaySlider", Minimum = 0, Maximum = 100, Value = 20 };
@@ -46,7 +47,7 @@ public sealed class DesktopAutoInstrumentationSmokeTests
                 Title = "WpfSmokeWindow",
                 Width = 320,
                 Height = 240,
-                Content = new WpfStackPanel { Children = { button, textBox, readOnlyTextBox, slider } }
+                Content = new WpfStackPanel { Children = { button, keyboardButton, textBox, readOnlyTextBox, slider } }
             };
 
             window.Show();
@@ -67,6 +68,16 @@ public sealed class DesktopAutoInstrumentationSmokeTests
             Assert.Contains(initialReplayBodies, body => body.Contains("\"type\":10", StringComparison.Ordinal));
 
             button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, button));
+            keyboardButton.RaiseEvent(new System.Windows.Input.KeyEventArgs(
+                System.Windows.Input.Keyboard.PrimaryDevice,
+                PresentationSource.FromVisual(keyboardButton),
+                Environment.TickCount,
+                System.Windows.Input.Key.Space)
+            {
+                RoutedEvent = UIElement.PreviewKeyDownEvent,
+                Source = keyboardButton
+            });
+            keyboardButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, keyboardButton));
             Thread.Sleep(120);
             PumpWpfDispatcher();
             textBox.Focus();
@@ -84,7 +95,15 @@ public sealed class DesktopAutoInstrumentationSmokeTests
             window.Close();
             await client.FlushAsync();
 
-            Assert.Contains(rumQueue.Items, item => item.Line.Contains("action", StringComparison.Ordinal) && item.Line.Contains("SmokeButton", StringComparison.Ordinal));
+            Assert.Contains(rumQueue.Items, item =>
+                item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+                item.Line.Contains("action_name=SmokeButton", StringComparison.Ordinal) &&
+                item.Line.Contains("action_type=click", StringComparison.Ordinal));
+            Assert.Contains(rumQueue.Items, item =>
+                item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+                item.Line.Contains("action_name=KeyboardButton", StringComparison.Ordinal) &&
+                item.Line.Contains("action_type=key", StringComparison.Ordinal));
+            AssertOnlyExpectedAutomaticActionTypes(rumQueue.Items);
             Assert.Contains(rumQueue.Items, item => item.Line.Contains("action", StringComparison.Ordinal) && item.Line.Contains("ReplaySlider", StringComparison.Ordinal));
             var replayBodies = replayQueue.Items.Select(item => Encoding.UTF8.GetString(ExtractAndDecompressSegment(item.Body))).ToArray();
             Assert.Contains(replayBodies, body => body.Contains("\"source\":2", StringComparison.Ordinal) && body.Contains("\"positions\":[", StringComparison.Ordinal));
@@ -400,10 +419,12 @@ public sealed class DesktopAutoInstrumentationSmokeTests
             await using var client = CreateClient(rumQueue, replayQueue);
 
             using var form = new WinForms.Form { Text = "WinFormsSmokeWindow", Width = 320, Height = 240 };
-            var button = new WinForms.Button { Name = "SmokeButton", Text = "Save", Left = 10, Top = 10, Width = 120 };
-            var textBox = new WinForms.TextBox { Name = "SmokeInput", Text = "initial", Left = 10, Top = 50, Width = 180 };
-            var readOnlyTextBox = new WinForms.TextBox { Name = "ReadOnlyLog", Text = "ready", ReadOnly = true, Left = 10, Top = 80, Width = 180 };
+            var button = new WinForms.Button { Name = "SmokeButton", Text = "Save", Left = 10, Top = 10, Width = 120, TabIndex = 0 };
+            var keyboardButton = new KeyboardWinFormsButton { Name = "KeyboardButton", Text = "Open", Left = 150, Top = 10, Width = 120, TabStop = false };
+            var textBox = new WinForms.TextBox { Name = "SmokeInput", Text = "initial", Left = 10, Top = 50, Width = 180, TabIndex = 1 };
+            var readOnlyTextBox = new WinForms.TextBox { Name = "ReadOnlyLog", Text = "ready", ReadOnly = true, Left = 10, Top = 80, Width = 180, TabStop = false };
             form.Controls.Add(button);
+            form.Controls.Add(keyboardButton);
             form.Controls.Add(textBox);
             form.Controls.Add(readOnlyTextBox);
 
@@ -425,7 +446,14 @@ public sealed class DesktopAutoInstrumentationSmokeTests
                 timer.Stop();
                 try
                 {
+                    button.Focus();
+                    PostMessage(button.Handle, 0x0100, (nint)WinForms.Keys.Tab, 0);
+                    PostMessage(button.Handle, 0x0101, (nint)WinForms.Keys.Tab, 0);
+                    WinForms.Application.DoEvents();
                     button.PerformClick();
+                    keyboardButton.RaiseKeyDown(WinForms.Keys.Space);
+                    keyboardButton.PerformClick();
+                    keyboardButton.RaiseKeyUp(WinForms.Keys.Space);
                     textBox.Focus();
                     textBox.Text = "secret-value";
                     readOnlyTextBox.Text = "programmatic log update";
@@ -453,7 +481,19 @@ public sealed class DesktopAutoInstrumentationSmokeTests
                 throw callbackError;
             }
 
-            Assert.Contains(rumQueue.Items, item => item.Line.Contains("action", StringComparison.Ordinal) && item.Line.Contains("SmokeButton", StringComparison.Ordinal));
+            Assert.Contains(rumQueue.Items, item =>
+                item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+                item.Line.Contains("action_name=SmokeButton", StringComparison.Ordinal) &&
+                item.Line.Contains("action_type=click", StringComparison.Ordinal));
+            Assert.Contains(rumQueue.Items, item =>
+                item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+                item.Line.Contains("action_name=KeyboardButton", StringComparison.Ordinal) &&
+                item.Line.Contains("action_type=key", StringComparison.Ordinal));
+            Assert.Contains(rumQueue.Items, item =>
+                item.Line.StartsWith("action,", StringComparison.Ordinal) &&
+                item.Line.Contains("action_name=SmokeInput", StringComparison.Ordinal) &&
+                item.Line.Contains("action_type=key", StringComparison.Ordinal));
+            AssertOnlyExpectedAutomaticActionTypes(rumQueue.Items);
             var replayBodies = replayQueue.Items.Select(item => Encoding.UTF8.GetString(ExtractAndDecompressSegment(item.Body))).ToArray();
             Assert.Contains(replayBodies, body => body.Contains("\"source\":2", StringComparison.Ordinal) && body.Contains("\"positions\":[", StringComparison.Ordinal));
             Assert.Contains(replayBodies, body => body.Contains("\"source\":0", StringComparison.Ordinal) && body.Contains("\"event_type\":\"input\"", StringComparison.Ordinal));
@@ -484,6 +524,40 @@ public sealed class DesktopAutoInstrumentationSmokeTests
             replayQueue,
             new RetryReplayTransport());
     }
+
+    private sealed class KeyboardWinFormsButton : WinForms.Button
+    {
+        public void RaiseKeyDown(WinForms.Keys key)
+        {
+            OnKeyDown(new WinForms.KeyEventArgs(key));
+        }
+
+        public void RaiseKeyUp(WinForms.Keys key)
+        {
+            OnKeyUp(new WinForms.KeyEventArgs(key));
+        }
+    }
+
+    private static void AssertOnlyExpectedAutomaticActionTypes(IEnumerable<QueuedRumEvent> items)
+    {
+        var allowedTypeTags = new[]
+        {
+            ",action_type=click,",
+            ",action_type=key,",
+            ",action_type=launch_cold,",
+            ",action_type=launch_hot,"
+        };
+
+        Assert.All(
+            items.Where(item => item.Line.StartsWith("action,", StringComparison.Ordinal)),
+            item => Assert.Contains(
+                allowedTypeTags,
+                typeTag => item.Line.Contains(typeTag, StringComparison.Ordinal)));
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 
     private static Task RunStaAsync(Func<Task> action)
     {

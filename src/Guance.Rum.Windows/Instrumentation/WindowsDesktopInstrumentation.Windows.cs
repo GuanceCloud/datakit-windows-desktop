@@ -26,6 +26,11 @@ internal static partial class WindowsDesktopInstrumentation
     private static WeakReference<RumClient>? ActiveClient;
     private static bool WpfClassHandlersRegistered;
     private static bool WinFormsApplicationHandlersRegistered;
+    private static WinFormsInputMessageFilter? WinFormsInputFilter;
+    [ThreadStatic]
+    private static bool WpfKeyboardInputActive;
+    [ThreadStatic]
+    private static bool WinFormsKeyboardInputActive;
 
     static partial void TryAttachPlatform(RumClient client, AutomaticInstrumentationOptions options)
     {
@@ -122,6 +127,18 @@ internal static partial class WindowsDesktopInstrumentation
         WpfClassHandlersRegistered = true;
 
         EventManager.RegisterClassHandler(
+            typeof(UIElement),
+            UIElement.PreviewMouseDownEvent,
+            new System.Windows.Input.MouseButtonEventHandler((_, _) => WpfKeyboardInputActive = false),
+            true);
+
+        EventManager.RegisterClassHandler(
+            typeof(UIElement),
+            UIElement.PreviewKeyUpEvent,
+            new System.Windows.Input.KeyEventHandler((sender, _) => QueueWpfKeyboardInputReset(sender)),
+            true);
+
+        EventManager.RegisterClassHandler(
             typeof(FrameworkElement),
             FrameworkElement.LoadedEvent,
             new RoutedEventHandler((sender, _) =>
@@ -146,7 +163,7 @@ internal static partial class WindowsDesktopInstrumentation
                 }
                 var element = sender as FrameworkElement;
                 var name = WpfElementName(sender);
-                active.AddAction(name, "click", TimeSpan.Zero);
+                active.AddAction(name, WpfActionType(), TimeSpan.Zero);
                 var ownerWindow = element is null ? app.MainWindow : Window.GetWindow(element) ?? app.MainWindow;
                 if (ownerWindow is not null && element is not null)
                 {
@@ -251,11 +268,12 @@ internal static partial class WindowsDesktopInstrumentation
             UIElement.PreviewKeyDownEvent,
             new System.Windows.Input.KeyEventHandler((sender, args) =>
             {
+                WpfKeyboardInputActive = true;
                 if (ReferenceEquals(sender, args.OriginalSource) && TryFormatWpfShortcut(sender, args, out var shortcutName))
                 {
                     if (TryGetActiveClient(out var active))
                     {
-                        active.AddAction(shortcutName, "shortcut", TimeSpan.Zero);
+                        active.AddAction(shortcutName, RumConstants.ActionTypeKey, TimeSpan.Zero);
                         active.CaptureSessionReplayInteraction("shortcut", shortcutName);
                         QueueWpfReplaySnapshot(sender);
                     }
@@ -273,7 +291,7 @@ internal static partial class WindowsDesktopInstrumentation
                     var commandName = WpfCommandActionName(sender, args.Command);
                     if (TryGetActiveClient(out var active))
                     {
-                        active.AddAction(commandName, "command", TimeSpan.Zero);
+                        active.AddAction(commandName, WpfActionType(), TimeSpan.Zero);
                         active.CaptureSessionReplayInteraction("command", commandName);
                         QueueWpfReplaySnapshot(sender);
                     }
@@ -374,21 +392,21 @@ internal static partial class WindowsDesktopInstrumentation
         System.Windows.Media.CompositionTarget.Rendering += rendering;
     }
 
-    private static void TrackWpfAction(object sender, string actionType, bool replayAsInput = false)
+    private static void TrackWpfAction(object sender, string replayInteractionType, bool replayAsInput = false)
     {
         if (!TryGetActiveClient(out var client))
         {
             return;
         }
         var name = WpfElementName(sender);
-        client.AddAction(name, actionType, TimeSpan.Zero);
+        client.AddAction(name, WpfActionType(), TimeSpan.Zero);
         if (replayAsInput)
         {
             client.CaptureSessionReplayInput(name);
         }
         else
         {
-            client.CaptureSessionReplayInteraction(actionType, name);
+            client.CaptureSessionReplayInteraction(replayInteractionType, name);
         }
 
         QueueWpfReplaySnapshot(sender);
@@ -469,6 +487,25 @@ internal static partial class WindowsDesktopInstrumentation
         return true;
     }
 
+    private static string WpfActionType()
+    {
+        return WpfKeyboardInputActive ? RumConstants.ActionTypeKey : RumConstants.ActionTypeClick;
+    }
+
+    private static void QueueWpfKeyboardInputReset(object sender)
+    {
+        var dispatcher = (sender as System.Windows.Threading.DispatcherObject)?.Dispatcher ?? WpfApplication.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            WpfKeyboardInputActive = false;
+            return;
+        }
+
+        dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() => WpfKeyboardInputActive = false));
+    }
+
     private static void AttachWinForms(RumClient client)
     {
         if (WinFormsApplicationHandlersRegistered)
@@ -477,6 +514,8 @@ internal static partial class WindowsDesktopInstrumentation
         }
 
         WinFormsApplicationHandlersRegistered = true;
+        WinFormsInputFilter = new WinFormsInputMessageFilter();
+        WinForms.Application.AddMessageFilter(WinFormsInputFilter);
         WinForms.Application.ThreadException += (_, args) =>
         {
             if (TryGetActiveClient(out var active))
@@ -547,7 +586,9 @@ internal static partial class WindowsDesktopInstrumentation
                     active.StopView();
                 }
             };
-            form.KeyDown += (_, args) => TrackWinFormsShortcut(client, form, args);
+            form.KeyDown += (_, args) => TrackWinFormsKeyDown(client, form, args);
+            form.KeyUp += (_, _) => QueueWinFormsKeyboardInputReset(form);
+            form.MouseDown += (_, _) => WinFormsKeyboardInputActive = false;
             QueueWinFormsFrameCompletion(form, attachment);
         }
 
@@ -602,7 +643,9 @@ internal static partial class WindowsDesktopInstrumentation
         if (isFirstAttachment)
         {
             WinFormsControlAttachments.Add(control, new AttachmentMarker());
-            control.KeyDown += (_, args) => TrackWinFormsShortcut(client, control, args);
+            control.KeyDown += (_, args) => TrackWinFormsKeyDown(client, control, args);
+            control.KeyUp += (_, _) => QueueWinFormsKeyboardInputReset(control);
+            control.MouseDown += (_, _) => WinFormsKeyboardInputActive = false;
             if (IsWebViewCandidate(control))
             {
                 client.AttachDiscoveredWebView(control);
@@ -626,7 +669,7 @@ internal static partial class WindowsDesktopInstrumentation
 
         if (control is WinForms.CheckBox or WinForms.RadioButton)
         {
-            control.Click += (_, _) => TrackWinFormsControlClick(client, control, "click");
+            control.Click += (_, _) => TrackWinFormsControlClick(client, control);
             if (control is WinForms.CheckBox checkBox)
             {
                 checkBox.CheckedChanged += (_, _) => TrackWinFormsAction(client, ControlName(checkBox), "toggle");
@@ -638,12 +681,12 @@ internal static partial class WindowsDesktopInstrumentation
         }
         else if (control is WinForms.ButtonBase)
         {
-            control.Click += (_, _) => TrackWinFormsControlClick(client, control, "click");
+            control.Click += (_, _) => TrackWinFormsControlClick(client, control);
         }
 
         if (control is WinForms.TextBoxBase)
         {
-            control.Enter += (_, _) => TrackWinFormsInput(client, control);
+            control.GotFocus += (_, _) => TrackWinFormsInput(client, control);
             control.TextChanged += (_, _) =>
             {
                 if (CanTrackWinFormsInput(control) && TryGetActiveClient(out var active))
@@ -654,7 +697,7 @@ internal static partial class WindowsDesktopInstrumentation
         }
         else if (control is WinForms.ComboBox comboBox)
         {
-            comboBox.Enter += (_, _) => TrackWinFormsInput(client, comboBox);
+            comboBox.GotFocus += (_, _) => TrackWinFormsInput(client, comboBox);
             comboBox.SelectionChangeCommitted += (_, _) => TrackWinFormsAction(client, ControlName(comboBox), "selection");
         }
         else if (control is WinForms.NumericUpDown numericUpDown)
@@ -711,14 +754,14 @@ internal static partial class WindowsDesktopInstrumentation
         }
     }
 
-    private static void TrackWinFormsControlClick(RumClient client, WinForms.Control control, string actionType)
+    private static void TrackWinFormsControlClick(RumClient client, WinForms.Control control)
     {
         if (!TryGetActiveClient(out client))
         {
             return;
         }
         var name = ControlName(control);
-        client.AddAction(name, actionType, TimeSpan.Zero);
+        client.AddAction(name, WinFormsActionType(), TimeSpan.Zero);
         var point = control.FindForm()?.PointToClient(WinForms.Control.MousePosition) ?? System.Drawing.Point.Empty;
         client.CaptureSessionReplayClick(control, name, point.X, point.Y);
     }
@@ -730,7 +773,7 @@ internal static partial class WindowsDesktopInstrumentation
             return;
         }
         var name = ControlName(control);
-        client.AddAction(name, "input", TimeSpan.Zero);
+        client.AddAction(name, WinFormsActionType(), TimeSpan.Zero);
         client.CaptureSessionReplayInput(name);
     }
 
@@ -741,14 +784,14 @@ internal static partial class WindowsDesktopInstrumentation
                (control is not WinForms.TextBoxBase textBox || !textBox.ReadOnly);
     }
 
-    private static void TrackWinFormsAction(RumClient client, string name, string actionType)
+    private static void TrackWinFormsAction(RumClient client, string name, string replayInteractionType)
     {
         if (!TryGetActiveClient(out client))
         {
             return;
         }
-        client.AddAction(name, actionType, TimeSpan.Zero);
-        client.CaptureSessionReplayInteraction(actionType, name);
+        client.AddAction(name, WinFormsActionType(), TimeSpan.Zero);
+        client.CaptureSessionReplayInteraction(replayInteractionType, name);
     }
 
     private static void TrackWinFormsShortcut(RumClient client, WinForms.Control control, WinForms.KeyEventArgs args)
@@ -766,8 +809,49 @@ internal static partial class WindowsDesktopInstrumentation
         }
 
         var name = $"{ControlName(control)}.{args.Modifiers}+{args.KeyCode}";
-        client.AddAction(name, "shortcut", TimeSpan.Zero);
+        client.AddAction(name, RumConstants.ActionTypeKey, TimeSpan.Zero);
         client.CaptureSessionReplayInteraction("shortcut", name);
+    }
+
+    private static void TrackWinFormsKeyDown(RumClient client, WinForms.Control control, WinForms.KeyEventArgs args)
+    {
+        WinFormsKeyboardInputActive = true;
+        TrackWinFormsShortcut(client, control, args);
+    }
+
+    private static string WinFormsActionType()
+    {
+        return WinFormsKeyboardInputActive ? RumConstants.ActionTypeKey : RumConstants.ActionTypeClick;
+    }
+
+    private static void QueueWinFormsKeyboardInputReset(WinForms.Control control)
+    {
+        if (!control.IsHandleCreated || control.IsDisposed)
+        {
+            WinFormsKeyboardInputActive = false;
+            return;
+        }
+
+        try
+        {
+            control.BeginInvoke(new Action(() => WinFormsKeyboardInputActive = false));
+        }
+        catch (InvalidOperationException)
+        {
+            WinFormsKeyboardInputActive = false;
+        }
+    }
+
+    private static void QueueWinFormsKeyboardInputReset()
+    {
+        var context = SynchronizationContext.Current;
+        if (context is null)
+        {
+            WinFormsKeyboardInputActive = false;
+            return;
+        }
+
+        context.Post(_ => WinFormsKeyboardInputActive = false, null);
     }
 
     private static string ControlName(WinForms.Control control)
@@ -809,6 +893,43 @@ internal static partial class WindowsDesktopInstrumentation
     private sealed class ReplaySnapshotMarker
     {
         public System.Windows.Threading.DispatcherTimer? Timer { get; set; }
+    }
+
+    private sealed class WinFormsInputMessageFilter : WinForms.IMessageFilter
+    {
+        private const int KeyDownMessage = 0x0100;
+        private const int KeyUpMessage = 0x0101;
+        private const int SystemKeyDownMessage = 0x0104;
+        private const int SystemKeyUpMessage = 0x0105;
+        private const int LeftButtonDownMessage = 0x0201;
+        private const int RightButtonDownMessage = 0x0204;
+        private const int MiddleButtonDownMessage = 0x0207;
+        private const int ExtraButtonDownMessage = 0x020B;
+        private const int PointerDownMessage = 0x0246;
+
+        public bool PreFilterMessage(ref WinForms.Message message)
+        {
+            switch (message.Msg)
+            {
+                case KeyDownMessage:
+                case SystemKeyDownMessage:
+                    WinFormsKeyboardInputActive = true;
+                    break;
+                case KeyUpMessage:
+                case SystemKeyUpMessage:
+                    QueueWinFormsKeyboardInputReset();
+                    break;
+                case LeftButtonDownMessage:
+                case RightButtonDownMessage:
+                case MiddleButtonDownMessage:
+                case ExtraButtonDownMessage:
+                case PointerDownMessage:
+                    WinFormsKeyboardInputActive = false;
+                    break;
+            }
+
+            return false;
+        }
     }
 }
 
