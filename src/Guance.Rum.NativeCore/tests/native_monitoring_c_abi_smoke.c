@@ -27,5 +27,22 @@ int main(void) {
     assert(resources.redacted_query_parameter_names != NULL);
     assert(resources.redacted_query_parameter_name_count > 0);
     assert(guance_rum_configure_resource_collection(NULL, &resources) == 0);
+
+    guance_rum_trace_config trace;
+    guance_rum_trace_config_init(&trace);
+    assert(trace.struct_size == sizeof(trace));
+    assert(trace.version == GUANCE_RUM_TRACE_CONFIG_VERSION);
+    assert(trace.enable_auto_trace == 0);
+    assert(trace.enable_link_rum_data == 0);
+    assert(trace.sample_rate == 1.0);
+    assert(trace.trace_type == GUANCE_RUM_TRACE_DDTRACE);
+    assert(guance_rum_configure_trace(NULL, &trace) == 0);
+
+    guance_rum_trace_context context;
+    guance_rum_trace_context_init(&context);
+    assert(context.struct_size == sizeof(context));
+    assert(context.version == GUANCE_RUM_TRACE_CONTEXT_VERSION);
+    assert(context.header_count == 0);
+    assert(guance_rum_create_trace_context(NULL, "https://example.com", "GET", &context) == 0);
     return 0;
 }

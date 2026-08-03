@@ -6,6 +6,7 @@
 #include "line_protocol.h"
 #include "queue_store.h"
 #include "resource_collection.h"
+#include "trace_context.h"
 
 #include <atomic>
 #include <memory>
@@ -86,6 +87,10 @@ public:
     void stop_resource(const char* resource_id, int status_code, int64_t response_size);
     void stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol);
     bool configure_resource_collection(const guance_rum_resource_collection_config& config);
+    bool configure_trace(const guance_rum_trace_config& config);
+    std::optional<TraceContext> create_trace_context(
+        const char* url,
+        const char* method) const;
     void add_error(const char* stack, const char* message, const char* error_type, const char* source);
     void add_long_task(int64_t duration_ns, const char* stack);
     void start_session_replay();
@@ -185,6 +190,7 @@ private:
     std::unique_ptr<QueueStore> replay_queue_;
     std::unique_ptr<NativeMonitoring> native_monitoring_;
     ResourceCollectionConfig resource_collection_config_ = default_resource_collection_config();
+    TraceConfig trace_config_;
     std::vector<ReplaySegment> replay_error_buffer_;
     std::vector<ReplayPendingRecord> replay_pending_records_;
     std::vector<uintptr_t> replay_windows_;

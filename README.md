@@ -10,14 +10,14 @@ Windows desktop RUM SDK for reporting user behavior data to Dataway or local Dat
 - Manual APIs for View, Action, Error, Resource, LongTask, user binding, global context, flush, and shutdown.
 - .NET automatic instrumentation entry points for WPF, WinForms, WinUI, `HttpClient`, unhandled exceptions, and UI-thread long tasks.
 - Electron hybrid UI acceptance sample with a Vite/file renderer, secure preload bridge, loopback resource tests, an independently instrumented remote renderer window, and the official Guance Browser RUM SDK.
-- Native C ABI for C/C++ safe automatic boundaries and manual behavior reporting.
+- Native C ABI for C/C++ safe automatic boundaries, WinHTTP trace propagation, and manual behavior reporting.
 - Opt-in native Win32 UI hang detection plus next-start recovery reporting for unhandled SEH and `std::terminate`; minimal crash dumps are local-only and disabled by default.
 - Experimental Session Replay implementation for .NET and native apps. Replay validation and release support are deferred to Phase 2 and are disabled by default in every Phase 1 sample.
 - Native fallback persistence uses an on-disk FIFO file queue when SQLite is not linked, so the packaged DLL keeps failed events across process restarts.
 
 Automatic WPF, WinForms, and WinUI instrumentation captures window view lifecycle, resize replay events, button/menu clicks, text input focus and changes, selector changes, toggle changes, keyboard shortcuts where available, WPF commands, WinForms grid cell interactions, and dynamically added controls discovered during idle scans or WinUI loaded-tree scans. `HttpClient` diagnostics classify resources as `http` or `grpc` and add network instrumentation metadata when available.
 Automatically collected interaction Actions use `action_type=click` for pointer/control activation and `action_type=key` for keyboard activation. Application startup Actions retain `launch_cold` and `launch_hot`; semantic values such as `menu`, `input`, `selection`, `toggle`, `value_change`, `shortcut`, `command`, `grid_cell_click`, and `submit` are not emitted as automatic Action types.
-HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. Resource events also carry trace/span IDs, HTTP protocol/version metadata, and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown.
+HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. When trace linking is enabled, Resource events carry the same trace/span IDs injected into the outgoing request, plus HTTP protocol/version metadata and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown.
 
 The Electron renderer uses the Web RUM contract and is accepted into the same Guance RUM application as the Windows samples when it uses the same application ID. It is identified as Windows through the browser OS dimensions and the `windows_desktop_platform=windows`, `windows_desktop_runtime=electron`, and `windows_integration_mode=hybrid` context tags; it does not impersonate the managed `df_windows_rum_sdk` identity.
 
@@ -33,6 +33,14 @@ RumSdk.Init(new RumConfig
     RumAppId = "<rum-app-id>",
     ServiceName = "desktop-client",
     Env = "prod",
+    Trace = new RumTraceConfig
+    {
+        EnableAutoTrace = true,
+        EnableLinkRumData = true,
+        TraceType = RumTraceType.TraceParent,
+        // Use an explicit allow-list before sending tracing headers.
+        ShouldTrace = uri => uri.Host.EndsWith(".example.com", StringComparison.OrdinalIgnoreCase)
+    },
     // Phase 1 validates RUM only. Session Replay is a Phase 2 target.
     SessionReplay = new RumSessionReplayConfig { Enabled = false },
     Privacy = new RumPrivacyConfig
@@ -77,6 +85,15 @@ RumSdk.Init(new RumConfig
     ServiceName = "desktop-client"
 });
 ```
+
+Trace propagation is opt-in and supports `DdTrace`, `ZipkinMultiHeader`,
+`ZipkinSingleHeader`, `TraceParent`, `SkyWalking`, and `Jaeger`. The trace
+sampling decision controls the propagated sampled flag; IDs are still generated
+for unsampled requests. `EnableLinkRumData` controls only whether those IDs are
+copied to the RUM Resource. Set `RumTraceConfig.ContextProvider` to supply custom
+headers and IDs. Global `HttpClient` interception requires
+`EnableAutomaticInstrumentation`; custom handler chains can instead wrap their
+transport with `RumHttpMessageHandler`.
 
 Manual APIs mirror the Android SDK behavior:
 
@@ -172,6 +189,13 @@ monitoring.enable_ui_hang_monitoring = 1;
 monitoring.main_window_handle = reinterpret_cast<uintptr_t>(main_window);
 monitoring.enable_native_crash_reporting = 1;
 guance_rum_enable_native_monitoring(rum, &monitoring);
+
+guance_rum_trace_config trace;
+guance_rum_trace_config_init(&trace);
+trace.enable_auto_trace = 1;
+trace.enable_link_rum_data = 1;
+trace.trace_type = GUANCE_RUM_TRACE_TRACEPARENT;
+guance_rum_configure_trace(rum, &trace);
 ```
 
 The default thresholds are 500 ms for a UI long task and 5 seconds for an

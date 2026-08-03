@@ -7,6 +7,7 @@ internal sealed class AutomaticInstrumentation : IDisposable
     private readonly RumClient client;
     private readonly AutomaticInstrumentationOptions options;
     private HttpDiagnosticObserver? httpObserver;
+    private IDisposable? allListenersSubscription;
     private UiThreadBlockMonitor? blockMonitor;
     private bool started;
 
@@ -33,7 +34,7 @@ internal sealed class AutomaticInstrumentation : IDisposable
         if (options.EnableHttpClient)
         {
             httpObserver = new HttpDiagnosticObserver(client);
-            DiagnosticListener.AllListeners.Subscribe(httpObserver);
+            allListenersSubscription = DiagnosticListener.AllListeners.Subscribe(httpObserver);
         }
 
         if (options.EnableUiThreadBlock && SynchronizationContext.Current is not null)
@@ -53,7 +54,10 @@ internal sealed class AutomaticInstrumentation : IDisposable
             TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
         }
 
+        allListenersSubscription?.Dispose();
+        allListenersSubscription = null;
         httpObserver?.Dispose();
+        httpObserver = null;
         blockMonitor?.Dispose();
         WindowsDesktopInstrumentation.Detach(client);
     }

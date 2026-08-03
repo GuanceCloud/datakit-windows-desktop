@@ -61,6 +61,26 @@ void guance_rum_resource_collection_config_init(
         guance::rum::default_redacted_query_parameter_name_count();
 }
 
+void guance_rum_trace_config_init(guance_rum_trace_config* config) {
+    if (config == nullptr) {
+        return;
+    }
+    *config = guance_rum_trace_config{};
+    config->struct_size = sizeof(guance_rum_trace_config);
+    config->version = GUANCE_RUM_TRACE_CONFIG_VERSION;
+    config->sample_rate = 1.0;
+    config->trace_type = GUANCE_RUM_TRACE_DDTRACE;
+}
+
+void guance_rum_trace_context_init(guance_rum_trace_context* context) {
+    if (context == nullptr) {
+        return;
+    }
+    *context = guance_rum_trace_context{};
+    context->struct_size = sizeof(guance_rum_trace_context);
+    context->version = GUANCE_RUM_TRACE_CONTEXT_VERSION;
+}
+
 guance_rum_handle guance_rum_init(const guance_rum_config* config) {
     try {
         return new RumCore(guance::rum::from_c_config(config));
@@ -142,6 +162,43 @@ int guance_rum_configure_resource_collection(
     }
     try {
         return static_cast<RumCore*>(handle)->configure_resource_collection(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_rum_configure_trace(
+    guance_rum_handle handle,
+    const guance_rum_trace_config* config) {
+    if (handle == nullptr || config == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->configure_trace(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_rum_create_trace_context(
+    guance_rum_handle handle,
+    const char* url,
+    const char* method,
+    guance_rum_trace_context* context) {
+    if (context == nullptr) {
+        return 0;
+    }
+    guance_rum_trace_context_init(context);
+    if (handle == nullptr) {
+        return 0;
+    }
+    try {
+        const auto generated =
+            static_cast<RumCore*>(handle)->create_trace_context(url, method);
+        return generated.has_value() &&
+                guance::rum::trace_context_to_c(*generated, *context)
+            ? 1
+            : 0;
     } catch (...) {
         return 0;
     }

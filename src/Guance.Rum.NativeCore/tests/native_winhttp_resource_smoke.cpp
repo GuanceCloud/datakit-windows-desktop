@@ -3,6 +3,8 @@
 #include "guance_rum_winhttp.hpp"
 
 #include <cassert>
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -140,6 +142,23 @@ bool contains(const std::string& text, const std::string& expected) {
     return text.find(expected) != std::string::npos;
 }
 
+std::string header_value(const std::string& request, const std::string& name) {
+    std::string lower = request;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    std::string prefix = name;
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    prefix += ":";
+    const auto start = lower.find("\r\n" + prefix);
+    assert(start != std::string::npos);
+    const auto value_start = request.find_first_not_of(" \t", start + 2 + prefix.size());
+    const auto value_end = request.find("\r\n", value_start);
+    return request.substr(value_start, value_end - value_start);
+}
+
 int collect_non_ignored(const char* url, const char*, void* user_data) {
     auto* calls = static_cast<int*>(user_data);
     ++(*calls);
@@ -173,6 +192,13 @@ int main() {
     resources.user_data = &filter_calls;
     const int configured = guance_rum_configure_resource_collection(handle, &resources);
     assert(configured == 1);
+    guance_rum_trace_config trace{};
+    guance_rum_trace_config_init(&trace);
+    trace.enable_auto_trace = 1;
+    trace.enable_link_rum_data = 1;
+    trace.trace_type = GUANCE_RUM_TRACE_ZIPKIN_MULTI_HEADER;
+    const int trace_configured = guance_rum_configure_trace(handle, &trace); // Always invoke in Release builds.
+    assert(trace_configured == 1);
     HINTERNET session = WinHttpOpen(
         L"GuanceRumNativeResourceSmoke/0.1",
         WINHTTP_ACCESS_TYPE_NO_PROXY,
@@ -219,6 +245,15 @@ int main() {
         WINHTTP_DEFAULT_ACCEPT_TYPES,
         0);
     assert(request != nullptr);
+    // Seed an existing value to verify the adapter replaces, rather than duplicates, it.
+    const wchar_t existing_trace_id[] =
+        L"X-B3-TraceId: 00000000000000000000000000000001";
+    const BOOL added_existing_trace = WinHttpAddRequestHeaders(
+        request,
+        existing_trace_id,
+        static_cast<DWORD>(-1L),
+        WINHTTP_ADDREQ_FLAG_ADD);
+    assert(added_existing_trace);
 
     const auto resource_url = datakit_url + "/instrumented?token=secret&keep=1";
     {
@@ -248,12 +283,20 @@ int main() {
     assert(requests.size() == 3);
     assert(contains(requests[0], "GET /ignored"));
     assert(contains(requests[1], "GET /instrumented?token=secret&keep=1"));
+    const auto trace_id = header_value(requests[1], "X-B3-TraceId");
+    const auto span_id = header_value(requests[1], "X-B3-SpanId");
+    assert(trace_id.size() == 32);
+    assert(span_id.size() == 16);
+    assert(trace_id != "00000000000000000000000000000001");
+    assert(header_value(requests[1], "X-B3-Sampled") == "1");
     assert(contains(requests[2], "POST /v1/write/rum"));
     assert(contains(requests[2], "resource_status=200"));
     assert(contains(requests[2], "resource_type=http"));
     assert(contains(requests[2], "resource_http_protocol=HTTP/1.1"));
     assert(contains(requests[2], "resource_size=0i"));
     assert(contains(requests[2], "resource_request_size=0i"));
+    assert(contains(requests[2], "trace_id=" + trace_id));
+    assert(contains(requests[2], "span_id=" + span_id));
     assert(contains(requests[2], "token\\=%3Credacted%3E&keep\\=1"));
     assert(!contains(requests[2], "token\\=secret"));
     assert(!contains(requests[2], "/ignored"));

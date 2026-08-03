@@ -23,6 +23,7 @@ public sealed class RumConfig
     public bool Debug { get; init; }
     public double SampleRate { get; init; } = 1.0;
     public double SessionErrorSampleRate { get; init; }
+    public RumTraceConfig Trace { get; init; } = new();
     public RumPrivacyConfig Privacy { get; init; } = new();
     public RumSessionReplayConfig SessionReplay { get; init; } = new();
     public int BatchSize { get; init; } = 50;
@@ -78,6 +79,16 @@ public sealed class RumConfig
         if (SessionErrorSampleRate is < 0 or > 1)
         {
             throw new InvalidOperationException("SessionErrorSampleRate must be between 0 and 1.");
+        }
+
+        if (Trace is null)
+        {
+            throw new InvalidOperationException("Trace must not be null.");
+        }
+
+        if (Trace.SampleRate is < 0 or > 1)
+        {
+            throw new InvalidOperationException("Trace.SampleRate must be between 0 and 1.");
         }
 
         if (string.IsNullOrWhiteSpace(Privacy.RedactedValue))

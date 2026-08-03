@@ -16,8 +16,12 @@ public sealed class RumHttpMessageHandler : DelegatingHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         request.Options.Set(HttpInstrumentationMarks.ManualHandlerInstrumented, true);
+        var traceContext = TraceContextFactory.Create(client.Config, request);
+        if (!TraceContextFactory.TryApply(request, traceContext))
+        {
+            traceContext = null;
+        }
         var resourceId = client.StartResource(request.RequestUri?.ToString() ?? string.Empty, request.Method.Method);
-        var activity = Activity.Current;
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -31,7 +35,7 @@ public sealed class RumHttpMessageHandler : DelegatingHandler
                 resourceType: response.Content.Headers.ContentType?.MediaType,
                 requestHeader: HttpHeaderRedactor.Format(request.Headers, request.Content?.Headers, client.Config.Privacy),
                 responseHeader: HttpHeaderRedactor.Format(response.Headers, response.Content.Headers, client.Config.Privacy),
-                properties: CreateResourceProperties(request, response, activity, stopwatch, exception: null));
+                properties: CreateResourceProperties(request, response, traceContext, stopwatch, exception: null));
             return response;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -41,12 +45,12 @@ public sealed class RumHttpMessageHandler : DelegatingHandler
                 statusCode: 0,
                 errorStack: ex.ToString(),
                 errorMessage: ex.Message,
-                properties: CreateResourceProperties(request, null, activity, stopwatch, ex));
+                properties: CreateResourceProperties(request, null, traceContext, stopwatch, ex));
             throw;
         }
     }
 
-    private IReadOnlyDictionary<string, object?> CreateResourceProperties(HttpRequestMessage request, HttpResponseMessage? response, Activity? activity, Stopwatch stopwatch, Exception? exception)
+    private IReadOnlyDictionary<string, object?> CreateResourceProperties(HttpRequestMessage request, HttpResponseMessage? response, RumTraceContext? traceContext, Stopwatch stopwatch, Exception? exception)
     {
         var elapsed = stopwatch.Elapsed;
         var timing = HttpResourceTimingResolver.Resolve(client.Config, request, response, elapsed, exception, nameof(RumHttpMessageHandler));
@@ -54,8 +58,8 @@ public sealed class RumHttpMessageHandler : DelegatingHandler
         {
             [RumConstants.NetworkInstrumentation] = nameof(RumHttpMessageHandler),
             [RumConstants.NetworkLibrary] = "HttpClient",
-            [RumConstants.TraceId] = activity?.TraceId.ToString(),
-            [RumConstants.SpanId] = activity?.SpanId.ToString()
+            [RumConstants.TraceId] = client.Config.Trace.EnableLinkRumData ? traceContext?.TraceId : null,
+            [RumConstants.SpanId] = client.Config.Trace.EnableLinkRumData ? traceContext?.SpanId : null
         };
 
         if (request.Version is not null)

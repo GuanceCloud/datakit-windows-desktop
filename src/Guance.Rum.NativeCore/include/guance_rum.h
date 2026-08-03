@@ -105,6 +105,67 @@ typedef struct guance_rum_resource_collection_config {
     void* user_data;
 } guance_rum_resource_collection_config;
 
+#define GUANCE_RUM_TRACE_CONFIG_VERSION 1u
+#define GUANCE_RUM_TRACE_CONTEXT_VERSION 1u
+#define GUANCE_RUM_TRACE_MAX_HEADERS 4u
+#define GUANCE_RUM_TRACE_HEADER_NAME_CAPACITY 64u
+#define GUANCE_RUM_TRACE_HEADER_VALUE_CAPACITY 2048u
+#define GUANCE_RUM_TRACE_ID_CAPACITY 128u
+
+typedef enum guance_rum_trace_type {
+    GUANCE_RUM_TRACE_DDTRACE = 0,
+    GUANCE_RUM_TRACE_ZIPKIN_MULTI_HEADER = 1,
+    GUANCE_RUM_TRACE_ZIPKIN_SINGLE_HEADER = 2,
+    GUANCE_RUM_TRACE_TRACEPARENT = 3,
+    GUANCE_RUM_TRACE_SKYWALKING = 4,
+    GUANCE_RUM_TRACE_JAEGER = 5
+} guance_rum_trace_type;
+
+typedef struct guance_rum_trace_header {
+    char name[GUANCE_RUM_TRACE_HEADER_NAME_CAPACITY];
+    char value[GUANCE_RUM_TRACE_HEADER_VALUE_CAPACITY];
+} guance_rum_trace_header;
+
+typedef struct guance_rum_trace_context {
+    uint32_t struct_size;
+    uint32_t version;
+    int sampled;
+    int link_rum_data;
+    char trace_id[GUANCE_RUM_TRACE_ID_CAPACITY];
+    char span_id[GUANCE_RUM_TRACE_ID_CAPACITY];
+    uint32_t header_count;
+    guance_rum_trace_header headers[GUANCE_RUM_TRACE_MAX_HEADERS];
+} guance_rum_trace_context;
+
+typedef int (*guance_rum_trace_should_trace_callback)(
+    const char* url,
+    const char* method,
+    void* user_data);
+
+/* Initialize context with guance_rum_trace_context_init before filling it.
+ * Return non-zero to use the supplied headers and identifiers. */
+typedef int (*guance_rum_trace_context_provider_callback)(
+    const char* url,
+    const char* method,
+    guance_rum_trace_context* context,
+    void* user_data);
+
+/* String values are copied by guance_rum_configure_trace. Callbacks and
+ * user_data are retained and must remain valid until reconfiguration or SDK
+ * shutdown. Callbacks are synchronous and may run concurrently. */
+typedef struct guance_rum_trace_config {
+    uint32_t struct_size;
+    uint32_t version;
+    int enable_auto_trace;
+    int enable_link_rum_data;
+    double sample_rate;
+    guance_rum_trace_type trace_type;
+    const char* service_name;
+    guance_rum_trace_should_trace_callback should_trace;
+    guance_rum_trace_context_provider_callback context_provider;
+    void* user_data;
+} guance_rum_trace_config;
+
 typedef enum guance_rum_launch_type {
     GUANCE_RUM_LAUNCH_COLD = 0,
     GUANCE_RUM_LAUNCH_HOT = 1
@@ -143,9 +204,21 @@ GUANCE_RUM_EXPORT void guance_rum_native_monitoring_config_init(
     guance_rum_native_monitoring_config* config);
 GUANCE_RUM_EXPORT void guance_rum_resource_collection_config_init(
     guance_rum_resource_collection_config* config);
+GUANCE_RUM_EXPORT void guance_rum_trace_config_init(
+    guance_rum_trace_config* config);
+GUANCE_RUM_EXPORT void guance_rum_trace_context_init(
+    guance_rum_trace_context* context);
 GUANCE_RUM_EXPORT int guance_rum_configure_resource_collection(
     guance_rum_handle handle,
     const guance_rum_resource_collection_config* config);
+GUANCE_RUM_EXPORT int guance_rum_configure_trace(
+    guance_rum_handle handle,
+    const guance_rum_trace_config* config);
+GUANCE_RUM_EXPORT int guance_rum_create_trace_context(
+    guance_rum_handle handle,
+    const char* url,
+    const char* method,
+    guance_rum_trace_context* context);
 GUANCE_RUM_EXPORT int guance_rum_enable_native_monitoring(
     guance_rum_handle handle,
     const guance_rum_native_monitoring_config* config);

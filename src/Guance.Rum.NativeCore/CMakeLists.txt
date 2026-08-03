@@ -12,6 +12,7 @@ add_library(guance_rum_native SHARED
     src/native_monitoring.cpp
     src/queue_store.cpp
     src/resource_collection.cpp
+    src/trace_context.cpp
     src/rum_core.cpp
     src/thread_stack_sampler.cpp
     src/transport.cpp
@@ -50,6 +51,18 @@ add_executable(native_resource_collection_state_smoke
 )
 target_include_directories(native_resource_collection_state_smoke PRIVATE include src)
 target_compile_features(native_resource_collection_state_smoke PRIVATE cxx_std_17)
+
+add_executable(native_trace_context_smoke
+    tests/native_trace_context_smoke.cpp
+    src/trace_context.cpp
+)
+target_include_directories(native_trace_context_smoke PRIVATE include src)
+target_compile_features(native_trace_context_smoke PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(native_trace_context_smoke PRIVATE /UNDEBUG)
+else()
+    target_compile_options(native_trace_context_smoke PRIVATE -UNDEBUG)
+endif()
 
 if(WIN32)
     add_executable(guance_rum_electron_bridge src/electron_bridge_host.cpp)
@@ -93,6 +106,11 @@ if(WIN32)
     add_executable(native_winhttp_resource_smoke tests/native_winhttp_resource_smoke.cpp)
     target_include_directories(native_winhttp_resource_smoke PRIVATE include)
     target_compile_features(native_winhttp_resource_smoke PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_options(native_winhttp_resource_smoke PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(native_winhttp_resource_smoke PRIVATE -UNDEBUG)
+    endif()
     target_link_libraries(native_winhttp_resource_smoke PRIVATE guance_rum_native winhttp ws2_32)
 
     set(GUANCE_RUM_NATIVE_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/win-x64")
@@ -102,7 +120,7 @@ if(WIN32)
             PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
 
-    foreach(target_name guance_rum_native guance_rum_electron_bridge native_line_protocol_smoke native_monitoring_state_smoke native_resource_collection_state_smoke native_browser_bridge_smoke native_monitoring_abi_smoke native_monitoring_c_abi_smoke native_ui_hang_smoke native_crash_recovery_smoke native_win32_replay_smoke native_winhttp_resource_smoke)
+    foreach(target_name guance_rum_native guance_rum_electron_bridge native_line_protocol_smoke native_monitoring_state_smoke native_resource_collection_state_smoke native_trace_context_smoke native_browser_bridge_smoke native_monitoring_abi_smoke native_monitoring_c_abi_smoke native_ui_hang_smoke native_crash_recovery_smoke native_win32_replay_smoke native_winhttp_resource_smoke)
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${GUANCE_RUM_NATIVE_RUNTIME_DIR}"
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${GUANCE_RUM_NATIVE_RUNTIME_DIR}"

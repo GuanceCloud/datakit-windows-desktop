@@ -61,12 +61,16 @@ internal sealed class HttpDiagnosticObserver : IObserver<DiagnosticListener>, IO
             return;
         }
 
-        var activity = Activity.Current;
+        var traceContext = TraceContextFactory.Create(client.Config, request);
+        if (!TraceContextFactory.TryApply(request, traceContext))
+        {
+            traceContext = null;
+        }
         var resourceId = client.StartResource(request.RequestUri?.ToString() ?? string.Empty, request.Method.Method);
         resources[request] = new ActiveHttpResource(
             resourceId,
-            activity?.TraceId.ToString(),
-            activity?.SpanId.ToString(),
+            client.Config.Trace.EnableLinkRumData ? traceContext?.TraceId : null,
+            client.Config.Trace.EnableLinkRumData ? traceContext?.SpanId : null,
             Stopwatch.GetTimestamp());
     }
 
@@ -144,15 +148,14 @@ internal sealed class HttpDiagnosticObserver : IObserver<DiagnosticListener>, IO
 
     private IReadOnlyDictionary<string, object?> CreateResourceProperties(HttpRequestMessage request, HttpResponseMessage? response, ActiveHttpResource resource, Exception? exception)
     {
-        var activity = Activity.Current;
         var elapsed = TimeSpan.FromSeconds((double)(Stopwatch.GetTimestamp() - resource.StartTimestamp) / Stopwatch.Frequency);
         var timing = HttpResourceTimingResolver.Resolve(client.Config, request, response, elapsed, exception, "System.Net.Http.Diagnostics");
         var properties = new Dictionary<string, object?>(timing.ToProperties())
         {
             [RumConstants.NetworkInstrumentation] = "System.Net.Http",
             [RumConstants.NetworkLibrary] = DetectNetworkLibrary(request, response),
-            [RumConstants.TraceId] = resource.TraceId ?? activity?.TraceId.ToString(),
-            [RumConstants.SpanId] = resource.SpanId ?? activity?.SpanId.ToString()
+            [RumConstants.TraceId] = resource.TraceId,
+            [RumConstants.SpanId] = resource.SpanId
         };
 
         if (request.Version is not null)

@@ -639,7 +639,9 @@ Config from_c_config(const guance_rum_config* c) {
 }
 
 RumCore::RumCore(Config config)
-    : config_(std::move(config)), session_id_(uuid32()) {
+    : config_(std::move(config)),
+      session_id_(uuid32()),
+      trace_config_(default_trace_config(config_.service_name)) {
     session_sampled_ = hit_rate(config_.sample_rate);
     session_error_sampled_ = !session_sampled_ && hit_rate(config_.session_error_sample_rate);
     session_replay_sampled_ = hit_rate(config_.session_replay_sample_rate);
@@ -1063,6 +1065,31 @@ bool RumCore::configure_resource_collection(
     std::lock_guard lock(mutex_);
     resource_collection_config_ = std::move(parsed);
     return true;
+}
+
+bool RumCore::configure_trace(const guance_rum_trace_config& config) {
+    TraceConfig parsed;
+    if (!trace_config_from_c(config, config_.service_name, parsed)) {
+        return false;
+    }
+
+    std::lock_guard lock(mutex_);
+    trace_config_ = std::move(parsed);
+    return true;
+}
+
+std::optional<TraceContext> RumCore::create_trace_context(
+    const char* url,
+    const char* method) const {
+    TraceConfig trace_config;
+    {
+        std::lock_guard lock(mutex_);
+        trace_config = trace_config_;
+    }
+    return guance::rum::create_trace_context(
+        trace_config,
+        str_or_empty(url),
+        str_or_empty(method));
 }
 
 void RumCore::stop_resource(const char* resource_id, int status_code, int64_t response_size) {
