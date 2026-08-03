@@ -169,7 +169,7 @@ describe("Electron native host adapter", () => {
   it("passes configuration through a private child-process environment", () => {
     const environment = createNativeEnvironment(
       {
-        datakitUrl: "http://private.example.test:9529",
+        datakitUrl: "http://datakit.example.test:9529",
         applicationId: "win_sample",
         service: "windows-sample",
         env: "local",
@@ -181,7 +181,7 @@ describe("Electron native host adapter", () => {
       { PATH: "test-path" },
     );
 
-    expect(environment.GUANCE_RUM_NATIVE_DATAKIT_URL).toBe("http://private.example.test:9529");
+    expect(environment.GUANCE_RUM_NATIVE_DATAKIT_URL).toBe("http://datakit.example.test:9529");
     expect(environment.GUANCE_RUM_NATIVE_APP_ID).toBe("win_sample");
     expect(environment.GUANCE_RUM_NATIVE_DEBUG).toBe("1");
     expect(environment.PATH).toBe("test-path");

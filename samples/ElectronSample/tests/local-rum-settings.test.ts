@@ -108,20 +108,22 @@ describe("loadLocalRumSettings", () => {
     });
   });
 
-  it("uses the shared webViewUrl for Electron mixed mode and allows LAN HTTP", () => {
+  it("prefers an environment web view URL for Electron mixed mode and allows HTTP", () => {
     const {
       createLocalRumSettingsReader,
       isSupportedWebViewUrl,
       resolveWebViewUrl,
     } = require("../src/main/local-rum-settings.cjs");
     const reader = createLocalRumSettingsReader({
-      environment: {},
+      environment: {
+        GUANCE_RUM_WEBVIEW_URL: "http://webview.example.test:8000",
+      },
       settings: {
-        webViewUrl: "http://private.example.test:8000",
+        webViewUrl: "https://json-webview.example.test",
       },
     });
 
-    expect(resolveWebViewUrl(reader)).toBe("http://private.example.test:8000");
+    expect(resolveWebViewUrl(reader)).toBe("http://webview.example.test:8000");
     expect(isSupportedWebViewUrl(resolveWebViewUrl(reader))).toBe(true);
   });
 
