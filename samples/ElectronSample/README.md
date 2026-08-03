@@ -4,9 +4,7 @@ Phase 1 Electron hybrid RUM acceptance sample.
 
 Configuration, run instructions, architecture, and the acceptance flow are documented in [`../../docs/electron-phase-1-acceptance.md`](../../docs/electron-phase-1-acceptance.md).
 
-The sample pins Electron `22.3.27` and emits a Windows x64 package intended to cover Windows 7 SP1 through Windows 11. Electron 22 is end-of-life, so this compatibility build receives no Chromium, Node.js, or Electron security updates; the managed Windows SDK remains a Windows 10+ target.
-
-Security scope: this directory is a legacy compatibility and acceptance sample, not a production application and not part of the `Guance.Rum.Windows` NuGet package. Electron `22.3.27` is retained deliberately to keep the widest practical Windows compatibility. Do not redistribute the generated executable or use it in production; applications that adopt the integration pattern must select and maintain an Electron release appropriate for their own security and operating-system requirements.
+Security scope: this directory is a legacy compatibility and acceptance sample, not a production application and not part of the `Guance.Rum.Windows` NuGet package. It pins Electron `22.3.27` and emits a Windows x64 package intended to cover Windows 7 SP1 through Windows 11. Electron 22 is end-of-life, so this compatibility build receives no Chromium, Node.js, or Electron security updates; the managed Windows SDK remains a Windows 10+ target. Do not redistribute the generated executable or use it in production; applications that adopt the integration pattern must select and maintain an Electron release appropriate for their own security and operating-system requirements.
 
 The main process also translates each window's `unresponsive`/`responsive` and
 `render-process-gone` signals into a strict, allow-listed native bridge command.

@@ -108,23 +108,38 @@ describe("loadLocalRumSettings", () => {
     });
   });
 
-  it("prefers an environment web view URL for Electron mixed mode and allows HTTP", () => {
+  it("uses the shared web view URL for Electron mixed mode and allows HTTP", () => {
     const {
       createLocalRumSettingsReader,
       isSupportedWebViewUrl,
       resolveWebViewUrl,
     } = require("../src/main/local-rum-settings.cjs");
     const reader = createLocalRumSettingsReader({
+      environment: {},
+      settings: {
+        webViewUrl: "http://webview.example.test:8000",
+      },
+    });
+
+    expect(resolveWebViewUrl(reader)).toBe("http://webview.example.test:8000");
+    expect(isSupportedWebViewUrl(resolveWebViewUrl(reader))).toBe(true);
+  });
+
+  it("prefers an environment web view URL over the shared JSON setting", () => {
+    const {
+      createLocalRumSettingsReader,
+      resolveWebViewUrl,
+    } = require("../src/main/local-rum-settings.cjs");
+    const reader = createLocalRumSettingsReader({
       environment: {
-        GUANCE_RUM_WEBVIEW_URL: "http://webview.example.test:8000",
+        GUANCE_RUM_WEBVIEW_URL: "https://environment-webview.example.test",
       },
       settings: {
         webViewUrl: "https://json-webview.example.test",
       },
     });
 
-    expect(resolveWebViewUrl(reader)).toBe("http://webview.example.test:8000");
-    expect(isSupportedWebViewUrl(resolveWebViewUrl(reader))).toBe(true);
+    expect(resolveWebViewUrl(reader)).toBe("https://environment-webview.example.test");
   });
 
   it("only accepts an executable-sidecar JSON file in packaged mode", () => {
