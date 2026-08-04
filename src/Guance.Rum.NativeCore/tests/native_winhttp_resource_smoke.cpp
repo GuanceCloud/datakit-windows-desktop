@@ -168,7 +168,7 @@ int collect_non_ignored(const char* url, const char*, void* user_data) {
 } // namespace
 
 int main() {
-    SmokeServer server(3);
+    SmokeServer server(4);
     const auto datakit_url = "http://127.0.0.1:" + std::to_string(server.port());
     const auto cache_directory = std::filesystem::temp_directory_path() /
         ("guance-native-winhttp-" + std::to_string(
@@ -199,6 +199,12 @@ int main() {
     trace.trace_type = GUANCE_RUM_TRACE_ZIPKIN_MULTI_HEADER;
     const int trace_configured = guance_rum_configure_trace(handle, &trace); // Always invoke in Release builds.
     assert(trace_configured == 1);
+    guance_rum_log_config logging{};
+    guance_rum_log_config_init(&logging);
+    logging.enable_custom_log = 1;
+    logging.enable_link_rum_data = 1;
+    const int logging_configured = guance_rum_configure_logging(handle, &logging);
+    assert(logging_configured == 1);
     HINTERNET session = WinHttpOpen(
         L"GuanceRumNativeResourceSmoke/0.1",
         WINHTTP_ACCESS_TYPE_NO_PROXY,
@@ -278,9 +284,16 @@ int main() {
     WinHttpCloseHandle(connection);
     WinHttpCloseHandle(session);
 
+    guance_rum_start_view(handle, "NativeLogView");
+    const auto action_id = guance_rum_start_action(handle, "NativeLogAction", "click");
+    guance_rum_log_property log_properties[] = {{"operation", "save"}};
+    assert(guance_rum_add_log(handle, "native log message", "warning", log_properties, 1) == 1);
+    guance_rum_stop_action(handle, action_id);
+    guance_rum_stop_view(handle);
+
     guance_rum_flush(handle);
     const auto requests = server.wait();
-    assert(requests.size() == 3);
+    assert(requests.size() == 4);
     assert(contains(requests[0], "GET /ignored"));
     assert(contains(requests[1], "GET /instrumented?token=secret&keep=1"));
     const auto trace_id = header_value(requests[1], "X-B3-TraceId");
@@ -300,11 +313,23 @@ int main() {
     assert(contains(requests[2], "token\\=%3Credacted%3E&keep\\=1"));
     assert(!contains(requests[2], "token\\=secret"));
     assert(!contains(requests[2], "/ignored"));
+    assert(contains(requests[3], "POST /v1/write/logging"));
+    assert(contains(requests[3], "df_rum_windows_log,"));
+    assert(contains(requests[3], "view_name=NativeLogView"));
+    assert(contains(requests[3], "action_name=NativeLogAction"));
+    assert(contains(requests[3], "message=\"native log message\""));
+    assert(contains(requests[3], "status=\"warning\""));
+    assert(contains(requests[3], "operation=\"save\""));
 
     guance_rum_diagnostics diagnostics{};
     const int has_diagnostics = guance_rum_get_diagnostics(handle, &diagnostics);
     assert(has_diagnostics == 1);
     assert(diagnostics.rum_upload_success_count == 1);
+    guance_rum_log_diagnostics log_diagnostics{};
+    guance_rum_log_diagnostics_init(&log_diagnostics);
+    assert(guance_rum_get_log_diagnostics(handle, &log_diagnostics) == 1);
+    assert(log_diagnostics.logs_enqueued == 1);
+    assert(log_diagnostics.upload_success_count == 1);
     guance_rum_shutdown(handle);
 
     std::error_code cleanup_error;

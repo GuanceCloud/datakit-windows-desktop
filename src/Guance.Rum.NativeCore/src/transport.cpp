@@ -197,6 +197,14 @@ TransportResult send_to_dataway(const Config& config, const std::vector<std::str
     return post_body(config, "v1/write/rum", "text/plain", join_lines(lines));
 }
 
+TransportResult send_logging_to_dataway(const Config& config, const std::vector<std::string>& lines) {
+    if (lines.empty()) {
+        return success_result(204);
+    }
+
+    return post_body(config, "v1/write/logging", "text/plain", join_lines(lines));
+}
+
 TransportResult send_session_replay_to_dataway(const Config& config, const std::string& content_type, const std::string& body) {
     if (body.empty()) {
         return success_result(204);

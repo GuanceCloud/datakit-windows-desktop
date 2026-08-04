@@ -23,6 +23,8 @@ public static class RumSdk
     }
 
     public static void EnableAutomaticInstrumentation(AutomaticInstrumentationOptions? options = null) => Client.EnableAutomaticInstrumentation(options);
+    public static void EnableAutomaticLogCapture() => Client.EnableAutomaticLogCapture();
+    public static void DisableAutomaticLogCapture() => Client.DisableAutomaticLogCapture();
     public static void AttachWinUIWindow(object window, string? viewName = null) => Client.AttachWinUIWindow(window, viewName);
     public static void AttachWebView(object webView) => Client.AttachWebView(webView);
     public static void DetachWebView(object webView) => Client.DetachWebView(webView);
@@ -48,7 +50,11 @@ public static class RumSdk
     public static void AddError(Exception exception, IReadOnlyDictionary<string, object?>? properties = null) => Client.AddError(exception, properties);
     public static void AddError(string stack, string message, string errorType, string source = "logger", IReadOnlyDictionary<string, object?>? properties = null) => Client.AddError(stack, message, errorType, source, properties);
     public static void AddLongTask(TimeSpan duration, string? stack = null, IReadOnlyDictionary<string, object?>? properties = null) => Client.AddLongTask(duration, stack, properties);
+    public static void AddLog(string content, RumLogStatus status, IReadOnlyDictionary<string, object?>? properties = null) => Client.AddLog(content, status, properties);
+    public static void AddLog(string content, string status, IReadOnlyDictionary<string, object?>? properties = null) => Client.AddLog(content, status, properties);
+    public static void AddLogs(IEnumerable<RumLogEntry> logs) => Client.AddLogs(logs);
     public static RumDiagnosticsSnapshot GetDiagnosticsSnapshot() => Client.GetDiagnosticsSnapshot();
+    public static RumLogDiagnosticsSnapshot GetLogDiagnosticsSnapshot() => Client.GetLogDiagnosticsSnapshot();
     public static void AddDiagnosticListener(EventHandler<RumDiagnosticEvent> listener) => Client.DiagnosticEvent += listener;
     public static void RemoveDiagnosticListener(EventHandler<RumDiagnosticEvent> listener) => Client.DiagnosticEvent -= listener;
     public static Task FlushAsync(CancellationToken cancellationToken = default) => Client.FlushAsync(cancellationToken);

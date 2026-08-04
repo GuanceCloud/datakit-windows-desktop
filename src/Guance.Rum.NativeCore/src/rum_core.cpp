@@ -32,7 +32,9 @@ constexpr int64_t kReplaySegmentFlushMilliseconds = 5000;
 constexpr int64_t kReplayCoalesceMilliseconds = 200;
 constexpr const char* kWindowsReplaySource = "windows";
 constexpr const char* kWindowsSdkName = "df_windows_rum_sdk";
+constexpr const char* kWindowsLogSource = "df_rum_windows_log";
 constexpr std::size_t kMaxBridgeLineBytes = 1024 * 1024;
+constexpr std::size_t kMaxLogContentBytes = 30 * 1024;
 
 std::optional<std::string> bridge_measurement(const char* line, std::size_t length) {
     if (line == nullptr ||
@@ -111,6 +113,47 @@ std::string replay_queue_path(const std::string& configured) {
     const auto extension = path.extension().string();
     path.replace_filename(stem + "-replay" + extension);
     return path.string();
+}
+
+std::string logging_queue_path(const std::string& configured) {
+    std::filesystem::path path = configured.empty() ? default_queue_path() : configured;
+    const auto stem = path.stem().string();
+    const auto extension = path.extension().string();
+    path.replace_filename(stem + "-logging" + extension);
+    return path.string();
+}
+
+std::string normalize_log_status(const char* status) {
+    auto value = str_or_empty(status);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
+}
+
+uint32_t log_level_mask(const std::string& status) {
+    if (status == "debug") return GUANCE_RUM_LOG_DEBUG;
+    if (status == "info") return GUANCE_RUM_LOG_INFO;
+    if (status == "warning") return GUANCE_RUM_LOG_WARNING;
+    if (status == "error") return GUANCE_RUM_LOG_ERROR;
+    if (status == "critical") return GUANCE_RUM_LOG_CRITICAL;
+    if (status == "ok") return GUANCE_RUM_LOG_OK;
+    return 0;
+}
+
+std::string truncate_log_content(const char* content) {
+    auto value = str_or_empty(content);
+    if (value.size() <= kMaxLogContentBytes) {
+        return value;
+    }
+
+    std::size_t length = kMaxLogContentBytes;
+    while (length > 0 &&
+           (static_cast<unsigned char>(value[length]) & 0xC0u) == 0x80u) {
+        --length;
+    }
+    value.resize(length);
+    return value;
 }
 
 std::optional<std::string> multipart_boundary(const std::string& content_type) {
@@ -649,6 +692,11 @@ RumCore::RumCore(Config config)
     session_replay_recording_ = config_.session_replay_enabled && (session_replay_sampled_ || session_replay_error_sampled_);
     queue_ = std::make_unique<QueueStore>(config_.cache_path, config_.max_queue_items, config_.max_queue_bytes);
     replay_queue_ = std::make_unique<QueueStore>(replay_queue_path(config_.cache_path), config_.max_queue_items, config_.max_queue_bytes);
+    log_queue_ = std::make_unique<QueueStore>(
+        logging_queue_path(config_.cache_path),
+        log_config_.max_queue_items,
+        log_config_.max_queue_bytes,
+        true);
     native_monitoring_ = std::make_unique<NativeMonitoring>(*this);
 }
 
@@ -685,10 +733,41 @@ void RumCore::flush() {
         }
         record_rum_transport_result(result.delete_from_queue, result.retry_later, result.status_code, result.error_code, result.latency_ms);
         if (result.retry_later) {
-            return;
+            break;
         }
         if (result.delete_from_queue) {
             queue_->remove(ids);
+        }
+    }
+
+    {
+        std::lock_guard log_lock(log_mutex_);
+        if (log_config_.enable_custom_log) {
+            while (true) {
+                const auto batch = log_queue_->peek(50);
+                if (batch.empty()) {
+                    break;
+                }
+                std::vector<std::string> lines;
+                std::vector<int64_t> ids;
+                for (const auto& item : batch) {
+                    ids.push_back(item.id);
+                    lines.push_back(item.line);
+                }
+                const auto result = send_logging_to_dataway(config_, lines);
+                record_log_transport_result(
+                    result.delete_from_queue,
+                    result.retry_later,
+                    result.status_code,
+                    result.error_code,
+                    result.latency_ms);
+                if (result.retry_later) {
+                    break;
+                }
+                if (result.delete_from_queue) {
+                    log_queue_->remove(ids);
+                }
+            }
         }
     }
 
@@ -781,6 +860,19 @@ NativeDiagnostics RumCore::diagnostics() const {
     snapshot.session_error_sampled = session_error_sampled_;
     snapshot.session_replay_sampled = session_replay_sampled_;
     snapshot.session_replay_error_sampled = session_replay_error_sampled_;
+    return snapshot;
+}
+
+NativeLogDiagnostics RumCore::log_diagnostics() const {
+    NativeLogDiagnostics snapshot;
+    snapshot.logs_enqueued = logs_enqueued_.load();
+    snapshot.logs_dropped = logs_dropped_.load();
+    snapshot.upload_success_count = log_upload_success_count_.load();
+    snapshot.upload_retry_count = log_upload_retry_count_.load();
+    snapshot.upload_terminal_failure_count = log_upload_terminal_failure_count_.load();
+    snapshot.last_upload_status_code = last_log_upload_status_code_.load();
+    snapshot.last_upload_error_code = last_log_upload_error_code_.load();
+    snapshot.last_upload_latency_ms = last_log_upload_latency_ms_.load();
     return snapshot;
 }
 
@@ -1075,6 +1167,133 @@ bool RumCore::configure_trace(const guance_rum_trace_config& config) {
 
     std::lock_guard lock(mutex_);
     trace_config_ = std::move(parsed);
+    return true;
+}
+
+bool RumCore::configure_logging(const guance_rum_log_config& config) {
+    constexpr uint32_t known_level_mask =
+        GUANCE_RUM_LOG_DEBUG |
+        GUANCE_RUM_LOG_INFO |
+        GUANCE_RUM_LOG_WARNING |
+        GUANCE_RUM_LOG_ERROR |
+        GUANCE_RUM_LOG_CRITICAL |
+        GUANCE_RUM_LOG_OK;
+    if (config.struct_size < sizeof(guance_rum_log_config) ||
+        config.version != GUANCE_RUM_LOG_CONFIG_VERSION ||
+        config.sample_rate < 0.0 ||
+        config.sample_rate > 1.0 ||
+        (config.level_filter_mask & ~known_level_mask) != 0 ||
+        (config.global_context_count > 0 && config.global_context == nullptr) ||
+        config.global_context_count > 1024 ||
+        config.max_queue_items <= 0 ||
+        config.max_queue_bytes <= 0 ||
+        (config.discard_strategy != GUANCE_RUM_LOG_DISCARD_NEW &&
+         config.discard_strategy != GUANCE_RUM_LOG_DISCARD_OLDEST)) {
+        return false;
+    }
+
+    LogConfig parsed;
+    parsed.enable_custom_log = config.enable_custom_log != 0;
+    parsed.enable_link_rum_data = config.enable_link_rum_data != 0;
+    parsed.sample_rate = config.sample_rate;
+    parsed.level_filter_mask = config.level_filter_mask;
+    parsed.max_queue_items = config.max_queue_items;
+    parsed.max_queue_bytes = config.max_queue_bytes;
+    parsed.discard_strategy = config.discard_strategy;
+    for (uint32_t index = 0; index < config.global_context_count; ++index) {
+        const auto& property = config.global_context[index];
+        const auto key = str_or_empty(property.key);
+        if (!key.empty()) {
+            parsed.global_context[key] = str_or_empty(property.value);
+        }
+    }
+
+    std::lock_guard lock(log_mutex_);
+    log_config_ = std::move(parsed);
+    log_queue_ = std::make_unique<QueueStore>(
+        logging_queue_path(config_.cache_path),
+        log_config_.max_queue_items,
+        log_config_.max_queue_bytes,
+        log_config_.discard_strategy == GUANCE_RUM_LOG_DISCARD_NEW);
+    return true;
+}
+
+bool RumCore::add_log(
+    const char* content,
+    const char* status,
+    const guance_rum_log_property* properties,
+    uint32_t property_count) {
+    if (content == nullptr || status == nullptr ||
+        (property_count > 0 && properties == nullptr) ||
+        property_count > 1024) {
+        logs_dropped_.fetch_add(1);
+        return false;
+    }
+
+    std::lock_guard log_lock(log_mutex_);
+    const auto normalized_status = normalize_log_status(status);
+    const auto status_level = log_level_mask(normalized_status);
+    if (!log_config_.enable_custom_log ||
+        normalized_status.empty() ||
+        !hit_rate(log_config_.sample_rate) ||
+        (log_config_.level_filter_mask != 0 &&
+         (status_level == 0 || (log_config_.level_filter_mask & status_level) == 0))) {
+        logs_dropped_.fetch_add(1);
+        return false;
+    }
+
+    RumEvent event{kWindowsLogSource, {}, {}, unix_time_nanoseconds()};
+    event.tags["app_id"] = config_.rum_app_id;
+    event.tags["service"] = config_.service_name;
+    event.tags["env"] = config_.env;
+    event.tags["version"] = config_.version;
+    event.tags["sdk_name"] = kWindowsSdkName;
+    {
+        std::lock_guard state_lock(mutex_);
+        for (const auto& [key, value] : global_context_) {
+            event.tags.emplace(key, value);
+        }
+        for (const auto& [key, value] : log_config_.global_context) {
+            event.tags.emplace(key, value);
+        }
+        for (const auto& [key, value] : user_tags_) {
+            event.tags.emplace(key, value);
+        }
+        if (user_tags_.empty()) {
+            event.tags["is_signin"] = "F";
+        }
+        if (log_config_.enable_link_rum_data) {
+            event.tags["session_id"] = session_id_;
+            event.tags["session_type"] = "user";
+            if (user_tags_.find("userid") == user_tags_.end()) {
+                event.tags["userid"] = session_id_;
+            }
+            if (active_view_) {
+                event.tags["view_id"] = active_view_->id;
+                event.tags["view_name"] = active_view_->name;
+                event.tags["view_referrer"] = active_view_->referrer;
+            }
+            if (const auto action = current_action_locked()) {
+                event.tags["action_id"] = action->id;
+                event.tags["action_name"] = action->name;
+            }
+        }
+    }
+
+    for (uint32_t index = 0; index < property_count; ++index) {
+        const auto key = str_or_empty(properties[index].key);
+        if (!key.empty()) {
+            event.fields[key] = str_or_empty(properties[index].value);
+        }
+    }
+    event.fields["message"] = truncate_log_content(content);
+    event.fields["status"] = normalized_status;
+
+    if (!log_queue_->enqueue(format_line_protocol(event))) {
+        logs_dropped_.fetch_add(1);
+        return false;
+    }
+    logs_enqueued_.fetch_add(1);
     return true;
 }
 
@@ -1680,6 +1899,24 @@ void RumCore::record_replay_transport_result(bool delete_from_queue, bool retry_
         replay_upload_success_count_.fetch_add(1);
     } else if (delete_from_queue) {
         replay_upload_terminal_failure_count_.fetch_add(1);
+    }
+}
+
+void RumCore::record_log_transport_result(
+    bool delete_from_queue,
+    bool retry_later,
+    int status_code,
+    int error_code,
+    int64_t latency_ms) {
+    last_log_upload_status_code_.store(status_code);
+    last_log_upload_error_code_.store(error_code);
+    last_log_upload_latency_ms_.store(latency_ms);
+    if (retry_later) {
+        log_upload_retry_count_.fetch_add(1);
+    } else if (status_code >= 200 && status_code < 300) {
+        log_upload_success_count_.fetch_add(1);
+    } else if (delete_from_queue) {
+        log_upload_terminal_failure_count_.fetch_add(1);
     }
 }
 

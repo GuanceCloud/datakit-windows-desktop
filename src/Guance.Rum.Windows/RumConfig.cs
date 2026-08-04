@@ -24,6 +24,7 @@ public sealed class RumConfig
     public double SampleRate { get; init; } = 1.0;
     public double SessionErrorSampleRate { get; init; }
     public RumTraceConfig Trace { get; init; } = new();
+    public RumLogConfig Logging { get; init; } = new();
     public RumPrivacyConfig Privacy { get; init; } = new();
     public RumSessionReplayConfig SessionReplay { get; init; } = new();
     public int BatchSize { get; init; } = 50;
@@ -84,6 +85,47 @@ public sealed class RumConfig
         if (Trace is null)
         {
             throw new InvalidOperationException("Trace must not be null.");
+        }
+
+        if (Logging is null)
+        {
+            throw new InvalidOperationException("Logging must not be null.");
+        }
+
+        if (Logging.SampleRate is < 0 or > 1)
+        {
+            throw new InvalidOperationException("Logging.SampleRate must be between 0 and 1.");
+        }
+
+        if (Logging.EnableTraceCapture && !Logging.EnableCustomLog)
+        {
+            throw new InvalidOperationException("Logging.EnableCustomLog must be enabled when Logging.EnableTraceCapture is enabled.");
+        }
+
+        if (Logging.MaxQueueItems < 1_000)
+        {
+            throw new InvalidOperationException("Logging.MaxQueueItems must be at least 1000.");
+        }
+
+        if (Logging.MaxQueueBytes <= 0)
+        {
+            throw new InvalidOperationException("Logging.MaxQueueBytes must be greater than 0.");
+        }
+
+        if (Logging.GlobalContext is null)
+        {
+            throw new InvalidOperationException("Logging.GlobalContext must not be null.");
+        }
+
+        if (Logging.LevelFilters is not null)
+        {
+            foreach (var level in Logging.LevelFilters)
+            {
+                if (!Enum.IsDefined(typeof(RumLogStatus), level))
+                {
+                    throw new InvalidOperationException($"Logging.LevelFilters contains an unsupported level: {level}.");
+                }
+            }
         }
 
         if (Trace.SampleRate is < 0 or > 1)

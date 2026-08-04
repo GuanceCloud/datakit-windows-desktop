@@ -64,6 +64,28 @@ struct NativeDiagnostics {
     bool session_replay_error_sampled = false;
 };
 
+struct LogConfig {
+    bool enable_custom_log = false;
+    bool enable_link_rum_data = false;
+    double sample_rate = 1.0;
+    uint32_t level_filter_mask = 0;
+    Tags global_context;
+    int max_queue_items = 5000;
+    int64_t max_queue_bytes = 32LL * 1024 * 1024;
+    guance_rum_log_discard_strategy discard_strategy = GUANCE_RUM_LOG_DISCARD_NEW;
+};
+
+struct NativeLogDiagnostics {
+    int64_t logs_enqueued = 0;
+    int64_t logs_dropped = 0;
+    int64_t upload_success_count = 0;
+    int64_t upload_retry_count = 0;
+    int64_t upload_terminal_failure_count = 0;
+    int64_t last_upload_status_code = 0;
+    int64_t last_upload_error_code = 0;
+    int64_t last_upload_latency_ms = 0;
+};
+
 class RumCore {
 public:
     explicit RumCore(Config config);
@@ -71,6 +93,7 @@ public:
     void flush();
     void shutdown();
     NativeDiagnostics diagnostics() const;
+    NativeLogDiagnostics log_diagnostics() const;
     bool write_line(const char* line, std::size_t length);
     void set_user(const char* id, const char* name, const char* email);
     void clear_user();
@@ -88,6 +111,12 @@ public:
     void stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol);
     bool configure_resource_collection(const guance_rum_resource_collection_config& config);
     bool configure_trace(const guance_rum_trace_config& config);
+    bool configure_logging(const guance_rum_log_config& config);
+    bool add_log(
+        const char* content,
+        const char* status,
+        const guance_rum_log_property* properties,
+        uint32_t property_count);
     std::optional<TraceContext> create_trace_context(
         const char* url,
         const char* method) const;
@@ -176,6 +205,7 @@ private:
     std::optional<Action> current_action_locked() const;
     void record_rum_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     void record_replay_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
+    void record_log_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     std::string start_resource_impl(const char* url, const char* method, bool automatic);
 
     Config config_;
@@ -188,9 +218,11 @@ private:
     std::unordered_map<std::string, Resource> resources_;
     std::unique_ptr<QueueStore> queue_;
     std::unique_ptr<QueueStore> replay_queue_;
+    std::unique_ptr<QueueStore> log_queue_;
     std::unique_ptr<NativeMonitoring> native_monitoring_;
     ResourceCollectionConfig resource_collection_config_ = default_resource_collection_config();
     TraceConfig trace_config_;
+    LogConfig log_config_;
     std::vector<ReplaySegment> replay_error_buffer_;
     std::vector<ReplayPendingRecord> replay_pending_records_;
     std::vector<uintptr_t> replay_windows_;
@@ -198,6 +230,7 @@ private:
     std::unordered_map<uintptr_t, guance_rum_session_replay_touch_privacy> replay_touch_privacy_;
     std::unordered_map<uintptr_t, bool> replay_hidden_;
     mutable std::mutex mutex_;
+    mutable std::mutex log_mutex_;
     bool session_sampled_ = true;
     bool session_error_sampled_ = false;
     bool session_replay_sampled_ = false;
@@ -216,12 +249,20 @@ private:
     std::atomic<int64_t> replay_upload_success_count_{0};
     std::atomic<int64_t> replay_upload_retry_count_{0};
     std::atomic<int64_t> replay_upload_terminal_failure_count_{0};
+    std::atomic<int64_t> logs_enqueued_{0};
+    std::atomic<int64_t> logs_dropped_{0};
+    std::atomic<int64_t> log_upload_success_count_{0};
+    std::atomic<int64_t> log_upload_retry_count_{0};
+    std::atomic<int64_t> log_upload_terminal_failure_count_{0};
     std::atomic<int64_t> last_rum_upload_status_code_{0};
     std::atomic<int64_t> last_replay_upload_status_code_{0};
+    std::atomic<int64_t> last_log_upload_status_code_{0};
     std::atomic<int64_t> last_rum_upload_error_code_{0};
     std::atomic<int64_t> last_replay_upload_error_code_{0};
+    std::atomic<int64_t> last_log_upload_error_code_{0};
     std::atomic<int64_t> last_rum_upload_latency_ms_{0};
     std::atomic<int64_t> last_replay_upload_latency_ms_{0};
+    std::atomic<int64_t> last_log_upload_latency_ms_{0};
 };
 
 Config from_c_config(const guance_rum_config* config);

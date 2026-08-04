@@ -17,6 +17,7 @@ struct TransportResult {
 };
 
 TransportResult send_to_dataway(const Config& config, const std::vector<std::string>& lines);
+TransportResult send_logging_to_dataway(const Config& config, const std::vector<std::string>& lines);
 TransportResult send_session_replay_to_dataway(const Config& config, const std::string& content_type, const std::string& body);
 
 } // namespace guance::rum

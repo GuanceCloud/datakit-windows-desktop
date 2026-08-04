@@ -81,6 +81,28 @@ void guance_rum_trace_context_init(guance_rum_trace_context* context) {
     context->version = GUANCE_RUM_TRACE_CONTEXT_VERSION;
 }
 
+void guance_rum_log_config_init(guance_rum_log_config* config) {
+    if (config == nullptr) {
+        return;
+    }
+    *config = guance_rum_log_config{};
+    config->struct_size = sizeof(guance_rum_log_config);
+    config->version = GUANCE_RUM_LOG_CONFIG_VERSION;
+    config->sample_rate = 1.0;
+    config->max_queue_items = 5000;
+    config->max_queue_bytes = 32LL * 1024 * 1024;
+    config->discard_strategy = GUANCE_RUM_LOG_DISCARD_NEW;
+}
+
+void guance_rum_log_diagnostics_init(guance_rum_log_diagnostics* diagnostics) {
+    if (diagnostics == nullptr) {
+        return;
+    }
+    *diagnostics = guance_rum_log_diagnostics{};
+    diagnostics->struct_size = sizeof(guance_rum_log_diagnostics);
+    diagnostics->version = GUANCE_RUM_LOG_DIAGNOSTICS_VERSION;
+}
+
 guance_rum_handle guance_rum_init(const guance_rum_config* config) {
     try {
         return new RumCore(guance::rum::from_c_config(config));
@@ -175,6 +197,88 @@ int guance_rum_configure_trace(
     }
     try {
         return static_cast<RumCore*>(handle)->configure_trace(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_rum_configure_logging(
+    guance_rum_handle handle,
+    const guance_rum_log_config* config) {
+    if (handle == nullptr || config == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->configure_logging(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_rum_add_log(
+    guance_rum_handle handle,
+    const char* content,
+    const char* status,
+    const guance_rum_log_property* properties,
+    uint32_t property_count) {
+    if (handle == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->add_log(
+            content,
+            status,
+            properties,
+            property_count) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_rum_add_logs(
+    guance_rum_handle handle,
+    const guance_rum_log_entry* entries,
+    uint32_t entry_count) {
+    if (handle == nullptr || (entry_count > 0 && entries == nullptr)) {
+        return 0;
+    }
+    int accepted = 0;
+    try {
+        for (uint32_t index = 0; index < entry_count; ++index) {
+            const auto& entry = entries[index];
+            if (static_cast<RumCore*>(handle)->add_log(
+                    entry.content,
+                    entry.status,
+                    entry.properties,
+                    entry.property_count)) {
+                ++accepted;
+            }
+        }
+    } catch (...) {
+        return accepted;
+    }
+    return accepted;
+}
+
+int guance_rum_get_log_diagnostics(
+    guance_rum_handle handle,
+    guance_rum_log_diagnostics* diagnostics) {
+    if (handle == nullptr || diagnostics == nullptr ||
+        diagnostics->struct_size < sizeof(guance_rum_log_diagnostics) ||
+        diagnostics->version != GUANCE_RUM_LOG_DIAGNOSTICS_VERSION) {
+        return 0;
+    }
+    try {
+        const auto snapshot = static_cast<RumCore*>(handle)->log_diagnostics();
+        diagnostics->logs_enqueued = snapshot.logs_enqueued;
+        diagnostics->logs_dropped = snapshot.logs_dropped;
+        diagnostics->upload_success_count = snapshot.upload_success_count;
+        diagnostics->upload_retry_count = snapshot.upload_retry_count;
+        diagnostics->upload_terminal_failure_count = snapshot.upload_terminal_failure_count;
+        diagnostics->last_upload_status_code = snapshot.last_upload_status_code;
+        diagnostics->last_upload_error_code = snapshot.last_upload_error_code;
+        diagnostics->last_upload_latency_ms = snapshot.last_upload_latency_ms;
+        return 1;
     } catch (...) {
         return 0;
     }

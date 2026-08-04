@@ -19,7 +19,11 @@ struct QueuedLine {
 
 class QueueStore {
 public:
-    explicit QueueStore(std::string database_path, int max_items, int64_t max_bytes);
+    explicit QueueStore(
+        std::string database_path,
+        int max_items,
+        int64_t max_bytes,
+        bool discard_new = false);
     ~QueueStore();
 
     bool enqueue(const std::string& line);
@@ -36,10 +40,12 @@ private:
     void fallback_trim();
     void fallback_recover();
     int64_t memory_size_bytes() const;
+    bool fallback_has_capacity_for(std::size_t bytes) const;
 
     std::string database_path_;
     int max_items_ = 100000;
     int64_t max_bytes_ = 64LL * 1024 * 1024;
+    bool discard_new_ = false;
     int64_t next_memory_id_ = 0;
     std::vector<QueuedLine> memory_lines_;
     std::mutex mutex_;

@@ -67,10 +67,15 @@ std::string queue_file_name(int64_t id) {
 
 } // namespace
 
-QueueStore::QueueStore(std::string database_path, int max_items, int64_t max_bytes)
+QueueStore::QueueStore(
+    std::string database_path,
+    int max_items,
+    int64_t max_bytes,
+    bool discard_new)
     : database_path_(std::move(database_path)),
       max_items_(max_items > 0 ? max_items : 100000),
-      max_bytes_(max_bytes > 0 ? max_bytes : 64LL * 1024 * 1024) {
+      max_bytes_(max_bytes > 0 ? max_bytes : 64LL * 1024 * 1024),
+      discard_new_(discard_new) {
     open();
 }
 
@@ -85,8 +90,31 @@ QueueStore::~QueueStore() {
 
 bool QueueStore::enqueue(const std::string& line) {
     std::lock_guard lock(mutex_);
+    if (line.empty() || static_cast<int64_t>(line.size()) > max_bytes_) {
+        return false;
+    }
 #if defined(GUANCE_RUM_HAS_SQLITE)
     if (db_ != nullptr) {
+        if (discard_new_) {
+            sqlite3_stmt* size_statement = nullptr;
+            int64_t count = max_items_;
+            int64_t bytes = max_bytes_;
+            if (sqlite3_prepare_v2(
+                    db_,
+                    "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(line AS BLOB))), 0) FROM rum_queue",
+                    -1,
+                    &size_statement,
+                    nullptr) == SQLITE_OK &&
+                sqlite3_step(size_statement) == SQLITE_ROW) {
+                count = sqlite3_column_int64(size_statement, 0);
+                bytes = sqlite3_column_int64(size_statement, 1);
+            }
+            sqlite3_finalize(size_statement);
+            if (count >= max_items_ || bytes + static_cast<int64_t>(line.size()) > max_bytes_) {
+                return false;
+            }
+        }
+
         sqlite3_stmt* stmt = nullptr;
         bool stored = false;
         if (sqlite3_prepare_v2(db_, "INSERT INTO rum_queue(line, created_at_unix_ms) VALUES (?1, strftime('%s','now') * 1000)", -1, &stmt, nullptr) == SQLITE_OK) {
@@ -95,12 +123,17 @@ bool QueueStore::enqueue(const std::string& line) {
         }
         sqlite3_finalize(stmt);
         if (stored) {
-            trim();
+            if (!discard_new_) {
+                trim();
+            }
             return true;
         }
         return false;
     }
 #endif
+    if (discard_new_ && !fallback_has_capacity_for(line.size())) {
+        return false;
+    }
     return fallback_enqueue(line);
 }
 
@@ -210,10 +243,14 @@ bool QueueStore::fallback_enqueue(const std::string& line) {
     if (ec) {
         std::filesystem::remove(temp_path, ec);
         memory_lines_.push_back({id, line});
-        trim();
+        if (!discard_new_) {
+            trim();
+        }
         return false;
     }
-    trim();
+    if (!discard_new_) {
+        trim();
+    }
     return true;
 }
 
@@ -333,6 +370,23 @@ int64_t QueueStore::memory_size_bytes() const {
         size += static_cast<int64_t>(line.line.size());
     }
     return size;
+}
+
+bool QueueStore::fallback_has_capacity_for(std::size_t bytes) const {
+    int64_t count = static_cast<int64_t>(memory_lines_.size());
+    int64_t total_bytes = memory_size_bytes();
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(fallback_directory(), ec)) {
+        if (ec || !entry.is_regular_file() || parse_queue_id(entry.path()) <= 0) {
+            continue;
+        }
+        count++;
+        total_bytes += static_cast<int64_t>(entry.file_size(ec));
+        if (ec) {
+            return false;
+        }
+    }
+    return count < max_items_ && total_bytes + static_cast<int64_t>(bytes) <= max_bytes_;
 }
 
 std::string default_queue_path() {

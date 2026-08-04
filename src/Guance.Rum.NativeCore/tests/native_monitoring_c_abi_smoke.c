@@ -44,5 +44,21 @@ int main(void) {
     assert(context.version == GUANCE_RUM_TRACE_CONTEXT_VERSION);
     assert(context.header_count == 0);
     assert(guance_rum_create_trace_context(NULL, "https://example.com", "GET", &context) == 0);
+
+    guance_rum_log_config logging;
+    guance_rum_log_config_init(&logging);
+    assert(logging.struct_size == sizeof(logging));
+    assert(logging.version == GUANCE_RUM_LOG_CONFIG_VERSION);
+    assert(logging.sample_rate == 1.0);
+    assert(logging.max_queue_items == 5000);
+    assert(logging.discard_strategy == GUANCE_RUM_LOG_DISCARD_NEW);
+    assert(guance_rum_configure_logging(NULL, &logging) == 0);
+    assert(guance_rum_add_log(NULL, "message", "info", NULL, 0) == 0);
+    assert(guance_rum_add_logs(NULL, NULL, 0) == 0);
+    guance_rum_log_diagnostics log_diagnostics;
+    guance_rum_log_diagnostics_init(&log_diagnostics);
+    assert(log_diagnostics.struct_size == sizeof(log_diagnostics));
+    assert(log_diagnostics.version == GUANCE_RUM_LOG_DIAGNOSTICS_VERSION);
+    assert(guance_rum_get_log_diagnostics(NULL, &log_diagnostics) == 0);
     return 0;
 }

@@ -4,8 +4,10 @@ internal static class RumConstants
 {
     public const string WindowsSdkName = "df_windows_rum_sdk";
     public const string WindowsSource = "windows";
+    public const string WindowsLogSource = "df_rum_windows_log";
 
     public const string RumWritePath = "v1/write/rum";
+    public const string LogWritePath = "v1/write/logging";
     public const string RumReplayWritePath = "v1/write/rum/replay";
 
     public const string MeasurementView = "view";
@@ -31,6 +33,8 @@ internal static class RumConstants
     public const string Locale = "locale";
     public const string NetworkType = "network_type";
     public const string CustomKeys = "custom_keys";
+    public const string LogMessage = "message";
+    public const string LogStatus = "status";
 
     public const string UserId = "userid";
     public const string UserName = "user_name";

@@ -8,6 +8,7 @@ Windows desktop RUM SDK for reporting user behavior data to Dataway or local Dat
 - Public Dataway mode with `DatawayUrl + ClientToken`, and local DataKit mode with `DatakitUrl`.
 - Persistent SQLite queue with retry, batching, and oldest-first discard limits.
 - Manual APIs for View, Action, Error, Resource, LongTask, user binding, global context, flush, and shutdown.
+- Android-aligned custom Logging input with RUM correlation, level filtering, sampling, batching, a dedicated durable queue, and `System.Diagnostics.Trace` auto-capture.
 - .NET automatic instrumentation entry points for WPF, WinForms, WinUI, `HttpClient`, unhandled exceptions, and UI-thread long tasks.
 - Electron hybrid UI acceptance sample with a Vite/file renderer, secure preload bridge, loopback resource tests, an independently instrumented remote renderer window, and the official Guance Browser RUM SDK.
 - Native C ABI for C/C++ safe automatic boundaries, WinHTTP trace propagation, and manual behavior reporting.
@@ -40,6 +41,15 @@ RumSdk.Init(new RumConfig
         TraceType = RumTraceType.TraceParent,
         // Use an explicit allow-list before sending tracing headers.
         ShouldTrace = uri => uri.Host.EndsWith(".example.com", StringComparison.OrdinalIgnoreCase)
+    },
+    Logging = new RumLogConfig
+    {
+        EnableCustomLog = true,
+        EnableLinkRumData = true,
+        EnableTraceCapture = true,
+        SampleRate = 1.0,
+        LevelFilters = new[] { RumLogStatus.Info, RumLogStatus.Warning, RumLogStatus.Error },
+        GlobalContext = new Dictionary<string, object?> { ["channel"] = "desktop" }
     },
     // Phase 1 validates RUM only. Session Replay is a Phase 2 target.
     SessionReplay = new RumSessionReplayConfig { Enabled = false },
@@ -126,6 +136,29 @@ catch (Exception ex)
 }
 ```
 
+Custom logs are sent to the Logging intake independently of RUM events:
+
+```csharp
+RumSdk.AddLog(
+    "payment completed",
+    RumLogStatus.Ok,
+    new Dictionary<string, object?> { ["order_id"] = "A1001" });
+
+RumSdk.AddLogs(new[]
+{
+    new RumLogEntry("cache miss", RumLogStatus.Debug),
+    new RumLogEntry("security audit", "audit")
+});
+```
+
+`EnableTraceCapture` installs a `RumTraceListener` for the process-wide
+`System.Diagnostics.Trace` pipeline. It captures `Trace` and `TraceSource`
+events; logging frameworks that do not write to that pipeline should call
+`AddLog` from their own sink/provider. Log content is capped at 30 KiB without
+splitting a UTF-8 character. The default dedicated queue holds 5,000 records and
+discards new records when full; set `DiscardStrategy =
+RumLogDiscardStrategy.DiscardOldest` to retain the newest records instead.
+
 Session Replay is experimental and deferred from Phase 1. Phase 1 samples hard-disable it, and manual start cannot override a disabled `RumSessionReplayConfig`. Phase 2 work must explicitly initialize with `Enabled = true` before using the following APIs:
 
 ```csharp
@@ -196,6 +229,13 @@ trace.enable_auto_trace = 1;
 trace.enable_link_rum_data = 1;
 trace.trace_type = GUANCE_RUM_TRACE_TRACEPARENT;
 guance_rum_configure_trace(rum, &trace);
+
+guance_rum_log_config logging;
+guance_rum_log_config_init(&logging);
+logging.enable_custom_log = 1;
+logging.enable_link_rum_data = 1;
+guance_rum_configure_logging(rum, &logging);
+guance_rum_add_log(rum, "native startup", "info", nullptr, 0);
 ```
 
 The default thresholds are 500 ms for a UI long task and 5 seconds for an
@@ -221,6 +261,6 @@ Use `build\pack.ps1` for release validation; it restores, tests, runs the Electr
 
 ## Dataway Contract
 
-The managed SDK posts `text/plain` line protocol to `v1/write/rum`. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
+The SDK posts RUM `text/plain` line protocol to `v1/write/rum` and Logging line protocol to `v1/write/logging`. The two data types use independent persistent queues and retry state, with RUM flushed first. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
 
 The experimental Session Replay transport posts Windows-identified `multipart/form-data` (`sdk_name=df_windows_rum_sdk`, `source=windows`) to `v1/write/rum/replay`. Console routing, playback, privacy, and performance gates are Phase 2 work and are not part of the Phase 1 release claim.

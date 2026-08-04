@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using Guance.Rum.Windows.Queue;
@@ -32,6 +31,7 @@ public sealed class RumClient : IAsyncDisposable
     private readonly RumConfig config;
     private readonly IRumQueue queue;
     private readonly IDatawayTransport transport;
+    private readonly LogPipeline logPipeline;
     private readonly ISessionReplayQueue sessionReplayQueue;
     private readonly ISessionReplayTransport sessionReplayTransport;
     private readonly SessionReplayPrivacyOverrides sessionReplayPrivacy = new();
@@ -46,6 +46,7 @@ public sealed class RumClient : IAsyncDisposable
     private readonly Dictionary<string, object?> globalContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?> rumGlobalContext = new(StringComparer.Ordinal);
     private readonly object stateGate = new();
+    private readonly object automaticLogCaptureGate = new();
     private readonly object rumQueueWriteGate = new();
     private readonly HashSet<Task> pendingRumQueueWrites = new();
     private readonly SemaphoreSlim rumFlushGate = new(1, 1);
@@ -56,6 +57,7 @@ public sealed class RumClient : IAsyncDisposable
     private readonly System.Threading.Timer sessionReplayFlushTimer;
     private readonly CancellationTokenSource shutdown = new();
     private AutomaticInstrumentation? automaticInstrumentation;
+    private RumTraceListener? traceLogListener;
     private ActiveView? activeView;
     private UserInfo? userInfo;
     private long rumEventsEnqueued;
@@ -75,12 +77,28 @@ public sealed class RumClient : IAsyncDisposable
     private volatile bool webViewAutoInstrumentationEnabled = true;
 
     public RumClient(RumConfig config)
-        : this(config, new SqliteRumQueue(config), new DatawayTransport(config), new SqliteSessionReplayQueue(config), new SessionReplayTransport(config))
+        : this(
+            config,
+            new SqliteRumQueue(config),
+            new DatawayTransport(config),
+            new SqliteSessionReplayQueue(config),
+            new SessionReplayTransport(config),
+            null,
+            new SqliteLogQueue(config),
+            new LogTransport(config))
     {
     }
 
     internal RumClient(RumConfig config, IRumQueue queue, IDatawayTransport transport)
-        : this(config, queue, transport, new SqliteSessionReplayQueue(config), new SessionReplayTransport(config))
+        : this(
+            config,
+            queue,
+            transport,
+            new SqliteSessionReplayQueue(config),
+            new SessionReplayTransport(config),
+            null,
+            new SqliteLogQueue(config),
+            new LogTransport(config))
     {
     }
 
@@ -90,7 +108,9 @@ public sealed class RumClient : IAsyncDisposable
         IDatawayTransport transport,
         ISessionReplayQueue sessionReplayQueue,
         ISessionReplayTransport sessionReplayTransport,
-        IApplicationLaunchClock? applicationLaunchClock = null)
+        IApplicationLaunchClock? applicationLaunchClock = null,
+        ILogQueue? logQueue = null,
+        ILogTransport? logTransport = null)
     {
         config.Validate();
         this.config = config;
@@ -108,11 +128,56 @@ public sealed class RumClient : IAsyncDisposable
         sessionReplayRetryBackoff = new RetryBackoff(config.SessionReplay.FlushInterval);
         flushTimer = new System.Threading.Timer(_ => _ = FlushRumQueueAsync(shutdown.Token, respectBackoff: true), null, config.FlushInterval, config.FlushInterval);
         sessionReplayFlushTimer = new System.Threading.Timer(_ => _ = FlushSessionReplayAsync(shutdown.Token, respectBackoff: true), null, config.SessionReplay.FlushInterval, config.SessionReplay.FlushInterval);
+        logPipeline = new LogPipeline(
+            config,
+            logQueue ?? new SqliteLogQueue(config),
+            logTransport ?? new LogTransport(config),
+            CreateLogEvent,
+            PublishDiagnostic,
+            shutdown.Token);
+        if (config.Logging.EnableTraceCapture)
+        {
+            EnableAutomaticLogCapture();
+        }
     }
 
     public RumConfig Config => config;
 
     public event EventHandler<RumDiagnosticEvent>? DiagnosticEvent;
+
+    public void EnableAutomaticLogCapture()
+    {
+        if (!config.Logging.EnableCustomLog)
+        {
+            throw new InvalidOperationException("Logging.EnableCustomLog must be enabled before automatic log capture.");
+        }
+
+        lock (automaticLogCaptureGate)
+        {
+            if (traceLogListener is not null)
+            {
+                return;
+            }
+
+            traceLogListener = new RumTraceListener(this);
+            Trace.Listeners.Add(traceLogListener);
+        }
+    }
+
+    public void DisableAutomaticLogCapture()
+    {
+        lock (automaticLogCaptureGate)
+        {
+            if (traceLogListener is null)
+            {
+                return;
+            }
+
+            Trace.Listeners.Remove(traceLogListener);
+            traceLogListener.Dispose();
+            traceLogListener = null;
+        }
+    }
 
     public RumDiagnosticsSnapshot GetDiagnosticsSnapshot()
     {
@@ -495,9 +560,45 @@ public sealed class RumClient : IAsyncDisposable
         IncrementLongTask(view, action);
     }
 
+    public void AddLog(
+        string content,
+        RumLogStatus status,
+        IReadOnlyDictionary<string, object?>? properties = null)
+    {
+        AddLog(content, RumLogStatusNames.ToProtocolValue(status), properties);
+    }
+
+    public void AddLog(
+        string content,
+        string status,
+        IReadOnlyDictionary<string, object?>? properties = null)
+    {
+        logPipeline.AddLog(content, status, properties);
+    }
+
+    public void AddLogs(IEnumerable<RumLogEntry> logs)
+    {
+        ArgumentNullException.ThrowIfNull(logs);
+        foreach (var log in logs)
+        {
+            if (log is null)
+            {
+                throw new ArgumentException("Log collection must not contain null entries.", nameof(logs));
+            }
+
+            AddLog(log.Content, log.Status, log.Properties);
+        }
+    }
+
+    public RumLogDiagnosticsSnapshot GetLogDiagnosticsSnapshot()
+    {
+        return logPipeline.GetDiagnosticsSnapshot();
+    }
+
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
         await FlushRumQueueAsync(cancellationToken, respectBackoff: false).ConfigureAwait(false);
+        await logPipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
         await FlushSessionReplayAsync(cancellationToken, respectBackoff: false).ConfigureAwait(false);
     }
 
@@ -554,6 +655,7 @@ public sealed class RumClient : IAsyncDisposable
 
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
+        DisableAutomaticLogCapture();
         webViewInstrumentation.Dispose();
         StopView();
         await FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -571,7 +673,10 @@ public sealed class RumClient : IAsyncDisposable
         sessionReplayTransport.Dispose();
         transport.Dispose();
         await sessionReplayQueue.DisposeAsync().ConfigureAwait(false);
+        await logPipeline.DisposeAsync().ConfigureAwait(false);
         await queue.DisposeAsync().ConfigureAwait(false);
+        rumFlushGate.Dispose();
+        sessionReplayFlushGate.Dispose();
         shutdown.Dispose();
     }
 
@@ -865,6 +970,75 @@ public sealed class RumClient : IAsyncDisposable
         return rumEvent;
     }
 
+    private LogEvent CreateLogEvent(
+        string content,
+        string status,
+        IReadOnlyDictionary<string, object?>? properties)
+    {
+        if (config.Logging.EnableLinkRumData)
+        {
+            session.Touch();
+        }
+
+        var user = userInfo;
+        var view = config.Logging.EnableLinkRumData ? SnapshotView() : null;
+        var action = config.Logging.EnableLinkRumData ? SnapshotAction() : null;
+        var logEvent = new LogEvent(Clock.UnixTimeNanoseconds())
+            .WithTag(RumConstants.AppId, config.RumAppId)
+            .WithTag(RumConstants.Service, config.ServiceName)
+            .WithTag(RumConstants.Env, config.Env.ToLowerInvariant())
+            .WithTag(RumConstants.Version, config.Version)
+            .WithTag(RumConstants.SdkName, RumConstants.WindowsSdkName)
+            .WithTag(RumConstants.SdkVersion, typeof(RumClient).Assembly.GetName().Version?.ToString() ?? "0.1.0")
+            .WithTag(RumConstants.ApplicationUuid, platformInfo.ApplicationUuid)
+            .WithTag(RumConstants.Os, platformInfo.Os)
+            .WithTag(RumConstants.OsVersion, platformInfo.OsVersion)
+            .WithTag(RumConstants.OsVersionMajor, platformInfo.OsVersionMajor)
+            .WithTag(RumConstants.Device, platformInfo.Device)
+            .WithTag(RumConstants.Model, platformInfo.Model)
+            .WithTag(RumConstants.Arch, platformInfo.Architecture)
+            .WithTag(RumConstants.ScreenSize, platformInfo.ScreenSize)
+            .WithTag(RumConstants.Locale, platformInfo.Locale)
+            .WithTag(RumConstants.NetworkType, RumPlatformInfo.GetNetworkType())
+            .WithTag(RumConstants.IsSignIn, user is null ? "F" : "T")
+            .WithTag(
+                RumConstants.UserId,
+                user?.Id ?? (config.Logging.EnableLinkRumData ? session.SessionId : null))
+            .WithTag(RumConstants.UserName, user?.Name)
+            .WithTag(RumConstants.UserEmail, user?.Email)
+            .WithTag(RumConstants.SessionId, config.Logging.EnableLinkRumData ? session.SessionId : null)
+            .WithTag(RumConstants.SessionType, config.Logging.EnableLinkRumData ? "user" : null)
+            .WithTag(RumConstants.ViewId, view?.Id)
+            .WithTag(RumConstants.ViewName, view?.Name)
+            .WithTag(RumConstants.ViewReferrer, view?.Referrer)
+            .WithTag(RumConstants.ActionId, action?.Id)
+            .WithTag(RumConstants.ActionName, action?.Name);
+
+        lock (stateGate)
+        {
+            AddTags(logEvent, globalContext);
+            AddTags(logEvent, config.Logging.GlobalContext);
+        }
+
+        if (user is not null)
+        {
+            AddTags(logEvent, user.Extra);
+        }
+
+        if (properties is not null)
+        {
+            foreach (var item in properties)
+            {
+                logEvent.WithField(item.Key, item.Value);
+            }
+        }
+
+        // Reserved fields are authoritative even when callers pass colliding properties.
+        return logEvent
+            .WithField(RumConstants.LogMessage, content)
+            .WithField(RumConstants.LogStatus, status);
+    }
+
     private void Enqueue(RumEvent rumEvent, bool waitForQueue = false)
     {
         if (!sampling.ShouldCollect(rumEvent.Measurement))
@@ -1107,7 +1281,17 @@ public sealed class RumClient : IAsyncDisposable
 
     private void EmitDiagnostic(RumDiagnosticLevel level, string source, string message, int? statusCode = null, Exception? exception = null)
     {
-        var item = new RumDiagnosticEvent(DateTimeOffset.UtcNow, level, source, message, statusCode, exception);
+        PublishDiagnostic(new RumDiagnosticEvent(
+            DateTimeOffset.UtcNow,
+            level,
+            source,
+            message,
+            statusCode,
+            exception));
+    }
+
+    private void PublishDiagnostic(RumDiagnosticEvent item)
+    {
         try
         {
             config.DiagnosticListener?.Invoke(item);
@@ -1290,6 +1474,17 @@ public sealed class RumClient : IAsyncDisposable
             if (!rumEvent.Tags.ContainsKey(item.Key))
             {
                 rumEvent.WithTag(item.Key, item.Value);
+            }
+        }
+    }
+
+    private static void AddTags(LogEvent logEvent, IReadOnlyDictionary<string, object?> values)
+    {
+        foreach (var item in values)
+        {
+            if (!logEvent.Tags.ContainsKey(item.Key))
+            {
+                logEvent.WithTag(item.Key, item.Value);
             }
         }
     }
@@ -1493,48 +1688,4 @@ public sealed class RumClient : IAsyncDisposable
             : new Dictionary<string, object?>(InitialProperties, StringComparer.Ordinal);
     }
 
-    private sealed class RetryBackoff
-    {
-        private static readonly TimeSpan MaxDelay = TimeSpan.FromMinutes(5);
-        private readonly TimeSpan baseDelay;
-        private readonly object gate = new();
-        private long retryScheduledAt;
-        private TimeSpan retryDelay;
-        private int attempt;
-
-        public RetryBackoff(TimeSpan baseDelay)
-        {
-            this.baseDelay = baseDelay <= TimeSpan.Zero ? TimeSpan.FromSeconds(1) : baseDelay;
-        }
-
-        public bool CanAttemptNow()
-        {
-            lock (gate)
-            {
-                return retryDelay <= TimeSpan.Zero || Clock.ElapsedSince(retryScheduledAt) >= retryDelay;
-            }
-        }
-
-        public void Reset()
-        {
-            lock (gate)
-            {
-                attempt = 0;
-                retryScheduledAt = 0;
-                retryDelay = TimeSpan.Zero;
-            }
-        }
-
-        public void ScheduleRetry()
-        {
-            lock (gate)
-            {
-                attempt = Math.Min(attempt + 1, 10);
-                var delayMilliseconds = Math.Min(MaxDelay.TotalMilliseconds, baseDelay.TotalMilliseconds * Math.Pow(2, attempt - 1));
-                var jitter = 0.8 + (Random.Shared.NextDouble() * 0.4);
-                retryScheduledAt = Clock.Timestamp();
-                retryDelay = TimeSpan.FromMilliseconds(Math.Max(1, delayMilliseconds * jitter));
-            }
-        }
-    }
 }

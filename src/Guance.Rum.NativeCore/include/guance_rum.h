@@ -166,6 +166,64 @@ typedef struct guance_rum_trace_config {
     void* user_data;
 } guance_rum_trace_config;
 
+#define GUANCE_RUM_LOG_CONFIG_VERSION 1u
+#define GUANCE_RUM_LOG_DIAGNOSTICS_VERSION 1u
+
+typedef enum guance_rum_log_level {
+    GUANCE_RUM_LOG_DEBUG = 1u << 0,
+    GUANCE_RUM_LOG_INFO = 1u << 1,
+    GUANCE_RUM_LOG_WARNING = 1u << 2,
+    GUANCE_RUM_LOG_ERROR = 1u << 3,
+    GUANCE_RUM_LOG_CRITICAL = 1u << 4,
+    GUANCE_RUM_LOG_OK = 1u << 5
+} guance_rum_log_level;
+
+typedef enum guance_rum_log_discard_strategy {
+    GUANCE_RUM_LOG_DISCARD_NEW = 0,
+    GUANCE_RUM_LOG_DISCARD_OLDEST = 1
+} guance_rum_log_discard_strategy;
+
+typedef struct guance_rum_log_property {
+    const char* key;
+    const char* value;
+} guance_rum_log_property;
+
+/* Property and context strings are copied synchronously. A zero level mask
+ * accepts every status, including application-defined custom status values. */
+typedef struct guance_rum_log_config {
+    uint32_t struct_size;
+    uint32_t version;
+    int enable_custom_log;
+    int enable_link_rum_data;
+    double sample_rate;
+    uint32_t level_filter_mask;
+    const guance_rum_log_property* global_context;
+    uint32_t global_context_count;
+    int max_queue_items;
+    int64_t max_queue_bytes;
+    guance_rum_log_discard_strategy discard_strategy;
+} guance_rum_log_config;
+
+typedef struct guance_rum_log_entry {
+    const char* content;
+    const char* status;
+    const guance_rum_log_property* properties;
+    uint32_t property_count;
+} guance_rum_log_entry;
+
+typedef struct guance_rum_log_diagnostics {
+    uint32_t struct_size;
+    uint32_t version;
+    int64_t logs_enqueued;
+    int64_t logs_dropped;
+    int64_t upload_success_count;
+    int64_t upload_retry_count;
+    int64_t upload_terminal_failure_count;
+    int64_t last_upload_status_code;
+    int64_t last_upload_error_code;
+    int64_t last_upload_latency_ms;
+} guance_rum_log_diagnostics;
+
 typedef enum guance_rum_launch_type {
     GUANCE_RUM_LAUNCH_COLD = 0,
     GUANCE_RUM_LAUNCH_HOT = 1
@@ -208,6 +266,10 @@ GUANCE_RUM_EXPORT void guance_rum_trace_config_init(
     guance_rum_trace_config* config);
 GUANCE_RUM_EXPORT void guance_rum_trace_context_init(
     guance_rum_trace_context* context);
+GUANCE_RUM_EXPORT void guance_rum_log_config_init(
+    guance_rum_log_config* config);
+GUANCE_RUM_EXPORT void guance_rum_log_diagnostics_init(
+    guance_rum_log_diagnostics* diagnostics);
 GUANCE_RUM_EXPORT int guance_rum_configure_resource_collection(
     guance_rum_handle handle,
     const guance_rum_resource_collection_config* config);
@@ -219,6 +281,22 @@ GUANCE_RUM_EXPORT int guance_rum_create_trace_context(
     const char* url,
     const char* method,
     guance_rum_trace_context* context);
+GUANCE_RUM_EXPORT int guance_rum_configure_logging(
+    guance_rum_handle handle,
+    const guance_rum_log_config* config);
+GUANCE_RUM_EXPORT int guance_rum_add_log(
+    guance_rum_handle handle,
+    const char* content,
+    const char* status,
+    const guance_rum_log_property* properties,
+    uint32_t property_count);
+GUANCE_RUM_EXPORT int guance_rum_add_logs(
+    guance_rum_handle handle,
+    const guance_rum_log_entry* entries,
+    uint32_t entry_count);
+GUANCE_RUM_EXPORT int guance_rum_get_log_diagnostics(
+    guance_rum_handle handle,
+    guance_rum_log_diagnostics* diagnostics);
 GUANCE_RUM_EXPORT int guance_rum_enable_native_monitoring(
     guance_rum_handle handle,
     const guance_rum_native_monitoring_config* config);

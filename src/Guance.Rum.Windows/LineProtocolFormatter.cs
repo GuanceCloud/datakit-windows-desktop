@@ -5,11 +5,11 @@ namespace Guance.Rum.Windows;
 
 internal static class LineProtocolFormatter
 {
-    public static string Format(RumEvent rumEvent)
+    public static string Format(ILineProtocolPoint rumEvent)
     {
         if (rumEvent.Fields.Count == 0)
         {
-            throw new InvalidOperationException("A RUM line protocol event requires at least one field.");
+            throw new InvalidOperationException("A line protocol point requires at least one field.");
         }
 
         var builder = new StringBuilder();
