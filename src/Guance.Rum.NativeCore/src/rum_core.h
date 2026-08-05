@@ -128,6 +128,13 @@ public:
     void capture_replay_click(uintptr_t hwnd, const char* target, double x, double y);
     void capture_replay_input(uintptr_t hwnd, const char* target);
     void capture_replay_resize(uintptr_t hwnd, const char* target, double width, double height);
+    bool capture_browser_replay_record(
+        const char* session_id,
+        const char* view_id,
+        const char* record_json,
+        std::size_t record_json_length,
+        int64_t timestamp_ms,
+        bool is_full_snapshot);
     void set_session_replay_text_privacy(uintptr_t hwnd, guance_rum_session_replay_text_privacy privacy);
     void set_session_replay_touch_privacy(uintptr_t hwnd, guance_rum_session_replay_touch_privacy privacy);
     void set_session_replay_hidden(uintptr_t hwnd, bool hidden);
@@ -197,8 +204,15 @@ private:
     bool sampled_for(const std::string& measurement) const;
     void capture_session_replay_snapshot();
     std::string build_session_replay_snapshot_record(int64_t timestamp_ms);
-    std::pair<std::string, std::string> build_session_replay_segment(std::string records_json, int records_count, bool has_full_snapshot, const std::string& creation_reason, int64_t start_ms, int64_t end_ms);
-    void add_replay_record(std::string record_json, bool has_full_snapshot, const std::string& creation_reason, int64_t timestamp_ms, std::string coalesce_key = {});
+    std::pair<std::string, std::string> build_session_replay_segment(std::string records_json, int records_count, bool has_full_snapshot, const std::string& creation_reason, int64_t start_ms, int64_t end_ms, const std::string& session_id_override, const std::string& view_id_override);
+    void add_replay_record(
+        std::string record_json,
+        bool has_full_snapshot,
+        const std::string& creation_reason,
+        int64_t timestamp_ms,
+        std::string coalesce_key = {},
+        std::string session_id_override = {},
+        std::string view_id_override = {});
     void flush_replay_pending_locked();
     void enqueue_replay_segment(std::string content_type, std::string body);
     void track_action(const Action& action, int64_t duration_ns);
@@ -237,6 +251,9 @@ private:
     bool session_replay_error_sampled_ = false;
     bool session_replay_recording_ = false;
     int replay_index_in_view_ = 0;
+    std::string replay_segment_view_id_;
+    std::string replay_pending_session_id_;
+    std::string replay_pending_view_id_;
     bool replay_pending_has_full_snapshot_ = false;
     std::string replay_pending_creation_reason_ = "incremental";
     int64_t replay_pending_start_ms_ = 0;

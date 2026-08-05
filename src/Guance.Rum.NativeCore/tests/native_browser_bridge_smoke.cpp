@@ -34,6 +34,8 @@ int main() {
     config.rum_app_id = "electron-browser-bridge-smoke";
     config.cache_path = queue_path_text.c_str();
     config.http_timeout_ms = 50;
+    config.session_replay_enabled = 1;
+    config.session_replay_sample_rate = 1.0;
 
     guance_rum_handle handle = guance_rum_init(&config);
     require(handle != nullptr, "native core failed to initialize");
@@ -68,6 +70,29 @@ int main() {
         guance_rum_write_line(handle, multiple_lines.data(), multiple_lines.size()) == 0,
         "multiple line payload was accepted");
 
+    const std::string browser_full_snapshot =
+        "{\"type\":2,\"timestamp\":1722300000123,\"data\":{\"node\":{\"id\":1}}}";
+    require(
+        guance_rum_capture_browser_replay_record(
+            handle,
+            "browser-native-session",
+            "browser-view-id",
+            browser_full_snapshot.data(),
+            browser_full_snapshot.size(),
+            1722300000123,
+            1) == 1,
+        "valid Browser Session Replay record was rejected");
+    require(
+        guance_rum_capture_browser_replay_record(
+            handle,
+            "browser-native-session",
+            "",
+            browser_full_snapshot.data(),
+            browser_full_snapshot.size(),
+            1722300000123,
+            1) == 0,
+        "invalid Browser Session Replay view id was accepted");
+
     const guance_rum_launch cold_launch{
         GUANCE_RUM_LAUNCH_COLD,
         1722300000000000000,
@@ -92,6 +117,9 @@ int main() {
     require(
         diagnostics.rum_events_enqueued == measurements.size() + 2,
         "Browser RUM and launch actions were not all enqueued");
+    require(
+        diagnostics.session_replay_sampled == 1,
+        "Browser Session Replay did not use native replay sampling");
 
     auto queue_directory = queue_path;
     queue_directory.replace_extension(".queue");

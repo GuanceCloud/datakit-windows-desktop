@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Guance.Rum.Windows;
 using Guance.Rum.Windows.Samples;
 using Xunit;
 
@@ -19,6 +20,13 @@ public sealed class SampleRumConfigTests : IDisposable
         "GUANCE_RUM_ENV",
         "GUANCE_RUM_VERSION",
         "GUANCE_RUM_DEBUG",
+        "GUANCE_RUM_SAMPLE_RATE",
+        "GUANCE_RUM_SESSION_REPLAY_ENABLED",
+        "GUANCE_RUM_SESSION_REPLAY_SAMPLE_RATE",
+        "GUANCE_RUM_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE",
+        "GUANCE_RUM_REPLAY_TEXT_AND_INPUT_PRIVACY",
+        "GUANCE_RUM_REPLAY_TOUCH_PRIVACY",
+        "GUANCE_RUM_REPLAY_IMAGE_PRIVACY",
         "GUANCE_RUM_DIAGNOSTIC_CONSOLE",
         "GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS",
         "GUANCE_RUM_WEBVIEW_TEST_URL"
@@ -60,6 +68,35 @@ public sealed class SampleRumConfigTests : IDisposable
         Assert.Equal("json-app", config.RumAppId);
         Assert.Equal("json-service", config.ServiceName);
         Assert.Equal("https://example.test/webview", SampleRumConfig.WebViewUrl);
+    }
+
+    [Fact]
+    public void Load_AllowsExperimentalSessionReplayFromLocalJson()
+    {
+        File.WriteAllText(
+            Path.Combine(temporaryDirectory, "rum.local.json"),
+            """
+            {
+              "sessionSampleRate": 80,
+              "sessionReplayEnabled": true,
+              "sessionReplaySampleRate": 75,
+              "sessionReplayOnErrorSampleRate": 25,
+              "replayTextAndInputPrivacy": "MaskSensitiveInputs",
+              "replayTouchPrivacy": "Hide",
+              "replayImagePrivacy": "MaskLargeOnly",
+              "diagnosticConsoleEnabled": false
+            }
+            """);
+
+        var config = SampleRumConfig.Load("default-app", "default-service", Array.Empty<string>());
+
+        Assert.Equal(0.8, config.SampleRate);
+        Assert.True(config.SessionReplay.Enabled);
+        Assert.Equal(0.75, config.SessionReplay.SampleRate);
+        Assert.Equal(0.25, config.SessionReplay.OnErrorSampleRate);
+        Assert.Equal(SessionReplayTextAndInputPrivacy.MaskSensitiveInputs, config.SessionReplay.TextAndInputPrivacy);
+        Assert.Equal(SessionReplayTouchPrivacy.Hide, config.SessionReplay.TouchPrivacy);
+        Assert.Equal(SessionReplayImagePrivacy.MaskLargeOnly, config.SessionReplay.ImagePrivacy);
     }
 
     [Fact]

@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { browserRumEventToLine } = require("./browser-rum-line-protocol.cjs");
+const { browserBridgeEventToNativeInput } = require("./browser-rum-line-protocol.cjs");
 
 const NATIVE_HOST_FILE = "guance_rum_electron_bridge.exe";
 const NATIVE_CORE_FILE = "guance_rum_native.dll";
@@ -57,6 +57,13 @@ function createNativeEnvironment(configuration, baseEnvironment = process.env) {
     GUANCE_RUM_NATIVE_CACHE_PATH: configuration.cachePath || "",
     GUANCE_RUM_NATIVE_PROXY_URL: configuration.proxyUrl || "",
     GUANCE_RUM_NATIVE_SAMPLE_RATE: String(configuration.sampleRate ?? 1),
+    GUANCE_RUM_NATIVE_SESSION_REPLAY_ENABLED: configuration.sessionReplayEnabled ? "1" : "0",
+    GUANCE_RUM_NATIVE_SESSION_REPLAY_SAMPLE_RATE: String(
+      configuration.sessionReplaySampleRate ?? 1,
+    ),
+    GUANCE_RUM_NATIVE_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE: String(
+      configuration.sessionReplayOnErrorSampleRate ?? 0,
+    ),
     GUANCE_RUM_NATIVE_HTTP_TIMEOUT_MS: String(configuration.httpTimeoutMs ?? 10_000),
     GUANCE_RUM_NATIVE_DEBUG: configuration.debug ? "1" : "0",
   };
@@ -136,7 +143,10 @@ class NativeRumHost {
     }
 
     try {
-      const payload = browserRumEventToLine(serializedEvent, this.trustedContext);
+      const payload = browserBridgeEventToNativeInput(serializedEvent, this.trustedContext);
+      if (payload.measurement === "session_replay" && !this.configuration.sessionReplayEnabled) {
+        throw new Error("Session Replay is not enabled in the native configuration.");
+      }
       this.child.stdin.write(payload.line, "utf8");
       this.accepted += 1;
       if (this.configuration.debug) {

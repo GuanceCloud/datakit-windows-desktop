@@ -502,6 +502,30 @@ void guance_rum_capture_replay_resize(guance_rum_handle handle, uintptr_t hwnd, 
     }
 }
 
+int guance_rum_capture_browser_replay_record(
+    guance_rum_handle handle,
+    const char* session_id,
+    const char* view_id,
+    const char* record_json,
+    size_t record_json_length,
+    int64_t timestamp_ms,
+    int is_full_snapshot) {
+    if (handle == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->capture_browser_replay_record(
+            session_id,
+            view_id,
+            record_json,
+            record_json_length,
+            timestamp_ms,
+            is_full_snapshot != 0) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
 void guance_rum_set_session_replay_text_privacy(guance_rum_handle handle, uintptr_t hwnd, guance_rum_session_replay_text_privacy privacy) {
     if (handle != nullptr) {
         static_cast<RumCore*>(handle)->set_session_replay_text_privacy(hwnd, privacy);

@@ -4,79 +4,48 @@ import { buildRumConfig } from "../src/renderer/rum-config";
 
 function environment(overrides: Partial<DesktopRumEnvironment> = {}): DesktopRumEnvironment {
   return {
-    applicationId: "rum-windows-electron",
-    clientToken: "",
-    site: "",
-    datakitOrigin: "http://127.0.0.1:9529",
-    service: "guance-rum-windows-electron",
-    env: "local",
-    version: "0.1.0",
+    enabled: true,
     debug: true,
-    sessionSampleRate: 100,
+    sessionReplayEnabled: false,
+    sessionReplayPrivacyLevel: "mask",
     userId: "desktop-test-user",
     ...overrides,
   };
 }
 
 describe("buildRumConfig", () => {
-  it("keeps the sample disabled until an application id is supplied", () => {
-    const result = buildRumConfig(environment({ applicationId: "" }));
+  it("stays disabled when the Windows native bridge is unavailable", () => {
+    const result = buildRumConfig(environment({ enabled: false }));
 
     expect(result.enabled).toBe(false);
-    expect(result.reason).toContain("GUANCE_RUM_APP_ID");
+    expect(result.reason).toContain("Windows 原生 RUM Bridge");
   });
 
-  it("builds a local DataKit configuration for a file renderer", () => {
+  it("builds a collector-only Browser RUM configuration for native bridge mode", () => {
     const result = buildRumConfig(environment());
 
     expect(result.enabled).toBe(true);
-    expect(result.intakeMode).toBe("datakit");
+    expect(result.intakeMode).toBe("bridge");
     expect(result.config).toMatchObject({
-      applicationId: "rum-windows-electron",
-      datakitOrigin: "http://127.0.0.1:9529",
-      sessionPersistence: "local-storage",
+      applicationId: "00000000-aaaa-0000-aaaa-000000000000",
+      datakitOrigin: "http://127.0.0.1",
       trackUserInteractions: true,
       trackViewsManually: true,
-    });
-  });
-
-  it("prefers public Dataway when the URL and client token are both present", () => {
-    const result = buildRumConfig(
-      environment({
-        clientToken: "public-browser-token",
-        site: "https://rum-openway.guance.com",
-      }),
-    );
-
-    expect(result.intakeMode).toBe("dataway");
-    expect(result.config).toMatchObject({
-      clientToken: "public-browser-token",
-      site: "https://rum-openway.guance.com",
-    });
-    expect(result.config).not.toHaveProperty("datakitOrigin");
-  });
-
-  it("hard-disables replay for the Phase 1 acceptance sample", () => {
-    const result = buildRumConfig(environment());
-
-    expect(result.config).toMatchObject({
       sessionReplaySampleRate: 0,
+    });
+    expect(result.config).not.toHaveProperty("clientToken");
+    expect(result.config).not.toHaveProperty("site");
+    expect(result.config).not.toHaveProperty("service");
+    expect(result.config).not.toHaveProperty("sessionPersistence");
+  });
+
+  it("allows experimental replay when the native bridge enables it", () => {
+    const result = buildRumConfig(environment({ sessionReplayEnabled: true }));
+
+    expect(result.config).toMatchObject({
+      sessionReplaySampleRate: 100,
       sessionReplayOnErrorSampleRate: 0,
       compressIntakeRequests: false,
-    });
-  });
-
-  it("normalizes unsupported environments and out-of-range sample rates", () => {
-    const result = buildRumConfig(
-      environment({
-        env: "development",
-        sessionSampleRate: 160,
-      }),
-    );
-
-    expect(result.config).toMatchObject({
-      env: "local",
-      sessionSampleRate: 100,
     });
   });
 });

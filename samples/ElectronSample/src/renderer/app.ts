@@ -57,20 +57,6 @@ function nowLabel(): string {
   }).format(new Date());
 }
 
-function getStableOperatorId(processUserId: string): string {
-  if (processUserId) {
-    return processUserId;
-  }
-  const key = "guance-electron-acceptance-operator";
-  const existing = localStorage.getItem(key);
-  if (existing) {
-    return existing;
-  }
-  const created = `desktop-${crypto.randomUUID()}`;
-  localStorage.setItem(key, created);
-  return created;
-}
-
 function renderShell(bootstrap: DesktopBootstrap): void {
   document.body.classList.toggle("remote-renderer", bootstrap.hybrid.isRemoteRenderer);
   const isWindows = bootstrap.app.platform === "win32";
@@ -81,6 +67,9 @@ function renderShell(bootstrap: DesktopBootstrap): void {
       ? "HTTP 隔离页面"
       : "file:// 生产页面";
   const rendererLabel = bootstrap.hybrid.isRemoteRenderer ? "REMOTE RENDERER" : "LOCAL RENDERER";
+  const replayState = bootstrap.rum.sessionReplayEnabled
+    ? "EXPERIMENTAL REPLAY ON"
+    : "EXPERIMENTAL REPLAY OFF";
 
   appRoot.innerHTML = `
     <div class="desktop-shell">
@@ -95,7 +84,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
         </div>
         <div class="titlebar-center">
           <span class="pulse-dot"></span>
-          <span>PHASE 1 · RUM ACCEPTANCE</span>
+          <span>WINDOWS NATIVE BRIDGE · RUM + REPLAY</span>
         </div>
         <div class="window-controls" aria-label="窗口控制">
           <button type="button" data-window-action="minimize" aria-label="最小化">—</button>
@@ -281,10 +270,10 @@ function renderShell(bootstrap: DesktopBootstrap): void {
           <article class="panel acceptance-panel">
             <div class="panel-head">
               <div>
-                <span class="panel-kicker">PHASE 1 SCOPE</span>
+                <span class="panel-kicker">WINDOWS NATIVE BRIDGE</span>
                 <h2>Signal coverage</h2>
               </div>
-              <span class="scope-pill">RUM ONLY</span>
+              <span class="scope-pill">${replayState}</span>
             </div>
             <div class="coverage-list">
               ${["view", "action", "resource", "error", "long_task"]
@@ -302,8 +291,8 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <div class="deferred-note">
               <span class="deferred-icon">Ⅱ</span>
               <span>
-                <strong>Session Replay 已后移</strong>
-                <small>一期配置强制采样率为 0，不启动录制。</small>
+                <strong>Session Replay（实验性）</strong>
+                <small>默认关闭；由原生配置决定采样、会话、持久化和上传。</small>
               </span>
             </div>
           </article>
@@ -354,6 +343,158 @@ function renderShell(bootstrap: DesktopBootstrap): void {
           </article>
         </section>
 
+        <section class="panel replay-panel" id="replay-playground" aria-labelledby="replay-playground-title">
+          <div class="panel-head replay-panel-head">
+            <div>
+              <span class="panel-kicker">EXPERIMENTAL SESSION REPLAY</span>
+              <h2 id="replay-playground-title">Session Replay playground</h2>
+            </div>
+            <div class="replay-panel-meta">
+              <span id="replay-interaction-status">0 interactions</span>
+              <span class="scope-pill replay-scope-pill">${bootstrap.rum.sessionReplayEnabled ? "RECORDING ON" : "RECORDING OFF"}</span>
+            </div>
+          </div>
+          <p class="replay-intro">
+            用真实表单、动态 DOM、弹层、拖放、滚动和 Canvas 验证实验性 Session Replay；默认关闭，开启后记录通过原生 Bridge 持久化并上传。
+          </p>
+
+          <div class="replay-grid">
+            <section class="replay-zone replay-form-zone" aria-labelledby="replay-form-title">
+              <div class="replay-zone-head">
+                <span>01</span>
+                <div><strong id="replay-form-title">Form & privacy states</strong><small>输入、选择与敏感字段</small></div>
+              </div>
+              <div class="replay-form-grid">
+                <label class="replay-field">
+                  <span>Operator name</span>
+                  <input id="replay-name" data-replay-fixture="input" type="text" placeholder="Type a visible value" autocomplete="off" />
+                </label>
+                <label class="replay-field">
+                  <span>Work email</span>
+                  <input id="replay-email" data-replay-fixture="privacy" type="email" placeholder="operator@example.com" autocomplete="off" />
+                </label>
+                <label class="replay-field">
+                  <span>Access token</span>
+                  <input id="replay-password" data-replay-fixture="privacy" type="password" value="sensitive-demo-value" autocomplete="off" />
+                </label>
+                <label class="replay-field">
+                  <span>Incident severity</span>
+                  <select id="replay-severity" data-replay-fixture="selection">
+                    <option value="normal">Normal</option>
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </label>
+                <label class="replay-field replay-field-wide">
+                  <span>Operator notes</span>
+                  <textarea id="replay-notes" data-replay-fixture="input" rows="3" placeholder="Describe the reproduction path"></textarea>
+                </label>
+              </div>
+              <div class="replay-choice-row">
+                <label><input data-replay-fixture="selection" type="checkbox" checked /> Preserve window state</label>
+                <label><input data-replay-fixture="selection" type="checkbox" /> Include diagnostics</label>
+              </div>
+              <fieldset class="replay-radio-group">
+                <legend>Capture mode</legend>
+                <label><input data-replay-fixture="selection" type="radio" name="replay-mode" value="guided" checked /> Guided</label>
+                <label><input data-replay-fixture="selection" type="radio" name="replay-mode" value="manual" /> Manual</label>
+              </fieldset>
+              <div class="replay-range-row">
+                <label for="replay-range">Interaction intensity</label>
+                <input id="replay-range" data-replay-fixture="range" type="range" min="0" max="100" value="48" />
+                <output id="replay-range-output" for="replay-range">48%</output>
+              </div>
+              <button class="replay-toggle" id="replay-toggle" data-replay-fixture="toggle" data-guance-action-name="toggle_replay_fixture" type="button" aria-pressed="false">
+                <span></span><strong>Persistent UI state</strong><small>OFF</small>
+              </button>
+            </section>
+
+            <section class="replay-zone" aria-labelledby="replay-dynamic-title">
+              <div class="replay-zone-head">
+                <span>02</span>
+                <div><strong id="replay-dynamic-title">Dynamic DOM</strong><small>新增、删除与折叠状态</small></div>
+              </div>
+              <div class="replay-dynamic-list" id="replay-dynamic-list" aria-live="polite">
+                <div class="replay-dynamic-row"><i>A1</i><span>Renderer bootstrap</span><b>READY</b></div>
+                <div class="replay-dynamic-row"><i>A2</i><span>Hybrid hand-off</span><b>READY</b></div>
+                <div class="replay-dynamic-row"><i>A3</i><span>Replay fixture set</span><b>READY</b></div>
+              </div>
+              <div class="replay-button-row">
+                <button id="replay-add-row" data-replay-fixture="dynamic" data-guance-action-name="add_replay_dynamic_row" type="button">＋ Add row</button>
+                <button id="replay-remove-row" data-replay-fixture="dynamic" data-guance-action-name="remove_replay_dynamic_row" type="button">− Remove</button>
+              </div>
+              <details class="replay-details" data-replay-fixture="dynamic">
+                <summary>Expandable diagnostic payload</summary>
+                <dl>
+                  <div><dt>Runtime</dt><dd>Electron renderer</dd></div>
+                  <div><dt>Mutation</dt><dd>Incremental DOM snapshot</dd></div>
+                  <div><dt>Privacy</dt><dd>Sensitive input fixture</dd></div>
+                </dl>
+              </details>
+              <div class="replay-tabs" role="tablist" aria-label="Replay state tabs">
+                <button class="active" data-replay-fixture="selection" data-replay-tab="timeline" type="button" role="tab" aria-selected="true">Timeline</button>
+                <button data-replay-fixture="selection" data-replay-tab="snapshot" type="button" role="tab" aria-selected="false">Snapshot</button>
+                <button data-replay-fixture="selection" data-replay-tab="mutation" type="button" role="tab" aria-selected="false">Mutation</button>
+              </div>
+              <div class="replay-tab-content" id="replay-tab-content">Timeline state is visible.</div>
+            </section>
+
+            <section class="replay-zone" aria-labelledby="replay-overlay-title">
+              <div class="replay-zone-head">
+                <span>03</span>
+                <div><strong id="replay-overlay-title">Overlay & pointer</strong><small>弹层、提示和拖放轨迹</small></div>
+              </div>
+              <div class="replay-button-row replay-overlay-actions">
+                <button id="replay-dialog-open" data-replay-fixture="overlay" data-guance-action-name="open_replay_dialog" type="button">Open dialog</button>
+                <button id="replay-toast" data-replay-fixture="overlay" data-guance-action-name="show_replay_toast" type="button">Show toast</button>
+              </div>
+              <div class="replay-drag-board">
+                <div id="replay-drag-source" class="replay-drag-chip" data-replay-fixture="drag" draggable="true">
+                  <span>⋮⋮</span> Drag trace
+                </div>
+                <div id="replay-drop-zone" class="replay-drop-zone" data-replay-fixture="drag">
+                  Drop interaction here
+                </div>
+              </div>
+              <div class="replay-scroll" id="replay-scroll" data-replay-fixture="scroll" tabindex="0">
+                ${Array.from(
+                  { length: 8 },
+                  (_, index) => `
+                    <div class="replay-scroll-row">
+                      <span>${String(index + 1).padStart(2, "0")}</span>
+                      <div><strong>Replay checkpoint ${index + 1}</strong><small>${index % 2 === 0 ? "DOM mutation" : "Pointer movement"}</small></div>
+                      <i></i>
+                    </div>`,
+                ).join("")}
+              </div>
+            </section>
+
+            <section class="replay-zone replay-canvas-zone" aria-labelledby="replay-canvas-title">
+              <div class="replay-zone-head">
+                <span>04</span>
+                <div><strong id="replay-canvas-title">Canvas trace pad</strong><small>实验性 Canvas 录制验证</small></div>
+              </div>
+              <canvas id="replay-canvas" data-replay-fixture="canvas" width="560" height="180" aria-label="Replay pointer drawing canvas"></canvas>
+              <div class="replay-canvas-foot">
+                <span>Press and drag to draw a pointer path.</span>
+                <button id="replay-canvas-clear" data-replay-fixture="canvas" data-guance-action-name="clear_replay_canvas" type="button">Clear trace</button>
+              </div>
+            </section>
+          </div>
+
+          <dialog id="replay-dialog" class="replay-dialog" data-replay-fixture="overlay" aria-labelledby="replay-dialog-title">
+            <div class="replay-dialog-icon">R</div>
+            <p class="panel-kicker">MODAL SNAPSHOT</p>
+            <h3 id="replay-dialog-title">Overlay state captured</h3>
+            <p>验证打开、聚焦、表单编辑和关闭弹层时的连续 DOM 状态。</p>
+            <label class="replay-field">
+              <span>Dialog annotation</span>
+              <input data-replay-fixture="input" type="text" placeholder="Add a modal note" />
+            </label>
+            <button id="replay-dialog-close" type="button">Close dialog</button>
+          </dialog>
+        </section>
+
         <footer class="status-footer">
           <div class="status-left">
             <span class="status-orb" id="rum-orb"></span>
@@ -363,8 +504,8 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             </span>
           </div>
           <div class="status-details">
-            <span><i></i>${escapeHtml(bootstrap.rum.service)}</span>
-            <span><i></i>${escapeHtml(bootstrap.rum.env)}</span>
+            <span><i></i>Native-owned identity</span>
+            <span><i></i>Native-owned session</span>
             <span><i></i>${escapeHtml(bootstrap.app.rendererMode)}</span>
           </div>
           <div class="status-version">v${escapeHtml(bootstrap.app.version)}</div>
@@ -405,6 +546,213 @@ function showToast(message: string, tone: "success" | "warning" | "danger" = "su
   window.setTimeout(() => toast.remove(), 3600);
 }
 
+function initializeReplayPlayground(onOfflineAction: () => void): void {
+  const playground = document.querySelector<HTMLElement>("#replay-playground");
+  if (!playground) {
+    return;
+  }
+
+  let interactionCount = 0;
+  const markInteraction = (label: string) => {
+    interactionCount += 1;
+    appRoot.dataset.replayInteractionCount = String(interactionCount);
+    const status = document.querySelector<HTMLElement>("#replay-interaction-status");
+    if (status) {
+      status.textContent = `${interactionCount} interactions · ${label}`;
+    }
+  };
+
+  playground.addEventListener("input", () => markInteraction("input"));
+  playground.addEventListener("change", () => markInteraction("change"));
+
+  const range = document.querySelector<HTMLInputElement>("#replay-range");
+  const rangeOutput = document.querySelector<HTMLOutputElement>("#replay-range-output");
+  range?.addEventListener("input", () => {
+    if (rangeOutput) {
+      rangeOutput.textContent = `${range.value}%`;
+    }
+  });
+
+  const toggle = document.querySelector<HTMLButtonElement>("#replay-toggle");
+  toggle?.addEventListener("click", () => {
+    const active = toggle.getAttribute("aria-pressed") !== "true";
+    toggle.setAttribute("aria-pressed", String(active));
+    toggle.classList.toggle("active", active);
+    const label = toggle.querySelector("small");
+    if (label) {
+      label.textContent = active ? "ON" : "OFF";
+    }
+    markInteraction(active ? "state on" : "state off");
+    onOfflineAction();
+  });
+
+  const dynamicList = document.querySelector<HTMLDivElement>("#replay-dynamic-list");
+  const addDynamicRow = () => {
+    if (!dynamicList) {
+      return;
+    }
+    const index = dynamicList.children.length + 1;
+    const row = document.createElement("div");
+    row.className = "replay-dynamic-row replay-dynamic-row-new";
+    row.innerHTML = `<i>A${index}</i><span>Runtime mutation ${index}</span><b>ADDED</b>`;
+    dynamicList.append(row);
+    markInteraction("DOM added");
+    onOfflineAction();
+  };
+  document.querySelector("#replay-add-row")?.addEventListener("click", addDynamicRow);
+  document.querySelector("#replay-remove-row")?.addEventListener("click", () => {
+    if (!dynamicList || dynamicList.children.length <= 1) {
+      showToast("至少保留一个动态节点。", "warning");
+      return;
+    }
+    dynamicList.lastElementChild?.remove();
+    markInteraction("DOM removed");
+    onOfflineAction();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-replay-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll<HTMLButtonElement>("[data-replay-tab]").forEach((item) => {
+        const selected = item === button;
+        item.classList.toggle("active", selected);
+        item.setAttribute("aria-selected", String(selected));
+      });
+      const tab = button.dataset.replayTab || "timeline";
+      const content = document.querySelector("#replay-tab-content");
+      if (content) {
+        content.textContent = `${tab[0].toUpperCase()}${tab.slice(1)} state is visible.`;
+      }
+      markInteraction(`${tab} tab`);
+      onOfflineAction();
+    });
+  });
+
+  const dialog = document.querySelector<HTMLDialogElement>("#replay-dialog");
+  document.querySelector("#replay-dialog-open")?.addEventListener("click", () => {
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+      markInteraction("dialog opened");
+      onOfflineAction();
+    }
+  });
+  document.querySelector("#replay-dialog-close")?.addEventListener("click", () => {
+    dialog?.close();
+    markInteraction("dialog closed");
+    onOfflineAction();
+  });
+  document.querySelector("#replay-toast")?.addEventListener("click", () => {
+    showToast("Replay overlay fixture 已显示。");
+    markInteraction("toast");
+    onOfflineAction();
+  });
+
+  const dragSource = document.querySelector<HTMLElement>("#replay-drag-source");
+  const dropZone = document.querySelector<HTMLElement>("#replay-drop-zone");
+  dragSource?.addEventListener("dragstart", (event) => {
+    event.dataTransfer?.setData("text/plain", "replay-trace");
+    dropZone?.classList.add("ready");
+    markInteraction("drag started");
+  });
+  dropZone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+  dropZone?.addEventListener("dragleave", () => dropZone.classList.remove("ready"));
+  dropZone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("ready");
+    dropZone.classList.add("dropped");
+    dropZone.textContent = "Pointer trace received";
+    markInteraction("drop completed");
+    onOfflineAction();
+  });
+
+  const replayScroll = document.querySelector<HTMLElement>("#replay-scroll");
+  replayScroll?.addEventListener(
+    "scroll",
+    () => {
+      replayScroll.classList.add("scrolled");
+      markInteraction("nested scroll");
+    },
+    { once: true },
+  );
+
+  const canvas = document.querySelector<HTMLCanvasElement>("#replay-canvas");
+  const context = canvas?.getContext("2d");
+  let drawing = false;
+  const canvasPoint = (event: PointerEvent) => {
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * canvas.width,
+      y: ((event.clientY - bounds.top) / bounds.height) * canvas.height,
+    };
+  };
+  const drawCanvasGuide = () => {
+    if (!canvas || !context) {
+      return;
+    }
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.save();
+    context.strokeStyle = "rgba(88, 244, 190, 0.16)";
+    context.lineWidth = 1;
+    context.setLineDash([4, 8]);
+    for (let x = 28; x < canvas.width; x += 56) {
+      context.beginPath();
+      context.moveTo(x, 0);
+      context.lineTo(x, canvas.height);
+      context.stroke();
+    }
+    for (let y = 30; y < canvas.height; y += 60) {
+      context.beginPath();
+      context.moveTo(0, y);
+      context.lineTo(canvas.width, y);
+      context.stroke();
+    }
+    context.restore();
+  };
+  drawCanvasGuide();
+  canvas?.addEventListener("pointerdown", (event) => {
+    if (!context) {
+      return;
+    }
+    drawing = true;
+    canvas.setPointerCapture(event.pointerId);
+    const point = canvasPoint(event);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    context.strokeStyle = "#58f4be";
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    markInteraction("canvas draw");
+    onOfflineAction();
+  });
+  canvas?.addEventListener("pointermove", (event) => {
+    if (!drawing || !context) {
+      return;
+    }
+    const point = canvasPoint(event);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+  });
+  const stopDrawing = (event: PointerEvent) => {
+    drawing = false;
+    if (canvas?.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  };
+  canvas?.addEventListener("pointerup", stopDrawing);
+  canvas?.addEventListener("pointercancel", stopDrawing);
+  document.querySelector("#replay-canvas-clear")?.addEventListener("click", () => {
+    drawCanvasGuide();
+    markInteraction("canvas cleared");
+    onOfflineAction();
+  });
+
+  appRoot.dataset.replayFixturesReady = "true";
+}
+
 async function initialize(): Promise<void> {
   const bridge = window.guanceDesktop;
   const bootstrap = await loadDesktopBootstrap(
@@ -414,6 +762,7 @@ async function initialize(): Promise<void> {
   );
   appRoot.dataset.acceptanceUserId = bootstrap.rum.userId;
   appRoot.dataset.rumInitialized = "false";
+  appRoot.dataset.replayRecording = "false";
   appRoot.dataset.rumSdkEventTypes = "";
   appRoot.dataset.rumSdkResourceCount = "0";
   renderShell(bootstrap);
@@ -491,20 +840,17 @@ async function initialize(): Promise<void> {
       } as Parameters<typeof datafluxRum.init>[0];
 
       datafluxRum.init(config);
-      datafluxRum.setGlobalContext({
-        windows_desktop_platform: "windows",
-        windows_desktop_runtime: "electron",
-        windows_integration_mode: "hybrid",
-        windows_acceptance_phase: "phase_1_rum",
-      });
-      datafluxRum.setUser({
-        id: getStableOperatorId(bootstrap.rum.userId),
-        name: "Electron acceptance operator",
-      });
       datafluxRum.startView({ name: "electron.operations" });
+      if (bootstrap.rum.sessionReplayEnabled) {
+        datafluxRum.startSessionReplayRecording();
+        appRoot.dataset.replayRecording = "true";
+      }
       rumEnabled = true;
       appRoot.dataset.rumInitialized = "true";
-      setRumStatus(`${result.intakeMode === "dataway" ? "Public Dataway" : "Local DataKit"} · 已连接`, true);
+      setRumStatus(
+        `Windows Native Bridge · RUM${bootstrap.rum.sessionReplayEnabled ? " + 实验性 Replay" : ""}`,
+        true,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown initialization error";
       setRumStatus(`初始化失败 · ${message}`, false);
@@ -649,6 +995,8 @@ async function initialize(): Promise<void> {
       previewActionWhenOffline();
     });
   });
+
+  initializeReplayPlayground(previewActionWhenOffline);
 
   window.setInterval(() => {
     const clock = document.querySelector("#live-clock");

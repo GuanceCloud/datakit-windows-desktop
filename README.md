@@ -10,17 +10,17 @@ Windows desktop RUM SDK for reporting user behavior data to Dataway or local Dat
 - Manual APIs for View, Action, Error, Resource, LongTask, user binding, global context, flush, and shutdown.
 - Android-aligned custom Logging input with RUM correlation, level filtering, sampling, batching, a dedicated durable queue, and `System.Diagnostics.Trace` auto-capture.
 - .NET automatic instrumentation entry points for WPF, WinForms, WinUI, `HttpClient`, unhandled exceptions, and UI-thread long tasks.
-- Electron hybrid UI acceptance sample with a Vite/file renderer, secure preload bridge, loopback resource tests, an independently instrumented remote renderer window, and the official Guance Browser RUM SDK.
+- Electron hybrid sample with a Vite/file renderer, the official Browser RUM collector, an Android-WebView-compatible `FTWebViewJavascriptBridge`, native session/context ownership, native persistence/upload, loopback resource tests, and an isolated remote renderer window.
 - Native C ABI for C/C++ safe automatic boundaries, WinHTTP trace propagation, and manual behavior reporting.
 - Opt-in native Win32 UI hang detection plus next-start recovery reporting for unhandled SEH and `std::terminate`; minimal crash dumps are local-only and disabled by default.
-- Experimental Session Replay implementation for .NET and native apps. Replay validation and release support are deferred to Phase 2 and are disabled by default in every Phase 1 sample.
+- Experimental Session Replay implementation for .NET, native, WebView2, and Electron apps. It is disabled by default but can be enabled and verified in every Sample; it is not a stable compatibility claim.
 - Native fallback persistence uses an on-disk FIFO file queue when SQLite is not linked, so the packaged DLL keeps failed events across process restarts.
 
 Automatic WPF, WinForms, and WinUI instrumentation captures window view lifecycle, resize replay events, button/menu clicks, text input focus and changes, selector changes, toggle changes, keyboard shortcuts where available, WPF commands, WinForms grid cell interactions, and dynamically added controls discovered during idle scans or WinUI loaded-tree scans. `HttpClient` diagnostics classify resources as `http` or `grpc` and add network instrumentation metadata when available.
 Automatically collected interaction Actions use `action_type=click` for pointer/control activation and `action_type=key` for keyboard activation. Application startup Actions retain `launch_cold` and `launch_hot`; semantic values such as `menu`, `input`, `selection`, `toggle`, `value_change`, `shortcut`, `command`, `grid_cell_click`, and `submit` are not emitted as automatic Action types.
 HTTP header and URL query capture is configurable through `RumConfig.Privacy`; credential-like headers and query parameters are redacted by default. When trace linking is enabled, Resource events carry the same trace/span IDs injected into the outgoing request, plus HTTP protocol/version metadata and timing semantics that mark whether `resource_ttfb` came from a total-elapsed fallback or a caller-provided phase measurement. Apps that already have deeper network timing can set `RumConfig.HttpResourceTimingProvider`; automatic `HttpClient` collection will use that provider for DNS/TCP/TLS/TTFB phase fields and fall back safely if the provider returns `null` or throws. UI-thread long task collection coalesces repeated block reports during a configurable cooldown.
 
-The Electron renderer uses the Web RUM contract and is accepted into the same Guance RUM application as the Windows samples when it uses the same application ID. It is identified as Windows through the browser OS dimensions and the `windows_desktop_platform=windows`, `windows_desktop_runtime=electron`, and `windows_integration_mode=hybrid` context tags; it does not impersonate the managed `df_windows_rum_sdk` identity.
+The Electron renderer uses Browser RUM only as the page collector/serializer. A preload bridge sends serialized RUM and experimental Replay records to the Electron main process and then to the Windows native core. The native side owns the real application ID, session, sampling, trusted context, `sdk_name=df_windows_rum_sdk`, durable queue, and upload; renderer bootstrap never receives the Dataway token or real intake configuration.
 
 ## Quick Start
 
@@ -51,8 +51,14 @@ RumSdk.Init(new RumConfig
         LevelFilters = new[] { RumLogStatus.Info, RumLogStatus.Warning, RumLogStatus.Error },
         GlobalContext = new Dictionary<string, object?> { ["channel"] = "desktop" }
     },
-    // Phase 1 validates RUM only. Session Replay is a Phase 2 target.
-    SessionReplay = new RumSessionReplayConfig { Enabled = false },
+    // Experimental and disabled by default. Set Enabled=true only after
+    // reviewing privacy and sampling for your application.
+    SessionReplay = new RumSessionReplayConfig
+    {
+        Enabled = false,
+        SampleRate = 1.0,
+        TextAndInputPrivacy = SessionReplayTextAndInputPrivacy.MaskAll
+    },
     Privacy = new RumPrivacyConfig
     {
         CaptureHttpHeaders = true,
@@ -159,7 +165,7 @@ splitting a UTF-8 character. The default dedicated queue holds 5,000 records and
 discards new records when full; set `DiscardStrategy =
 RumLogDiscardStrategy.DiscardOldest` to retain the newest records instead.
 
-Session Replay is experimental and deferred from Phase 1. Phase 1 samples hard-disable it, and manual start cannot override a disabled `RumSessionReplayConfig`. Phase 2 work must explicitly initialize with `Enabled = true` before using the following APIs:
+Session Replay is experimental and disabled by default. All Samples accept `sessionReplayEnabled: true` (or `GUANCE_RUM_SESSION_REPLAY_ENABLED=true`) so the feature can be enabled and verified, but this does not promote it to stable. Initialize with `Enabled = true` before using the following APIs; manual start does not override a disabled configuration:
 
 ```csharp
 RumSdk.SetSessionReplayTextAndInputPrivacy(passwordBox, SessionReplayTextAndInputPrivacy.MaskAll);
@@ -185,7 +191,7 @@ RumSdk.AddDiagnosticListener((_, item) =>
 
 ## Electron Hybrid Sample
 
-The Electron acceptance UI pins Electron `22.3.27`, installs `@cloudcare/browser-rum` in the renderer, and exercises all five Phase 1 RUM signals. Its Windows x64 compatibility artifact targets Windows 7 SP1 through Windows 11; Electron 22 is end-of-life and receives no further security updates. The managed SDK remains a Windows 10+ target.
+The Electron acceptance UI pins Electron `22.3.27`, installs `@cloudcare/browser-rum` in the renderer, and exercises the five RUM signals plus opt-in experimental Replay. Its Windows x64 compatibility artifact targets Windows 7 SP1 through Windows 11; Electron 22 is end-of-life and receives no further security updates. The managed SDK remains a Windows 10+ target.
 
 ```powershell
 cd samples/ElectronSample
@@ -263,4 +269,4 @@ Use `build\pack.ps1` for release validation; it restores, tests, runs the Electr
 
 The SDK posts RUM `text/plain` line protocol to `v1/write/rum` and Logging line protocol to `v1/write/logging`. The two data types use independent persistent queues and retry state, with RUM flushed first. Public Dataway requests append `token=<clientToken>&to_headless=true`; local DataKit requests do not require a token. 2xx through 4xx responses are treated as terminal for queued data, matching the Android SDK retry boundary; 5xx and network failures remain queued for retry with exponential backoff and jitter. HTTP header capture redacts credentials such as `Authorization`, `Cookie`, and API-token headers by default. Native WinHTTP upload URL-encodes Dataway tokens, supports request timeout and named proxy configuration, and exposes last status/error/latency through diagnostics.
 
-The experimental Session Replay transport posts Windows-identified `multipart/form-data` (`sdk_name=df_windows_rum_sdk`, `source=windows`) to `v1/write/rum/replay`. Console routing, playback, privacy, and performance gates are Phase 2 work and are not part of the Phase 1 release claim.
+The experimental Session Replay transport posts Windows-identified `multipart/form-data` (`sdk_name=df_windows_rum_sdk`, `source=windows`) to `v1/write/rum/replay`. It can be enabled and verified, including Browser rrweb records delivered by Electron/WebView bridges, but playback compatibility, privacy, stability, and performance remain experimental and are not part of the stable release claim.

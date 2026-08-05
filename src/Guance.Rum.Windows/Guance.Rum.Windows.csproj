@@ -7,7 +7,7 @@
     <Version>0.1.0</Version>
     <Description>Guance Windows desktop RUM SDK for WPF, WinForms, WinUI, and native desktop integrations.</Description>
     <PackageProjectUrl>https://github.com/GuanceCloud/datakit-windows-desktop</PackageProjectUrl>
-    <PackageReleaseNotes>Initial Windows desktop SDK with native runtime assets and the five core RUM measurements. Session Replay remains experimental and is deferred from Phase 1.</PackageReleaseNotes>
+    <PackageReleaseNotes>Initial Windows desktop SDK with native runtime assets and the five core RUM measurements. Session Replay is available as an opt-in experimental capability and remains disabled by default.</PackageReleaseNotes>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>Guance;RUM;Dataway;DataKit;Windows;WPF;WinForms;WinUI</PackageTags>

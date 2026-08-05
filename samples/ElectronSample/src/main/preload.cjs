@@ -4,6 +4,19 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 const RUM_BRIDGE_CHANNEL = "rum:browser-event";
 const MAX_SERIALIZED_EVENT_BYTES = 1024 * 1024;
+const REPLAY_ARGUMENT_PREFIX = "--guance-rum-replay=";
+const SUPPORTED_PRIVACY_LEVELS = new Set(["allow", "mask-user-input", "mask"]);
+
+const replayArgument = process.argv.find((argument) =>
+  argument.startsWith(REPLAY_ARGUMENT_PREFIX),
+);
+const requestedPrivacyLevel = replayArgument
+  ? replayArgument.slice(REPLAY_ARGUMENT_PREFIX.length)
+  : "mask";
+const sessionReplayEnabled = Boolean(replayArgument);
+const sessionReplayPrivacyLevel = SUPPORTED_PRIVACY_LEVELS.has(requestedPrivacyLevel)
+  ? requestedPrivacyLevel
+  : "mask";
 
 const desktopBridge = Object.freeze({
   getBootstrap: () => ipcRenderer.invoke("app:get-bootstrap"),
@@ -22,8 +35,8 @@ if (!process.argv.includes("--guance-rum-only-preload")) {
 contextBridge.exposeInMainWorld(
   "FTWebViewJavascriptBridge",
   Object.freeze({
-    getCapabilities: () => JSON.stringify([]),
-    getPrivacyLevel: () => "mask",
+    getCapabilities: () => JSON.stringify(sessionReplayEnabled ? ["records"] : []),
+    getPrivacyLevel: () => sessionReplayPrivacyLevel,
     getAllowedWebViewHosts: () => null,
     sendEvent: (serializedEvent) => {
       if (

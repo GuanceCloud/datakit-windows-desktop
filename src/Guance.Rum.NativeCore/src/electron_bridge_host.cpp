@@ -16,10 +16,11 @@
 
 namespace {
 
-constexpr std::size_t kMaxInputLineBytes = 1024 * 1024;
+constexpr std::size_t kMaxInputLineBytes = 2 * 1024 * 1024;
 constexpr auto kFlushInterval = std::chrono::seconds(1);
 constexpr const char* kLaunchCommandPrefix = "@guance-launch\t";
 constexpr const char* kErrorCommandPrefix = "@guance-error\t";
+constexpr const char* kReplayCommandPrefix = "@guance-replay\t";
 
 std::string utf8_from_wide(const std::wstring& value) {
     if (value.empty()) {
@@ -104,6 +105,9 @@ struct HostConfiguration {
     std::string cache_path;
     std::string proxy_url;
     double sample_rate = 1.0;
+    bool session_replay_enabled = false;
+    double session_replay_sample_rate = 1.0;
+    double session_replay_on_error_sample_rate = 0.0;
     bool debug = false;
     int http_timeout_ms = 10000;
 };
@@ -120,6 +124,14 @@ HostConfiguration load_configuration() {
     config.cache_path = read_environment(L"GUANCE_RUM_NATIVE_CACHE_PATH");
     config.proxy_url = read_environment(L"GUANCE_RUM_NATIVE_PROXY_URL");
     config.sample_rate = read_rate_environment(L"GUANCE_RUM_NATIVE_SAMPLE_RATE", 1.0);
+    config.session_replay_enabled =
+        read_boolean_environment(L"GUANCE_RUM_NATIVE_SESSION_REPLAY_ENABLED");
+    config.session_replay_sample_rate = read_rate_environment(
+        L"GUANCE_RUM_NATIVE_SESSION_REPLAY_SAMPLE_RATE",
+        1.0);
+    config.session_replay_on_error_sample_rate = read_rate_environment(
+        L"GUANCE_RUM_NATIVE_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE",
+        0.0);
     config.debug = read_boolean_environment(L"GUANCE_RUM_NATIVE_DEBUG");
     config.http_timeout_ms =
         read_integer_environment(L"GUANCE_RUM_NATIVE_HTTP_TIMEOUT_MS", 10000);
@@ -133,9 +145,15 @@ bool same_diagnostics(
            left.rum_upload_success_count == right.rum_upload_success_count &&
            left.rum_upload_retry_count == right.rum_upload_retry_count &&
            left.rum_upload_terminal_failure_count == right.rum_upload_terminal_failure_count &&
+           left.replay_upload_success_count == right.replay_upload_success_count &&
+           left.replay_upload_retry_count == right.replay_upload_retry_count &&
+           left.replay_upload_terminal_failure_count == right.replay_upload_terminal_failure_count &&
            left.last_rum_upload_status_code == right.last_rum_upload_status_code &&
+           left.last_replay_upload_status_code == right.last_replay_upload_status_code &&
            left.last_rum_upload_error_code == right.last_rum_upload_error_code &&
-           left.last_rum_upload_latency_ms == right.last_rum_upload_latency_ms;
+           left.last_replay_upload_error_code == right.last_replay_upload_error_code &&
+           left.last_rum_upload_latency_ms == right.last_rum_upload_latency_ms &&
+           left.last_replay_upload_latency_ms == right.last_replay_upload_latency_ms;
 }
 
 void log_diagnostics(
@@ -160,6 +178,12 @@ void log_diagnostics(
         << " status=" << diagnostics.last_rum_upload_status_code
         << " error=" << diagnostics.last_rum_upload_error_code
         << " latency_ms=" << diagnostics.last_rum_upload_latency_ms
+        << " replay_success=" << diagnostics.replay_upload_success_count
+        << " replay_retry=" << diagnostics.replay_upload_retry_count
+        << " replay_terminal=" << diagnostics.replay_upload_terminal_failure_count
+        << " replay_status=" << diagnostics.last_replay_upload_status_code
+        << " replay_error=" << diagnostics.last_replay_upload_error_code
+        << " replay_latency_ms=" << diagnostics.last_replay_upload_latency_ms
         << std::endl;
 }
 
@@ -276,6 +300,109 @@ bool percent_decode(const std::string& input, std::string& output) {
     return true;
 }
 
+int base64_value(char value) {
+    if (value >= 'A' && value <= 'Z') return value - 'A';
+    if (value >= 'a' && value <= 'z') return value - 'a' + 26;
+    if (value >= '0' && value <= '9') return value - '0' + 52;
+    if (value == '+') return 62;
+    if (value == '/') return 63;
+    return -1;
+}
+
+bool base64_decode(const std::string& input, std::string& output) {
+    output.clear();
+    if (input.empty() || input.size() % 4 != 0) {
+        return false;
+    }
+    output.reserve((input.size() / 4) * 3);
+    for (std::size_t index = 0; index < input.size(); index += 4) {
+        const bool third_padding = input[index + 2] == '=';
+        const bool fourth_padding = input[index + 3] == '=';
+        if ((third_padding && !fourth_padding) ||
+            (index + 4 != input.size() && (third_padding || fourth_padding))) {
+            return false;
+        }
+        const int first = base64_value(input[index]);
+        const int second = base64_value(input[index + 1]);
+        const int third = third_padding ? 0 : base64_value(input[index + 2]);
+        const int fourth = fourth_padding ? 0 : base64_value(input[index + 3]);
+        if (first < 0 || second < 0 || third < 0 || fourth < 0) {
+            return false;
+        }
+        output.push_back(static_cast<char>((first << 2) | (second >> 4)));
+        if (!third_padding) {
+            output.push_back(static_cast<char>(((second & 0x0f) << 4) | (third >> 2)));
+        }
+        if (!fourth_padding) {
+            output.push_back(static_cast<char>(((third & 0x03) << 6) | fourth));
+        }
+    }
+    return true;
+}
+
+ControlCommandResult handle_replay_command(
+    guance_rum_handle handle,
+    const std::string& line,
+    bool debug) {
+    if (line.rfind(kReplayCommandPrefix, 0) != 0) {
+        return ControlCommandResult::not_command;
+    }
+
+    std::istringstream input(line);
+    std::string part;
+    if (!std::getline(input, part, '\t') || part != "@guance-replay") {
+        return ControlCommandResult::rejected;
+    }
+    std::unordered_map<std::string, std::string> fields;
+    while (std::getline(input, part, '\t')) {
+        const auto separator = part.find('=');
+        if (separator == std::string::npos ||
+            !fields.emplace(part.substr(0, separator), part.substr(separator + 1)).second) {
+            return ControlCommandResult::rejected;
+        }
+    }
+    if (fields.size() != 5) {
+        return ControlCommandResult::rejected;
+    }
+
+    std::string session_id;
+    std::string view_id;
+    std::string record_json;
+    int64_t timestamp_ms = 0;
+    const auto full_snapshot = fields.find("full_snapshot");
+    if (!percent_decode(fields["session_id"], session_id) ||
+        session_id.empty() || session_id.size() > 128 ||
+        !percent_decode(fields["view_id"], view_id) ||
+        view_id.empty() || view_id.size() > 128 ||
+        !parse_int64(fields["timestamp_ms"], timestamp_ms) || timestamp_ms <= 0 ||
+        full_snapshot == fields.end() ||
+        (full_snapshot->second != "0" && full_snapshot->second != "1") ||
+        !base64_decode(fields["record"], record_json) ||
+        record_json.empty() || record_json.size() > 1024 * 1024) {
+        return ControlCommandResult::rejected;
+    }
+
+    if (guance_rum_capture_browser_replay_record(
+            handle,
+            session_id.c_str(),
+            view_id.c_str(),
+            record_json.data(),
+            record_json.size(),
+            timestamp_ms,
+            full_snapshot->second == "1" ? 1 : 0) != 1) {
+        return ControlCommandResult::rejected;
+    }
+    if (debug) {
+        std::cout
+            << "[Guance.RUM.NativeBridge] Browser replay"
+            << " session_id=" << session_id
+            << " view_id=" << view_id
+            << " bytes=" << record_json.size()
+            << std::endl;
+    }
+    return ControlCommandResult::accepted;
+}
+
 ControlCommandResult handle_error_command(
     guance_rum_handle handle,
     const std::string& line,
@@ -352,6 +479,10 @@ int main() {
         config.cache_path = host.cache_path.c_str();
         config.proxy_url = host.proxy_url.c_str();
         config.sample_rate = host.sample_rate;
+        config.session_replay_enabled = host.session_replay_enabled ? 1 : 0;
+        config.session_replay_sample_rate = host.session_replay_sample_rate;
+        config.session_replay_on_error_sample_rate =
+            host.session_replay_on_error_sample_rate;
         config.debug = host.debug ? 1 : 0;
         config.http_timeout_ms = host.http_timeout_ms;
 
@@ -365,6 +496,7 @@ int main() {
             << "[Guance.RUM.NativeBridge] ready"
             << " transport=" << (host.dataway_url.empty() ? "datakit" : "dataway")
             << " app_id=" << host.app_id
+            << " replay_experimental=" << (host.session_replay_enabled ? "enabled" : "disabled")
             << std::endl;
 
         std::atomic<bool> stopping{false};
@@ -409,6 +541,14 @@ int main() {
             }
             if (error_result == ControlCommandResult::rejected) {
                 std::cerr << "[Guance.RUM.NativeBridge] rejected invalid error command" << std::endl;
+                continue;
+            }
+            const auto replay_result = handle_replay_command(handle, line, host.debug);
+            if (replay_result == ControlCommandResult::accepted) {
+                continue;
+            }
+            if (replay_result == ControlCommandResult::rejected) {
+                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid replay command" << std::endl;
                 continue;
             }
             line.push_back('\n');

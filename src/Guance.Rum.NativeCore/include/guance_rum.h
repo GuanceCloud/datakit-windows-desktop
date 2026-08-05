@@ -337,6 +337,17 @@ GUANCE_RUM_EXPORT void guance_rum_register_replay_window(guance_rum_handle handl
 GUANCE_RUM_EXPORT void guance_rum_capture_replay_click(guance_rum_handle handle, uintptr_t hwnd, const char* target, double x, double y);
 GUANCE_RUM_EXPORT void guance_rum_capture_replay_input(guance_rum_handle handle, uintptr_t hwnd, const char* target);
 GUANCE_RUM_EXPORT void guance_rum_capture_replay_resize(guance_rum_handle handle, uintptr_t hwnd, const char* target, double width, double height);
+/* Experimental bridge entry point for rrweb-compatible records collected by
+ * Browser RUM inside Electron/WebView renderers. The record, native session,
+ * and view identity are copied before this function returns. */
+GUANCE_RUM_EXPORT int guance_rum_capture_browser_replay_record(
+    guance_rum_handle handle,
+    const char* session_id,
+    const char* view_id,
+    const char* record_json,
+    size_t record_json_length,
+    int64_t timestamp_ms,
+    int is_full_snapshot);
 GUANCE_RUM_EXPORT void guance_rum_set_session_replay_text_privacy(guance_rum_handle handle, uintptr_t hwnd, guance_rum_session_replay_text_privacy privacy);
 GUANCE_RUM_EXPORT void guance_rum_set_session_replay_touch_privacy(guance_rum_handle handle, uintptr_t hwnd, guance_rum_session_replay_touch_privacy privacy);
 GUANCE_RUM_EXPORT void guance_rum_set_session_replay_hidden(guance_rum_handle handle, uintptr_t hwnd, int hidden);

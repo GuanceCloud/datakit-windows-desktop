@@ -17,15 +17,10 @@ const bootstrap = {
     rendererMode: "vite-dev-server",
   },
   rum: {
-    applicationId: "",
-    clientToken: "",
-    site: "",
-    datakitOrigin: "http://127.0.0.1:9529",
-    service: "test",
-    env: "test",
-    version: "0.1.0",
+    enabled: true,
     debug: false,
-    sessionSampleRate: 100,
+    sessionReplayEnabled: false,
+    sessionReplayPrivacyLevel: "mask",
     userId: "test-user",
   },
   hybrid: {

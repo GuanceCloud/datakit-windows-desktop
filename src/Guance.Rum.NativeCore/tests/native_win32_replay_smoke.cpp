@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <filesystem>
 #include <future>
 #include <iostream>
 #include <stdexcept>
@@ -15,6 +16,12 @@
 namespace {
 
 constexpr wchar_t kWindowClass[] = L"GuanceRumNativeReplaySmokeWindow";
+
+std::filesystem::path unique_queue_directory() {
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           ("guance-rum-win32-replay-" + std::to_string(suffix));
+}
 
 LRESULT CALLBACK smoke_wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     return DefWindowProcW(hwnd, message, wparam, lparam);
@@ -193,11 +200,13 @@ bool contains(const std::string& text, const std::string& needle) {
 } // namespace
 
 int main() {
+    const auto queue_directory = unique_queue_directory();
+    const auto queue_path_text = (queue_directory / "rum.db").string();
     HWND edit = nullptr;
     HWND button = nullptr;
     HWND window = create_smoke_window(edit, button);
 
-    SmokeServer server(3);
+    SmokeServer server(4);
     const auto datakit_url = "http://127.0.0.1:" + std::to_string(server.port());
 
     guance_rum_config config{};
@@ -211,6 +220,7 @@ int main() {
     config.sample_rate = 1.0;
     config.session_replay_sample_rate = 1.0;
     config.max_queue_items = 100;
+    config.cache_path = queue_path_text.c_str();
 
     guance_rum_handle disabled_handle = guance_rum_init(&config);
     assert(disabled_handle != nullptr);
@@ -232,6 +242,18 @@ int main() {
     guance_rum_capture_replay_resize(handle, reinterpret_cast<uintptr_t>(window), "Native RUM Smoke", 480, 280);
     guance_rum_flush(handle);
 
+    const std::string browser_record =
+        "{\"type\":2,\"timestamp\":1722300000123,\"data\":{\"node\":{\"id\":42}}}";
+    assert(guance_rum_capture_browser_replay_record(
+               handle,
+               "browser-native-session",
+               "browser-native-view",
+               browser_record.data(),
+               browser_record.size(),
+               1722300000123,
+               1) == 1);
+    guance_rum_flush(handle);
+
     const char* action_id = guance_rum_start_action(handle, "Native Action", "click");
     assert(action_id != nullptr && action_id[0] != '\0');
     const char* resource_id = guance_rum_start_resource(handle, "https://example.com/api/42", "GET");
@@ -239,10 +261,11 @@ int main() {
     guance_rum_stop_resource_ext(handle, resource_id, 200, 1024, 64, "http", "trace-native", "span-native", "HTTP/2");
     guance_rum_add_long_task(handle, 25'000'000, "native long task");
     guance_rum_stop_action(handle, action_id);
+    guance_rum_stop_view(handle);
     guance_rum_flush(handle);
 
     const auto requests = server.wait_for_requests();
-    assert(requests.size() == 3);
+    assert(requests.size() == 4);
     const auto request = requests.front();
     assert(contains(request, "POST /v1/write/rum/replay"));
     assert(contains(request, "token=token%20value%2Bplus"));
@@ -253,27 +276,35 @@ int main() {
     assert(contains(request, "name=\"sdk_name\"\r\n\r\ndf_windows_rum_sdk\r\n"));
     assert(contains(request, "name=\"has_full_snapshot\""));
     assert(contains(request, "true"));
-    assert(contains(request, "data-guance-hwnd"));
-    assert(contains(request, "Native RUM Smoke") || contains(request, "Smoke Button") || contains(request, "Replay Label"));
+    assert(contains(request, "\"wireframes\":["));
+    assert(contains(request, "\"label\":\"Window\""));
     assert(!contains(request, "secret-value"));
     assert(contains(requests[1], "name=\"records_count\"\r\n\r\n3\r\n"));
-    assert(contains(requests[1], "\"source\":\"click\""));
+    assert(contains(requests[1], "\"source\":2"));
     assert(contains(requests[1], "Smoke Button"));
-    assert(contains(requests[1], "\"source\":\"input\""));
+    assert(contains(requests[1], "\"event_type\":\"input\""));
+    assert(contains(requests[1], "Smoke Edit"));
     assert(!contains(requests[1], "secret-value"));
-    assert(contains(requests[1], "\"source\":\"resize\""));
-    assert(contains(requests[2], "POST /v1/write/rum"));
-    assert(contains(requests[2], "sdk_name=df_windows_rum_sdk"));
-    assert(!contains(requests[2], "df_android_rum_sdk"));
-    assert(contains(requests[2], "resource_request_size=64i"));
-    assert(contains(requests[2], "resource_type=http"));
-    assert(contains(requests[2], "trace_id=trace-native"));
-    assert(contains(requests[2], "span_id=span-native"));
-    assert(contains(requests[2], "action_resource_count=1i"));
+    assert(contains(requests[1], "\"source\":4"));
+    assert(contains(requests[1], "Native RUM Smoke"));
+    assert(contains(requests[2], "POST /v1/write/rum/replay"));
+    assert(contains(requests[2], "name=\"session_id\"\r\n\r\nbrowser-native-session\r\n"));
+    assert(contains(requests[2], "name=\"view_id\"\r\n\r\nbrowser-native-view\r\n"));
+    assert(contains(requests[2], "\"session\":{\"id\":\"browser-native-session\"}"));
+    assert(contains(requests[2], "\"view\":{\"id\":\"browser-native-view\"}"));
+    assert(contains(requests[2], browser_record));
+    assert(contains(requests[3], "POST /v1/write/rum"));
+    assert(contains(requests[3], "sdk_name=df_windows_rum_sdk"));
+    assert(!contains(requests[3], "df_android_rum_sdk"));
+    assert(contains(requests[3], "resource_request_size=64i"));
+    assert(contains(requests[3], "resource_type=http"));
+    assert(contains(requests[3], "trace_id=trace-native"));
+    assert(contains(requests[3], "span_id=span-native"));
+    assert(contains(requests[3], "action_resource_count=1i"));
 
     guance_rum_diagnostics diagnostics{};
     assert(guance_rum_get_diagnostics(handle, &diagnostics) == 1);
-    assert(diagnostics.replay_upload_success_count >= 2);
+    assert(diagnostics.replay_upload_success_count >= 3);
     assert(diagnostics.rum_upload_success_count >= 1);
     assert(diagnostics.last_replay_upload_status_code == 200);
     assert(diagnostics.last_rum_upload_status_code == 200);
@@ -281,9 +312,13 @@ int main() {
     assert(diagnostics.session_replay_sampled == 1);
 
     guance_rum_stop_session_replay(handle);
+    guance_rum_shutdown(handle);
     DestroyWindow(button);
     DestroyWindow(edit);
     DestroyWindow(window);
+
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(queue_directory, cleanup_error);
 
     std::cout << "native Win32 replay smoke passed\n";
     return 0;

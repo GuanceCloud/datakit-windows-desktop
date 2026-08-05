@@ -12,6 +12,8 @@
   "electronRemoteUrl": null,
   "electronDevTools": false,
   "sessionReplayEnabled": false,
+  "sessionReplaySampleRate": 100,
+  "sessionReplayOnErrorSampleRate": 0,
   "replayTextAndInputPrivacy": "MaskSensitiveInputs",
   "replayTouchPrivacy": "Show",
   "replayImagePrivacy": "MaskNone",

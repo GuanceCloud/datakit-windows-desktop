@@ -71,11 +71,23 @@ internal static class SampleRumConfig
             ServiceName = settings.ServiceName ?? defaultServiceName,
             Env = settings.Env ?? "local",
             Version = settings.Version ?? "1.0.0",
+            SampleRate = PercentageToRate(settings.SessionSampleRate ?? 100),
             Debug = settings.Debug ?? true,
             DiagnosticListener = settings.DiagnosticConsoleEnabled == true ? LogDiagnostic : null,
             SessionReplay = new RumSessionReplayConfig
             {
-                Enabled = false
+                Enabled = settings.SessionReplayEnabled ?? false,
+                SampleRate = PercentageToRate(settings.SessionReplaySampleRate ?? 100),
+                OnErrorSampleRate = PercentageToRate(settings.SessionReplayOnErrorSampleRate ?? 0),
+                TextAndInputPrivacy = ParseEnum(
+                    settings.ReplayTextAndInputPrivacy,
+                    SessionReplayTextAndInputPrivacy.MaskAll),
+                TouchPrivacy = ParseEnum(
+                    settings.ReplayTouchPrivacy,
+                    SessionReplayTouchPrivacy.Show),
+                ImagePrivacy = ParseEnum(
+                    settings.ReplayImagePrivacy,
+                    SessionReplayImagePrivacy.MaskAll)
             }
         };
         return new SampleRumSettings(rum, EmptyToNull(settings.WebViewUrl));
@@ -109,6 +121,13 @@ internal static class SampleRumConfig
             Env = Environment.GetEnvironmentVariable("GUANCE_RUM_ENV"),
             Version = Environment.GetEnvironmentVariable("GUANCE_RUM_VERSION"),
             Debug = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DEBUG")),
+            SessionSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SAMPLE_RATE")),
+            SessionReplayEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY_ENABLED")),
+            SessionReplaySampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY_SAMPLE_RATE")),
+            SessionReplayOnErrorSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE")),
+            ReplayTextAndInputPrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_TEXT_AND_INPUT_PRIVACY"),
+            ReplayTouchPrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_TOUCH_PRIVACY"),
+            ReplayImagePrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_IMAGE_PRIVACY"),
             DiagnosticConsoleEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DIAGNOSTIC_CONSOLE")),
             DiagnosticFirstChanceExceptions = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS")),
             WebViewUrl = Environment.GetEnvironmentVariable("GUANCE_RUM_WEBVIEW_TEST_URL")
@@ -147,6 +166,18 @@ internal static class SampleRumConfig
                 case "--debug":
                     commandLine.Debug = ParseBool(value);
                     break;
+                case "--session-sample-rate":
+                    commandLine.SessionSampleRate = ParseDouble(value);
+                    break;
+                case "--session-replay-enabled":
+                    commandLine.SessionReplayEnabled = ParseBool(value);
+                    break;
+                case "--session-replay-sample-rate":
+                    commandLine.SessionReplaySampleRate = ParseDouble(value);
+                    break;
+                case "--session-replay-on-error-sample-rate":
+                    commandLine.SessionReplayOnErrorSampleRate = ParseDouble(value);
+                    break;
                 case "--diagnostic-console":
                     commandLine.DiagnosticConsoleEnabled = ParseBool(value);
                     break;
@@ -183,6 +214,13 @@ internal static class SampleRumConfig
         target.Env = Coalesce(source.Env, target.Env);
         target.Version = Coalesce(source.Version, target.Version);
         target.Debug = source.Debug ?? target.Debug;
+        target.SessionSampleRate = source.SessionSampleRate ?? target.SessionSampleRate;
+        target.SessionReplayEnabled = source.SessionReplayEnabled ?? target.SessionReplayEnabled;
+        target.SessionReplaySampleRate = source.SessionReplaySampleRate ?? target.SessionReplaySampleRate;
+        target.SessionReplayOnErrorSampleRate = source.SessionReplayOnErrorSampleRate ?? target.SessionReplayOnErrorSampleRate;
+        target.ReplayTextAndInputPrivacy = Coalesce(source.ReplayTextAndInputPrivacy, target.ReplayTextAndInputPrivacy);
+        target.ReplayTouchPrivacy = Coalesce(source.ReplayTouchPrivacy, target.ReplayTouchPrivacy);
+        target.ReplayImagePrivacy = Coalesce(source.ReplayImagePrivacy, target.ReplayImagePrivacy);
         target.DiagnosticConsoleEnabled = source.DiagnosticConsoleEnabled ?? target.DiagnosticConsoleEnabled;
         target.DiagnosticFirstChanceExceptions = source.DiagnosticFirstChanceExceptions ?? target.DiagnosticFirstChanceExceptions;
         target.WebViewUrl = Coalesce(source.WebViewUrl, target.WebViewUrl);
@@ -298,6 +336,28 @@ internal static class SampleRumConfig
         return bool.TryParse(value, out var result) ? result : null;
     }
 
+    private static double? ParseDouble(string? value)
+    {
+        return double.TryParse(
+            value,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var result)
+            ? result
+            : null;
+    }
+
+    private static double PercentageToRate(double value)
+    {
+        return Math.Clamp(value, 0, 100) / 100;
+    }
+
+    private static T ParseEnum<T>(string? value, T fallback)
+        where T : struct, Enum
+    {
+        return Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;
+    }
+
     private sealed class LocalRumSettings
     {
         public string? DatawayUrl { get; set; }
@@ -307,6 +367,13 @@ internal static class SampleRumConfig
         public string? ServiceName { get; set; }
         public string? Env { get; set; }
         public string? Version { get; set; }
+        public double? SessionSampleRate { get; set; }
+        public bool? SessionReplayEnabled { get; set; }
+        public double? SessionReplaySampleRate { get; set; }
+        public double? SessionReplayOnErrorSampleRate { get; set; }
+        public string? ReplayTextAndInputPrivacy { get; set; }
+        public string? ReplayTouchPrivacy { get; set; }
+        public string? ReplayImagePrivacy { get; set; }
         public bool? Debug { get; set; }
         public bool? DiagnosticConsoleEnabled { get; set; }
         public bool? DiagnosticFirstChanceExceptions { get; set; }

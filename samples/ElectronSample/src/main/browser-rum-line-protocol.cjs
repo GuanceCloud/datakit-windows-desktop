@@ -96,6 +96,14 @@ function collectProperties(properties, serializeValue) {
 }
 
 function parseBridgePayload(serializedEvent) {
+  const event = parseBridgeEvent(serializedEvent);
+  if (event.name !== "rum") {
+    throw new Error("Browser bridge event is not a RUM line-protocol record.");
+  }
+  return event.record;
+}
+
+function parseBridgeEvent(serializedEvent) {
   if (
     typeof serializedEvent !== "string" ||
     Buffer.byteLength(serializedEvent, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES
@@ -110,8 +118,32 @@ function parseBridgePayload(serializedEvent) {
     throw new Error("Browser RUM bridge payload is not valid JSON.");
   }
   assertRecordObject(event, "Browser RUM bridge event");
+  if (event.name === "session_replay") {
+    const record = event.data;
+    assertRecordObject(record, "Browser Session Replay record");
+    assertRecordObject(event.view, "Browser Session Replay view");
+    if (
+      typeof event.view.id !== "string" ||
+      !/^[A-Za-z0-9_.-]{1,128}$/.test(event.view.id)
+    ) {
+      throw new Error("Browser Session Replay view id is invalid.");
+    }
+    if (!Number.isSafeInteger(record.type) || record.type < 0) {
+      throw new Error("Browser Session Replay record type is invalid.");
+    }
+    if (!Number.isSafeInteger(record.timestamp) || record.timestamp <= 0) {
+      throw new Error("Browser Session Replay timestamp must be a positive millisecond integer.");
+    }
+    return {
+      name: "session_replay",
+      record,
+      viewId: event.view.id,
+      timestamp: record.timestamp,
+      fullSnapshot: record.type === 2,
+    };
+  }
   if (event.name !== "rum") {
-    throw new Error("Only Phase 1 RUM bridge events are accepted.");
+    throw new Error("Browser bridge event type is not supported.");
   }
 
   const record = event.data;
@@ -124,7 +156,7 @@ function parseBridgePayload(serializedEvent) {
   }
   assertRecordObject(record.tags, "Browser RUM tags");
   assertRecordObject(record.fields, "Browser RUM fields");
-  return record;
+  return { name: "rum", record };
 }
 
 function browserRumEventToLine(serializedEvent, trustedContext = {}) {
@@ -158,8 +190,39 @@ function browserRumEventToLine(serializedEvent, trustedContext = {}) {
   };
 }
 
+function browserBridgeEventToNativeInput(serializedEvent, trustedContext = {}) {
+  const event = parseBridgeEvent(serializedEvent);
+  if (event.name === "rum") {
+    return browserRumEventToLine(serializedEvent, trustedContext);
+  }
+
+  const recordJson = JSON.stringify(event.record);
+  if (Buffer.byteLength(recordJson, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES) {
+    throw new Error("Browser Session Replay record is too large.");
+  }
+  const sessionId = trustedContext.tags?.session_id;
+  if (typeof sessionId !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(sessionId)) {
+    throw new Error("Native Session Replay session id is unavailable or invalid.");
+  }
+  const command = [
+    "@guance-replay",
+    `session_id=${encodeURIComponent(sessionId)}`,
+    `view_id=${encodeURIComponent(event.viewId)}`,
+    `timestamp_ms=${event.timestamp}`,
+    `full_snapshot=${event.fullSnapshot ? 1 : 0}`,
+    `record=${Buffer.from(recordJson, "utf8").toString("base64")}`,
+  ].join("\t") + "\n";
+
+  return {
+    measurement: "session_replay",
+    line: command,
+  };
+}
+
 module.exports = {
   MAX_BRIDGE_PAYLOAD_BYTES,
+  browserBridgeEventToNativeInput,
   browserRumEventToLine,
+  parseBridgeEvent,
   parseBridgePayload,
 };

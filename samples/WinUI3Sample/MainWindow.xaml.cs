@@ -239,12 +239,20 @@ public sealed partial class MainWindow : Window
 
     private void OnStartReplayClicked(object sender, RoutedEventArgs e)
     {
-        AppendLog("Session Replay is disabled for the Phase 1 release.");
+        RunSample("Start experimental Session Replay", () =>
+        {
+            RumSdk.StartSessionReplayRecording();
+            AppendLog("Experimental Session Replay start requested (requires sessionReplayEnabled=true).");
+        });
     }
 
     private void OnStopReplayClicked(object sender, RoutedEventArgs e)
     {
-        AppendLog("Session Replay is disabled for the Phase 1 release.");
+        RunSample("Stop experimental Session Replay", () =>
+        {
+            RumSdk.StopSessionReplayRecording();
+            AppendLog("Experimental Session Replay stopped.");
+        });
     }
 
     private void OnMaskReplayTextClicked(object sender, RoutedEventArgs e)

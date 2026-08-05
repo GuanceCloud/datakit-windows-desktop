@@ -77,26 +77,26 @@
                         </StackPanel>
                     </Border>
 
-                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12" IsHitTestVisible="False" Opacity="0.65">
+                    <Border BorderBrush="LightGray" BorderThickness="1" Padding="12">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="Session Replay (Phase 2 — disabled)" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="Session Replay is disabled for the Phase 1 release." />
+                            <TextBlock Text="Session Replay (Experimental)" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="Disabled by default. Set sessionReplayEnabled=true to validate it." />
                             <TextBlock Text="Replay Input" />
-                            <TextBox x:Name="ReplayPrivacyBox" Text="sample@example.com" IsEnabled="False" />
+                            <TextBox x:Name="ReplayPrivacyBox" Text="sample@example.com" />
                             <Border x:Name="ReplayHiddenTarget" BorderBrush="LightGray" BorderThickness="1" Padding="12">
                                 <TextBlock Text="Element used by hidden-element privacy calls" />
                             </Border>
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Start Recording" Click="OnStartReplayClicked" IsEnabled="False" />
-                                <Button Content="Stop Recording" Click="OnStopReplayClicked" IsEnabled="False" />
-                                <Button Content="Mask Text" Click="OnMaskReplayTextClicked" IsEnabled="False" />
-                                <Button Content="Allow Text" Click="OnAllowReplayTextClicked" IsEnabled="False" />
+                                <Button Content="Start Recording" Click="OnStartReplayClicked" />
+                                <Button Content="Stop Recording" Click="OnStopReplayClicked" />
+                                <Button Content="Mask Text" Click="OnMaskReplayTextClicked" />
+                                <Button Content="Allow Text" Click="OnAllowReplayTextClicked" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Hide Touch" Click="OnHideReplayTouchClicked" IsEnabled="False" />
-                                <Button Content="Show Touch" Click="OnShowReplayTouchClicked" IsEnabled="False" />
-                                <Button Content="Hide Element" Click="OnHideReplayElementClicked" IsEnabled="False" />
-                                <Button Content="Show Element" Click="OnShowReplayElementClicked" IsEnabled="False" />
+                                <Button Content="Hide Touch" Click="OnHideReplayTouchClicked" />
+                                <Button Content="Show Touch" Click="OnShowReplayTouchClicked" />
+                                <Button Content="Hide Element" Click="OnHideReplayElementClicked" />
+                                <Button Content="Show Element" Click="OnShowReplayElementClicked" />
                             </StackPanel>
                         </StackPanel>
                     </Border>

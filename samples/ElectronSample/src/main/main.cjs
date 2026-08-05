@@ -50,6 +50,7 @@ let remoteWindow;
 let apiServer;
 let apiBaseUrl;
 let nativeRumHost;
+let nativeRumConfiguration;
 let nativeRumShutdownPromise;
 let launchLifecycleInstalled = false;
 let localRumSettingsReader = createLocalRumSettingsReader({
@@ -87,6 +88,33 @@ function readNumberConfiguration(environmentName, jsonName, fallback) {
   return localRumSettingsReader.readNumber(environmentName, jsonName, fallback);
 }
 
+function readPercentageConfiguration(environmentName, jsonName, fallback) {
+  return Math.min(
+    1,
+    Math.max(0, readNumberConfiguration(environmentName, jsonName, fallback) / 100),
+  );
+}
+
+function resolveReplayPrivacyLevel() {
+  const configured = readConfiguration(
+    "GUANCE_RUM_REPLAY_PRIVACY_LEVEL",
+    "replayPrivacyLevel",
+    readConfiguration(
+      "GUANCE_RUM_REPLAY_TEXT_AND_INPUT_PRIVACY",
+      "replayTextAndInputPrivacy",
+      "MaskAll",
+    ),
+  ).toLowerCase();
+  if (configured === "allow") {
+    return "allow";
+  }
+  if (configured === "mask-user-input" || configured === "masksensitiveinputs" ||
+      configured === "maskallinputs") {
+    return "mask-user-input";
+  }
+  return "mask";
+}
+
 function createNativeRumConfiguration() {
   const { datawayUrl, datakitUrl } = resolveRumIngestionConfiguration(
     localRumSettingsReader,
@@ -104,12 +132,25 @@ function createNativeRumConfiguration() {
   );
   const environment = readConfiguration("GUANCE_RUM_ENV", "env", "local");
   const version = readConfiguration("GUANCE_RUM_VERSION", "version", app.getVersion());
-  const sampleRate = Math.min(
-    1,
-    Math.max(
-      0,
-      readNumberConfiguration("GUANCE_RUM_SAMPLE_RATE", "sessionSampleRate", 100) / 100,
-    ),
+  const sampleRate = readPercentageConfiguration(
+    "GUANCE_RUM_SAMPLE_RATE",
+    "sessionSampleRate",
+    100,
+  );
+  const sessionReplayEnabled = readBooleanConfiguration(
+    "GUANCE_RUM_SESSION_REPLAY_ENABLED",
+    "sessionReplayEnabled",
+    IS_SMOKE,
+  );
+  const sessionReplaySampleRate = readPercentageConfiguration(
+    "GUANCE_RUM_SESSION_REPLAY_SAMPLE_RATE",
+    "sessionReplaySampleRate",
+    100,
+  );
+  const sessionReplayOnErrorSampleRate = readPercentageConfiguration(
+    "GUANCE_RUM_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE",
+    "sessionReplayOnErrorSampleRate",
+    0,
   );
 
   return {
@@ -123,6 +164,10 @@ function createNativeRumConfiguration() {
     cachePath: path.join(app.getPath("userData"), "native-rum-queue.db"),
     proxyUrl: readConfiguration("GUANCE_RUM_PROXY_URL", "proxyUrl"),
     sampleRate,
+    sessionReplayEnabled,
+    sessionReplaySampleRate,
+    sessionReplayOnErrorSampleRate,
+    sessionReplayPrivacyLevel: resolveReplayPrivacyLevel(),
     httpTimeoutMs: 10_000,
     debug: readBooleanConfiguration("GUANCE_RUM_DEBUG", "debug", true),
     trustedContext: {
@@ -135,9 +180,12 @@ function createNativeRumConfiguration() {
         sdk_version: app.getVersion(),
         session_id: NATIVE_SESSION_ID,
         is_electron: "true",
+        is_signin: "true",
+        userid: ACCEPTANCE_USER_ID,
+        user_name: "Electron acceptance operator",
       },
       fields: {
-        session_has_replay: false,
+        session_has_replay: sessionReplayEnabled && sessionReplaySampleRate > 0,
         session_sample_rate: sampleRate,
         session_on_error_sample_rate: 0,
       },
@@ -147,6 +195,7 @@ function createNativeRumConfiguration() {
 
 function initializeNativeRumHost() {
   const configuration = createNativeRumConfiguration();
+  nativeRumConfiguration = configuration;
   if (
     !configuration.applicationId ||
     (!configuration.datawayUrl && !configuration.datakitUrl)
@@ -206,11 +255,6 @@ function shutdownNativeRumHost() {
 }
 
 function createBootstrap(isRemoteRenderer = false) {
-  const { datawayUrl, datakitUrl } = resolveRumIngestionConfiguration(
-    localRumSettingsReader,
-    IS_SMOKE ? "http://127.0.0.1:9" : "http://127.0.0.1:9529",
-  );
-
   return {
     app: {
       name: app.getName(),
@@ -229,27 +273,13 @@ function createBootstrap(isRemoteRenderer = false) {
           : "packaged-file",
     },
     rum: {
-      applicationId: readConfiguration(
-        "GUANCE_RUM_APP_ID",
-        "rumAppId",
-        IS_SMOKE ? "electron-smoke" : "",
+      enabled: Boolean(nativeRumHost),
+      debug: nativeRumConfiguration?.debug ?? false,
+      sessionReplayEnabled: Boolean(
+        nativeRumHost && nativeRumConfiguration?.sessionReplayEnabled,
       ),
-      clientToken: readConfiguration("GUANCE_RUM_CLIENT_TOKEN", "clientToken"),
-      site: datawayUrl,
-      datakitOrigin: datawayUrl ? "" : datakitUrl,
-      service: readConfiguration(
-        "GUANCE_RUM_SERVICE_NAME",
-        "serviceName",
-        "guance-rum-windows-electron",
-      ),
-      env: readConfiguration("GUANCE_RUM_ENV", "env", "local"),
-      version: readConfiguration("GUANCE_RUM_VERSION", "version", app.getVersion()),
-      debug: readBooleanConfiguration("GUANCE_RUM_DEBUG", "debug", true),
-      sessionSampleRate: readNumberConfiguration(
-        "GUANCE_RUM_SAMPLE_RATE",
-        "sessionSampleRate",
-        100,
-      ),
+      sessionReplayPrivacyLevel:
+        nativeRumConfiguration?.sessionReplayPrivacyLevel || "mask",
       userId: ACCEPTANCE_USER_ID,
     },
     hybrid: {
@@ -264,6 +294,16 @@ function createBootstrap(isRemoteRenderer = false) {
       apiBaseUrl,
     },
   };
+}
+
+function createRumPreloadArguments(additionalArguments = []) {
+  const argumentsForPreload = [...additionalArguments];
+  if (nativeRumHost && nativeRumConfiguration?.sessionReplayEnabled) {
+    argumentsForPreload.push(
+      `--guance-rum-replay=${nativeRumConfiguration.sessionReplayPrivacyLevel}`,
+    );
+  }
+  return argumentsForPreload;
 }
 
 function sendJson(response, statusCode, value) {
@@ -495,7 +535,7 @@ async function createRemoteWindow({ forceBuiltIn = false } = {}) {
     backgroundColor: "#07110f",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
-      additionalArguments: ["--guance-rum-only-preload"],
+      additionalArguments: createRumPreloadArguments(["--guance-rum-only-preload"]),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -652,6 +692,50 @@ function configureSmoke(window) {
               Number(app?.dataset.rumSdkResourceCount || '0') >= 2
             )
           }, 'five SDK events and two Resource events')
+          const replayPlayground = await waitFor('#replay-playground')
+          const replayFixtures = Array.from(
+            replayPlayground.querySelectorAll('[data-replay-fixture]')
+          )
+          const replayFixtureKinds = [
+            ...new Set(replayFixtures.map((element) => element.dataset.replayFixture))
+          ]
+          const requiredReplayFixtureKinds = [
+            'input',
+            'privacy',
+            'selection',
+            'range',
+            'toggle',
+            'dynamic',
+            'overlay',
+            'drag',
+            'scroll',
+            'canvas'
+          ]
+          if (
+            replayFixtures.length < 18 ||
+            !requiredReplayFixtureKinds.every((kind) => replayFixtureKinds.includes(kind))
+          ) {
+            throw new Error('Replay fixture coverage is incomplete')
+          }
+          const nameInput = document.querySelector('#replay-name')
+          nameInput.value = 'Replay operator'
+          nameInput.dispatchEvent(new Event('input', { bubbles: true }))
+          const rangeInput = document.querySelector('#replay-range')
+          rangeInput.value = '74'
+          rangeInput.dispatchEvent(new Event('input', { bubbles: true }))
+          document.querySelector('#replay-toggle').click()
+          document.querySelector('#replay-add-row').click()
+          document.querySelector('#replay-dialog-open').click()
+          const replayDialog = document.querySelector('#replay-dialog')
+          const modalOpened = replayDialog.open === true
+          document.querySelector('#replay-dialog-close').click()
+          await waitUntil(
+            () =>
+              document.querySelectorAll('#replay-dynamic-list .replay-dynamic-row').length >= 4 &&
+              document.querySelector('#replay-range-output')?.textContent === '74%' &&
+              document.querySelector('#replay-toggle')?.getAttribute('aria-pressed') === 'true',
+            'Replay fixture interactions'
+          )
           const app = document.querySelector('#app')
           return {
             title: document.title,
@@ -665,6 +749,13 @@ function configureSmoke(window) {
             verifiedSignals: document.querySelectorAll('.coverage-row.verified').length,
             verifiedTypes: Array.from(document.querySelectorAll('.coverage-row.verified'))
               .map((element) => element.dataset.coverage),
+            replayFixtures: replayFixtures.length,
+            replayFixtureKinds,
+            replayDynamicRows: document.querySelectorAll(
+              '#replay-dynamic-list .replay-dynamic-row'
+            ).length,
+            replayModalOpened: modalOpened,
+            replayRecording: app?.dataset.replayRecording === 'true',
             acceptanceUserId: app?.dataset.acceptanceUserId
           }
         })()`,
@@ -721,6 +812,10 @@ function configureSmoke(window) {
           localResult.sdkEventTypes.includes(type),
         ) &&
         localResult.verifiedSignals >= 5 &&
+        localResult.replayFixtures >= 18 &&
+        localResult.replayDynamicRows >= 4 &&
+        localResult.replayModalOpened === true &&
+        localResult.replayRecording === true &&
         remoteResult.title === "Guance Desktop Control Room" &&
         remoteResult.remoteMode === true &&
         remoteResult.rumInitialized === true &&
@@ -751,6 +846,7 @@ function createMainWindow() {
     backgroundColor: "#07110f",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
+      additionalArguments: createRumPreloadArguments(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

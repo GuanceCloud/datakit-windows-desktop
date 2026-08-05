@@ -20,8 +20,8 @@
         </StackPanel>
 
         <TabControl Grid.Row="1" Margin="0,14,0,12" SelectedIndex="1">
-            <TabItem Header="Replay Gallery (Phase 2)" IsEnabled="False"
-                     ToolTip="Session Replay is disabled for the Phase 1 release.">
+            <TabItem Header="Replay Gallery (Experimental)"
+                     ToolTip="Experimental. Enable sessionReplayEnabled in rum.local.json before validation.">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <Grid Margin="16">
                         <Grid.Resources>
@@ -308,8 +308,8 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="Session Replay (Phase 2)" IsEnabled="False"
-                     ToolTip="Session Replay is disabled for the Phase 1 release.">
+            <TabItem Header="Session Replay (Experimental)"
+                     ToolTip="Experimental. Disabled by default; opt in through rum.local.json.">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="16">
                         <TextBlock Text="Replay Input" Margin="0,0,0,6" />

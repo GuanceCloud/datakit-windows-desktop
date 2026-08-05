@@ -12,15 +12,10 @@ export interface DesktopAppInfo {
 }
 
 export interface DesktopRumEnvironment {
-  applicationId: string;
-  clientToken: string;
-  site: string;
-  datakitOrigin: string;
-  service: string;
-  env: string;
-  version: string;
+  enabled: boolean;
   debug: boolean;
-  sessionSampleRate: number;
+  sessionReplayEnabled: boolean;
+  sessionReplayPrivacyLevel: "allow" | "mask-user-input" | "mask";
   userId: string;
 }
 
