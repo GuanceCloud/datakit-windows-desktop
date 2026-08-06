@@ -1,5 +1,5 @@
-using Guance.Rum.Windows;
-using Guance.Rum.Windows.Samples;
+using Guance.Windows;
+using Guance.Windows.Samples;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
@@ -13,8 +13,8 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        RumSdk.Init(SampleRumConfig.Load("rum-winui-demo", "winui-sample"));
-        RumSdk.EnableAutomaticInstrumentation();
+        GuanceSdk.Init(SampleGuanceConfig.Load("rum-winui-demo", "winui-sample"));
+        GuanceSdk.EnableAutomaticInstrumentation();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -35,7 +35,7 @@ public partial class App : Application
         rumShutdownInProgress = true;
         try
         {
-            await RumSdk.ShutdownAsync();
+            await GuanceSdk.ShutdownAsync();
         }
         catch (Exception ex)
         {

@@ -34,7 +34,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: native-win-${{ matrix.arch }}
-          path: src/Guance.Rum.NativeCore/bin/win-${{ matrix.arch }}/guance_rum_native.dll
+          path: src/Guance.Windows.Native/bin/win-${{ matrix.arch }}/guance_windows_native.dll
 
   managed:
     runs-on: windows-latest
@@ -47,19 +47,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: native-win-x64
-          path: src/Guance.Rum.NativeCore/bin/win-x64
+          path: src/Guance.Windows.Native/bin/win-x64
       - uses: actions/download-artifact@v4
         with:
           name: native-win-arm64
-          path: src/Guance.Rum.NativeCore/bin/win-arm64
+          path: src/Guance.Windows.Native/bin/win-arm64
       - uses: actions/download-artifact@v4
         with:
           name: native-win-x86
-          path: src/Guance.Rum.NativeCore/bin/win-x86
-      - run: dotnet restore Guance.Rum.Windows.sln
-      - run: dotnet test tests/Guance.Rum.Windows.Tests/Guance.Rum.Windows.Tests.csproj -c Release
-      - run: dotnet build src/Guance.Rum.Windows/Guance.Rum.Windows.csproj -c Release -f net6.0
-      - run: dotnet build src/Guance.Rum.Windows/Guance.Rum.Windows.csproj -c Release -f net6.0-windows10.0.17763.0
+          path: src/Guance.Windows.Native/bin/win-x86
+      - run: dotnet restore Guance.Windows.sln
+      - run: dotnet test tests/Guance.Windows.Tests/Guance.Windows.Tests.csproj -c Release
+      - run: dotnet build src/Guance.Windows/Guance.Windows.csproj -c Release -f net6.0
+      - run: dotnet build src/Guance.Windows/Guance.Windows.csproj -c Release -f net6.0-windows10.0.17763.0
       - name: Pack, verify, and consumer smoke
         shell: pwsh
         env:
@@ -103,8 +103,8 @@ jobs:
           PACKAGE_VERSION: ${{ github.ref_name }}
         run: |
           $version = $env:PACKAGE_VERSION
-          $package = Join-Path "dist" "Guance.Rum.Windows.$version.nupkg"
-          $symbols = Join-Path "dist" "Guance.Rum.Windows.$version.snupkg"
+          $package = Join-Path "dist" "Guance.Windows.$version.nupkg"
+          $symbols = Join-Path "dist" "Guance.Windows.$version.snupkg"
           if (-not (Test-Path -LiteralPath $package)) {
             throw "Expected release package was not found: $package"
           }

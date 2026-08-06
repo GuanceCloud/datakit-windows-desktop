@@ -2,7 +2,9 @@
 
 ## 0.1.0
 
-- Initial Windows desktop RUM SDK with .NET wrapper and native C ABI.
+- Initial Guance Windows observability SDK with .NET wrapper and native C ABI.
+- Publishes the capability-neutral `Guance.Windows` NuGet package and
+  `guance-windows-native` vcpkg port identity.
 - Supports RUM line protocol measurements: `view`, `action`, `resource`, `error`, and `long_task`.
 - Adds WPF, WinForms, WinUI 3, `HttpClient`, unhandled exception, and UI-thread block collection.
 - Adds a complex Electron hybrid UI acceptance sample using the official Browser RUM SDK, with Vite/file rendering, a secure native bridge, deterministic resources, and all five Phase 1 RUM signals.

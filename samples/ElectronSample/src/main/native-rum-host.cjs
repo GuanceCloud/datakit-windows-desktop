@@ -5,8 +5,8 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { browserBridgeEventToNativeInput } = require("./browser-rum-line-protocol.cjs");
 
-const NATIVE_HOST_FILE = "guance_rum_electron_bridge.exe";
-const NATIVE_CORE_FILE = "guance_rum_native.dll";
+const NATIVE_HOST_FILE = "guance_windows_electron_bridge.exe";
+const NATIVE_CORE_FILE = "guance_windows_native.dll";
 const MAX_INT64 = 9_223_372_036_854_775_807n;
 const PROCESS_FAILURE_TYPES = new Set([
   "ElectronRendererProcessGone",
@@ -36,7 +36,7 @@ function resolveNativeRumPaths({
   }
   const nativeDirectory = isPackaged
     ? path.join(resourcesPath, "native")
-    : path.resolve(sampleRoot, "..", "..", "src", "Guance.Rum.NativeCore", "bin", "win-x64");
+    : path.resolve(sampleRoot, "..", "..", "src", "Guance.Windows.Native", "bin", "win-x64");
   return {
     directory: nativeDirectory,
     executablePath: path.join(nativeDirectory, NATIVE_HOST_FILE),
@@ -47,25 +47,39 @@ function resolveNativeRumPaths({
 function createNativeEnvironment(configuration, baseEnvironment = process.env) {
   return {
     ...baseEnvironment,
-    GUANCE_RUM_NATIVE_DATAWAY_URL: configuration.datawayUrl || "",
-    GUANCE_RUM_NATIVE_DATAKIT_URL: configuration.datakitUrl || "",
-    GUANCE_RUM_NATIVE_CLIENT_TOKEN: configuration.clientToken || "",
-    GUANCE_RUM_NATIVE_APP_ID: configuration.applicationId || "",
-    GUANCE_RUM_NATIVE_SERVICE: configuration.service || "",
-    GUANCE_RUM_NATIVE_ENV: configuration.env || "",
-    GUANCE_RUM_NATIVE_VERSION: configuration.version || "",
-    GUANCE_RUM_NATIVE_CACHE_PATH: configuration.cachePath || "",
-    GUANCE_RUM_NATIVE_PROXY_URL: configuration.proxyUrl || "",
-    GUANCE_RUM_NATIVE_SAMPLE_RATE: String(configuration.sampleRate ?? 1),
-    GUANCE_RUM_NATIVE_SESSION_REPLAY_ENABLED: configuration.sessionReplayEnabled ? "1" : "0",
+    GUANCE_RUM_NATIVE_DATAWAY_URL: configuration.transport.datawayUrl || "",
+    GUANCE_RUM_NATIVE_DATAKIT_URL: configuration.transport.datakitUrl || "",
+    GUANCE_RUM_NATIVE_CLIENT_TOKEN: configuration.transport.clientToken || "",
+    GUANCE_RUM_NATIVE_APP_ID: configuration.application.id || "",
+    GUANCE_RUM_NATIVE_SERVICE: configuration.application.service || "",
+    GUANCE_RUM_NATIVE_ENV: configuration.application.env || "",
+    GUANCE_RUM_NATIVE_VERSION: configuration.application.version || "",
+    GUANCE_RUM_NATIVE_CACHE_PATH: configuration.runtime.cachePath || "",
+    GUANCE_RUM_NATIVE_MAX_CACHE_BYTES: launchInteger(configuration.cache.maxBytes, "cache.maxBytes"),
+    GUANCE_RUM_NATIVE_MAX_CACHE_FILES: launchInteger(configuration.cache.maxFiles, "cache.maxFiles"),
+    GUANCE_RUM_NATIVE_MAX_CACHE_AGE_SECONDS: launchInteger(configuration.cache.maxAgeSeconds, "cache.maxAgeSeconds"),
+    GUANCE_RUM_NATIVE_MAX_BATCH_ITEMS: launchInteger(configuration.cache.maxBatchItems, "cache.maxBatchItems"),
+    GUANCE_RUM_NATIVE_MAX_BATCH_BYTES: launchInteger(configuration.cache.maxBatchBytes, "cache.maxBatchBytes"),
+    GUANCE_RUM_NATIVE_MAX_UPLOAD_BYTES_PER_SECOND: launchInteger(configuration.upload.maxBytesPerSecond, "upload.maxBytesPerSecond"),
+    GUANCE_RUM_NATIVE_UPLOAD_BURST_BYTES: launchInteger(configuration.upload.burstBytes, "upload.burstBytes"),
+    GUANCE_RUM_NATIVE_MAX_UPLOAD_REQUESTS_PER_SECOND: String(configuration.upload.maxRequestsPerSecond),
+    GUANCE_RUM_NATIVE_MAX_UPLOAD_BATCHES_PER_CYCLE: launchInteger(configuration.upload.maxBatchesPerCycle, "upload.maxBatchesPerCycle"),
+    GUANCE_RUM_NATIVE_PROXY_URL: configuration.transport.proxyUrl || "",
+    GUANCE_RUM_NATIVE_SAMPLE_RATE: String(
+      configuration.rum.enabled ? configuration.rum.sampleRate ?? 1 : 0,
+    ),
+    GUANCE_RUM_NATIVE_LOG_ENABLED: configuration.log.enabled ? "1" : "0",
+    GUANCE_RUM_NATIVE_LOG_SAMPLE_RATE: String(configuration.log.sampleRate ?? 1),
+    GUANCE_RUM_NATIVE_SESSION_REPLAY_ENABLED:
+      configuration.rum.enabled && configuration.rum.sessionReplay.enabled ? "1" : "0",
     GUANCE_RUM_NATIVE_SESSION_REPLAY_SAMPLE_RATE: String(
-      configuration.sessionReplaySampleRate ?? 1,
+      configuration.rum.sessionReplay.sampleRate ?? 1,
     ),
     GUANCE_RUM_NATIVE_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE: String(
-      configuration.sessionReplayOnErrorSampleRate ?? 0,
+      configuration.rum.sessionReplay.onErrorSampleRate ?? 0,
     ),
-    GUANCE_RUM_NATIVE_HTTP_TIMEOUT_MS: String(configuration.httpTimeoutMs ?? 10_000),
-    GUANCE_RUM_NATIVE_DEBUG: configuration.debug ? "1" : "0",
+    GUANCE_RUM_NATIVE_HTTP_TIMEOUT_MS: String(configuration.transport.httpTimeoutMs ?? 10_000),
+    GUANCE_RUM_NATIVE_DEBUG: configuration.runtime.debug ? "1" : "0",
   };
 }
 
@@ -144,12 +158,26 @@ class NativeRumHost {
 
     try {
       const payload = browserBridgeEventToNativeInput(serializedEvent, this.trustedContext);
-      if (payload.measurement === "session_replay" && !this.configuration.sessionReplayEnabled) {
+      if (payload.measurement === "log" && !this.configuration.log.enabled) {
+        throw new Error("Browser Log collection is not enabled in the native configuration.");
+      }
+      if (
+        payload.measurement === "session_replay" &&
+        (!this.configuration.rum.enabled ||
+          !this.configuration.rum.sessionReplay.enabled)
+      ) {
         throw new Error("Session Replay is not enabled in the native configuration.");
+      }
+      if (
+        payload.measurement !== "log" &&
+        payload.measurement !== "session_replay" &&
+        !this.configuration.rum.enabled
+      ) {
+        throw new Error("Browser RUM collection is not enabled in the native configuration.");
       }
       this.child.stdin.write(payload.line, "utf8");
       this.accepted += 1;
-      if (this.configuration.debug) {
+      if (this.configuration.runtime.debug) {
         this.logger.log(
           `[electron-main][rum-bridge] ${rendererLabel} -> C++ ${payload.measurement} ` +
           `bytes=${Buffer.byteLength(payload.line, "utf8")} accepted=${this.accepted}`,
@@ -182,6 +210,9 @@ class NativeRumHost {
     }
 
     try {
+      if (!this.configuration.rum.enabled) {
+        throw new Error("RUM lifecycle collection is not enabled in the native configuration.");
+      }
       if (type !== "cold" && type !== "hot") {
         throw new Error("launch type must be cold or hot.");
       }
@@ -202,7 +233,7 @@ class NativeRumHost {
       ];
       this.child.stdin.write(`@guance-launch\t${fields.join("\t")}\n`, "utf8");
       this.accepted += 1;
-      if (this.configuration.debug) {
+      if (this.configuration.runtime.debug) {
         this.logger.log(
           `[electron-main][rum-bridge] Electron lifecycle -> C++ launch_${type} ` +
           `duration_ns=${values[1]} accepted=${this.accepted}`,
@@ -228,6 +259,9 @@ class NativeRumHost {
     }
 
     try {
+      if (!this.configuration.rum.enabled) {
+        throw new Error("RUM error collection is not enabled in the native configuration.");
+      }
       if (!PROCESS_FAILURE_TYPES.has(type)) {
         throw new Error("process failure type is not trusted.");
       }
@@ -238,7 +272,7 @@ class NativeRumHost {
         `@guance-error\ttype=${type}\tmessage=${encodeURIComponent(message)}\n`;
       this.child.stdin.write(command, "utf8");
       this.accepted += 1;
-      if (this.configuration.debug) {
+      if (this.configuration.runtime.debug) {
         this.logger.log(
           `[electron-main][rum-bridge] Electron process failure -> C++ ${type} ` +
           `accepted=${this.accepted}`,
@@ -277,7 +311,10 @@ class NativeRumHost {
         this.logger.error("[electron-main][rum-bridge] native host shutdown timed out");
         child.kill?.();
         finish();
-      }, Math.max(2_000, Number(this.configuration.httpTimeoutMs || 10_000) + 2_000));
+      }, Math.max(
+        2_000,
+        Number(this.configuration.transport.httpTimeoutMs || 10_000) + 2_000,
+      ));
 
       child.once?.("exit", finish);
       if (child.stdin?.writable) {

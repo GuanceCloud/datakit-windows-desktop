@@ -11,17 +11,40 @@ export interface DesktopAppInfo {
   rendererMode: "vite-dev-server" | "packaged-file" | "remote-http";
 }
 
-export interface DesktopRumEnvironment {
-  enabled: boolean;
+export type DesktopTraceType =
+  | "ddtrace"
+  | "zipkin"
+  | "zipkin_single_header"
+  | "w3c_traceparent"
+  | "w3c_traceparent_64bit"
+  | "skywalking_v3"
+  | "jaeger";
+
+export interface DesktopMonitoringEnvironment {
+  bridgeEnabled: boolean;
   debug: boolean;
-  sessionReplayEnabled: boolean;
-  sessionReplayPrivacyLevel: "allow" | "mask-user-input" | "mask";
   userId: string;
+  rum: {
+    enabled: boolean;
+    sessionReplay: {
+      enabled: boolean;
+      privacyLevel: "allow" | "mask-user-input" | "mask";
+    };
+  };
+  log: {
+    enabled: boolean;
+  };
+  trace: {
+    enabled: boolean;
+    sampleRate: number;
+    type: DesktopTraceType;
+    allowedUrls: string[];
+  };
 }
 
 export interface DesktopBootstrap {
   app: DesktopAppInfo;
-  rum: DesktopRumEnvironment;
+  monitoring: DesktopMonitoringEnvironment;
   hybrid: {
     localOrigin: string;
     remoteUrl: string;

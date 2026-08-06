@@ -1,7 +1,9 @@
 import { datafluxRum } from "@cloudcare/browser-rum";
+import { datafluxLogs } from "@cloudcare/browser-logs";
 import "./styles.css";
 import { loadDesktopBootstrap } from "./bootstrap-loader";
 import type { DesktopBootstrap } from "./contracts";
+import { buildLogConfig } from "./log-config";
 import { buildRumConfig } from "./rum-config";
 
 type RumEventPreview = {
@@ -67,7 +69,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
       ? "HTTP 隔离页面"
       : "file:// 生产页面";
   const rendererLabel = bootstrap.hybrid.isRemoteRenderer ? "REMOTE RENDERER" : "LOCAL RENDERER";
-  const replayState = bootstrap.rum.sessionReplayEnabled
+  const replayState = bootstrap.monitoring.rum.sessionReplay.enabled
     ? "EXPERIMENTAL REPLAY ON"
     : "EXPERIMENTAL REPLAY OFF";
 
@@ -351,7 +353,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             </div>
             <div class="replay-panel-meta">
               <span id="replay-interaction-status">0 interactions</span>
-              <span class="scope-pill replay-scope-pill">${bootstrap.rum.sessionReplayEnabled ? "RECORDING ON" : "RECORDING OFF"}</span>
+              <span class="scope-pill replay-scope-pill">${bootstrap.monitoring.rum.sessionReplay.enabled ? "RECORDING ON" : "RECORDING OFF"}</span>
             </div>
           </div>
           <p class="replay-intro">
@@ -760,7 +762,7 @@ async function initialize(): Promise<void> {
     window.location,
     window.fetch.bind(window),
   );
-  appRoot.dataset.acceptanceUserId = bootstrap.rum.userId;
+  appRoot.dataset.acceptanceUserId = bootstrap.monitoring.userId;
   appRoot.dataset.rumInitialized = "false";
   appRoot.dataset.replayRecording = "false";
   appRoot.dataset.rumSdkEventTypes = "";
@@ -821,7 +823,30 @@ async function initialize(): Promise<void> {
     markCoverage(type);
   };
 
-  const result = buildRumConfig(bootstrap.rum);
+  const logResult = buildLogConfig(
+    bootstrap.monitoring.bridgeEnabled,
+    bootstrap.monitoring.log,
+  );
+  if (logResult.enabled && logResult.config) {
+    try {
+      datafluxLogs.init(
+        logResult.config as unknown as Parameters<typeof datafluxLogs.init>[0],
+      );
+      datafluxLogs.logger.info("Electron Browser Log bridge initialized", {
+        source: "electron_renderer",
+      });
+      appRoot.dataset.logInitialized = "true";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown initialization error";
+      showToast(`Log 初始化失败 · ${message}`, "danger");
+    }
+  }
+
+  const result = buildRumConfig(
+    bootstrap.monitoring.bridgeEnabled,
+    bootstrap.monitoring.rum,
+    bootstrap.monitoring.trace,
+  );
   if (result.enabled && result.config) {
     try {
       const config = {
@@ -841,14 +866,15 @@ async function initialize(): Promise<void> {
 
       datafluxRum.init(config);
       datafluxRum.startView({ name: "electron.operations" });
-      if (bootstrap.rum.sessionReplayEnabled) {
+      if (bootstrap.monitoring.rum.sessionReplay.enabled) {
         datafluxRum.startSessionReplayRecording();
         appRoot.dataset.replayRecording = "true";
       }
       rumEnabled = true;
       appRoot.dataset.rumInitialized = "true";
+      appRoot.dataset.traceEnabled = String(bootstrap.monitoring.trace.enabled);
       setRumStatus(
-        `Windows Native Bridge · RUM${bootstrap.rum.sessionReplayEnabled ? " + 实验性 Replay" : ""}`,
+        `Windows Native Bridge · RUM${bootstrap.monitoring.log.enabled ? " + Log" : ""}${bootstrap.monitoring.trace.enabled ? " + Trace" : ""}${bootstrap.monitoring.rum.sessionReplay.enabled ? " + 实验性 Replay" : ""}`,
         true,
       );
     } catch (error) {
@@ -857,7 +883,11 @@ async function initialize(): Promise<void> {
       showToast("RUM 初始化失败，请检查配置。", "danger");
     }
   } else {
-    setRumStatus(result.reason || "RUM 未配置", false);
+    const logInitialized = appRoot.dataset.logInitialized === "true";
+    setRumStatus(
+      logInitialized ? "Windows Native Bridge · Log" : result.reason || "监控能力未配置",
+      logInitialized,
+    );
   }
 
   const previewActionWhenOffline = () => {

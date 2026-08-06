@@ -1,11 +1,11 @@
 {
-  "name": "guance-rum-windows-electron-sample",
+  "name": "guance-windows-electron-sample",
   "version": "0.1.0",
   "private": true,
-  "productName": "Guance Windows Electron RUM",
-  "description": "Electron hybrid UI acceptance sample for Guance Windows RUM",
+  "productName": "Guance Windows Electron Sample",
+  "description": "Electron hybrid UI acceptance sample for the Guance Windows observability SDK",
   "config": {
-    "windowsArtifactName": "GuanceRUMWindowsElectronSample"
+    "windowsArtifactName": "GuanceWindowsElectronSample"
   },
   "main": "src/main/main.cjs",
   "scripts": {
@@ -23,6 +23,7 @@
     "check": "npm run test && npm run build"
   },
   "dependencies": {
+    "@cloudcare/browser-logs": "^3.3.6",
     "@cloudcare/browser-rum": "^3.3.5"
   },
   "devDependencies": {

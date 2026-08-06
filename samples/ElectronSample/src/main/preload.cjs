@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 const RUM_BRIDGE_CHANNEL = "rum:browser-event";
 const MAX_SERIALIZED_EVENT_BYTES = 1024 * 1024;
 const REPLAY_ARGUMENT_PREFIX = "--guance-rum-replay=";
+const MONITORING_DISABLED_ARGUMENT = "--guance-monitoring-disabled";
 const SUPPORTED_PRIVACY_LEVELS = new Set(["allow", "mask-user-input", "mask"]);
 
 const replayArgument = process.argv.find((argument) =>
@@ -14,6 +15,7 @@ const requestedPrivacyLevel = replayArgument
   ? replayArgument.slice(REPLAY_ARGUMENT_PREFIX.length)
   : "mask";
 const sessionReplayEnabled = Boolean(replayArgument);
+const monitoringEnabled = !process.argv.includes(MONITORING_DISABLED_ARGUMENT);
 const sessionReplayPrivacyLevel = SUPPORTED_PRIVACY_LEVELS.has(requestedPrivacyLevel)
   ? requestedPrivacyLevel
   : "mask";
@@ -32,19 +34,21 @@ if (!process.argv.includes("--guance-rum-only-preload")) {
   contextBridge.exposeInMainWorld("guanceDesktop", desktopBridge);
 }
 
-contextBridge.exposeInMainWorld(
-  "FTWebViewJavascriptBridge",
-  Object.freeze({
-    getCapabilities: () => JSON.stringify(sessionReplayEnabled ? ["records"] : []),
-    getPrivacyLevel: () => sessionReplayPrivacyLevel,
-    getAllowedWebViewHosts: () => null,
-    sendEvent: (serializedEvent) => {
-      if (
-        typeof serializedEvent === "string" &&
-        Buffer.byteLength(serializedEvent, "utf8") <= MAX_SERIALIZED_EVENT_BYTES
-      ) {
-        ipcRenderer.send(RUM_BRIDGE_CHANNEL, serializedEvent);
-      }
-    },
-  }),
-);
+if (monitoringEnabled) {
+  contextBridge.exposeInMainWorld(
+    "FTWebViewJavascriptBridge",
+    Object.freeze({
+      getCapabilities: () => JSON.stringify(sessionReplayEnabled ? ["records"] : []),
+      getPrivacyLevel: () => sessionReplayPrivacyLevel,
+      getAllowedWebViewHosts: () => null,
+      sendEvent: (serializedEvent) => {
+        if (
+          typeof serializedEvent === "string" &&
+          Buffer.byteLength(serializedEvent, "utf8") <= MAX_SERIALIZED_EVENT_BYTES
+        ) {
+          ipcRenderer.send(RUM_BRIDGE_CHANNEL, serializedEvent);
+        }
+      },
+    }),
+  );
+}

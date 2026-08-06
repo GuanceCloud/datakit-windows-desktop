@@ -1,14 +1,14 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using Guance.Rum.Windows;
+using Guance.Windows;
 using System.Windows.Forms;
 
 namespace WinFormsSample;
 
 public sealed class MainForm : Form
 {
-    private readonly HttpClient httpClient = new(RumSdk.CreateHttpMessageHandler());
+    private readonly HttpClient httpClient = new(GuanceSdk.CreateHttpMessageHandler());
     private readonly TextBox userIdBox = new() { Text = "sample-user-001" };
     private readonly TextBox userNameBox = new() { Text = "WinForms Sample User" };
     private readonly TextBox userEmailBox = new() { Text = "sample@example.com" };
@@ -235,7 +235,7 @@ public sealed class MainForm : Form
         RunSample("Set user", () =>
         {
             var userId = TextOrDefault(userIdBox, "sample-user-001");
-            RumSdk.SetUser(
+            GuanceSdk.SetUser(
                 userId,
                 NullIfWhiteSpace(userNameBox.Text),
                 NullIfWhiteSpace(userEmailBox.Text),
@@ -248,7 +248,7 @@ public sealed class MainForm : Form
     {
         RunSample("Clear user", () =>
         {
-            RumSdk.ClearUser();
+            GuanceSdk.ClearUser();
             AppendLog("User cleared.");
         });
     }
@@ -258,7 +258,7 @@ public sealed class MainForm : Form
         RunSample("Add global context", () =>
         {
             var value = NextSampleValue("global");
-            RumSdk.AddGlobalContext("sample_global_context", value);
+            GuanceSdk.AddGlobalContext("sample_global_context", value);
             AppendLog($"Global context sample_global_context={value}");
         });
     }
@@ -268,7 +268,7 @@ public sealed class MainForm : Form
         RunSample("Add RUM context", () =>
         {
             var value = NextSampleValue("rum");
-            RumSdk.AddRumGlobalContext("sample_rum_context", value);
+            GuanceSdk.AddRumGlobalContext("sample_rum_context", value);
             AppendLog($"RUM context sample_rum_context={value}");
         });
     }
@@ -278,7 +278,7 @@ public sealed class MainForm : Form
         RunSample("Start view", () =>
         {
             var viewName = TextOrDefault(viewNameBox, "WinFormsManualView");
-            RumSdk.StartView(viewName, SampleProperties("start_view"));
+            GuanceSdk.StartView(viewName, SampleProperties("start_view"));
             AppendLog($"View started: {viewName}");
         });
     }
@@ -287,7 +287,7 @@ public sealed class MainForm : Form
     {
         RunSample("Stop view", () =>
         {
-            RumSdk.StopView(SampleProperties("stop_view"));
+            GuanceSdk.StopView(SampleProperties("stop_view"));
             AppendLog("View stopped.");
         });
     }
@@ -297,7 +297,7 @@ public sealed class MainForm : Form
         await RunSampleAsync("Scoped action", async () =>
         {
             var actionName = TextOrDefault(actionNameBox, "SampleAction");
-            using (RumSdk.StartAction(actionName, "click", SampleProperties("scoped_action")))
+            using (GuanceSdk.StartAction(actionName, "click", SampleProperties("scoped_action")))
             {
                 await Task.Delay(250);
             }
@@ -311,7 +311,7 @@ public sealed class MainForm : Form
         RunSample("Add action", () =>
         {
             var actionName = TextOrDefault(actionNameBox, "SampleAction");
-            RumSdk.AddAction(actionName, "custom", TimeSpan.FromMilliseconds(120), SampleProperties("add_action"));
+            GuanceSdk.AddAction(actionName, "custom", TimeSpan.FromMilliseconds(120), SampleProperties("add_action"));
             AppendLog($"Action added: {actionName}");
         });
     }
@@ -320,7 +320,7 @@ public sealed class MainForm : Form
     {
         await RunSampleAsync("Automatic HTTP success", async () =>
         {
-            using (RumSdk.StartAction("Auto HTTP success", "click", SampleProperties("auto_http_success")))
+            using (GuanceSdk.StartAction("Auto HTTP success", "click", SampleProperties("auto_http_success")))
             using (var response = await httpClient.GetAsync(GetResourceUrl()))
             {
                 AppendLog($"HTTP success status={(int)response.StatusCode}");
@@ -332,7 +332,7 @@ public sealed class MainForm : Form
     {
         await RunSampleAsync("Automatic HTTP failure", async () =>
         {
-            using (RumSdk.StartAction("Auto HTTP failure", "click", SampleProperties("auto_http_failure")))
+            using (GuanceSdk.StartAction("Auto HTTP failure", "click", SampleProperties("auto_http_failure")))
             using (var response = await httpClient.GetAsync("https://example.com/not-found"))
             {
                 AppendLog($"HTTP failure sample status={(int)response.StatusCode}");
@@ -345,11 +345,11 @@ public sealed class MainForm : Form
         await RunSampleAsync("Manual resource success", async () =>
         {
             var stopwatch = Stopwatch.StartNew();
-            var resourceId = RumSdk.StartResource(GetResourceUrl(), "GET", SampleProperties("manual_resource_start"));
+            var resourceId = GuanceSdk.StartResource(GetResourceUrl(), "GET", SampleProperties("manual_resource_start"));
             await Task.Delay(120);
             stopwatch.Stop();
 
-            RumSdk.StopResource(
+            GuanceSdk.StopResource(
                 resourceId,
                 200,
                 RumResourceTiming.FromPhases(
@@ -375,11 +375,11 @@ public sealed class MainForm : Form
         await RunSampleAsync("Manual resource error", async () =>
         {
             var stopwatch = Stopwatch.StartNew();
-            var resourceId = RumSdk.StartResource("https://example.invalid/sample", "POST", SampleProperties("manual_resource_error_start"));
+            var resourceId = GuanceSdk.StartResource("https://example.invalid/sample", "POST", SampleProperties("manual_resource_error_start"));
             await Task.Delay(90);
             stopwatch.Stop();
 
-            RumSdk.StopResource(
+            GuanceSdk.StopResource(
                 resourceId,
                 503,
                 RumResourceTiming.FromTotalElapsed(stopwatch.Elapsed, "winforms_sample"),
@@ -406,7 +406,7 @@ public sealed class MainForm : Form
             }
             catch (Exception ex)
             {
-                RumSdk.AddError(ex, SampleProperties("exception_error"));
+                GuanceSdk.AddError(ex, SampleProperties("exception_error"));
                 AppendLog($"Exception error added: {ex.GetType().Name}");
             }
         });
@@ -416,7 +416,7 @@ public sealed class MainForm : Form
     {
         RunSample("Add custom error", () =>
         {
-            RumSdk.AddError(
+            GuanceSdk.AddError(
                 "Sample custom error stack",
                 "Sample custom error message",
                 "SampleError",
@@ -430,7 +430,7 @@ public sealed class MainForm : Form
     {
         RunSample("Add long task", () =>
         {
-            RumSdk.AddLongTask(
+            GuanceSdk.AddLongTask(
                 TimeSpan.FromMilliseconds(750),
                 "Sample long task stack",
                 SampleProperties("add_long_task"));
@@ -451,7 +451,7 @@ public sealed class MainForm : Form
     {
         RunSample("Start experimental Session Replay", () =>
         {
-            RumSdk.StartSessionReplayRecording();
+            GuanceSdk.StartSessionReplayRecording();
             AppendLog("Experimental Session Replay start requested (requires sessionReplayEnabled=true).");
         });
     }
@@ -460,7 +460,7 @@ public sealed class MainForm : Form
     {
         RunSample("Stop experimental Session Replay", () =>
         {
-            RumSdk.StopSessionReplayRecording();
+            GuanceSdk.StopSessionReplayRecording();
             AppendLog("Experimental Session Replay stopped.");
         });
     }
@@ -469,7 +469,7 @@ public sealed class MainForm : Form
     {
         RunSample("Mask replay text", () =>
         {
-            RumSdk.SetSessionReplayTextAndInputPrivacy(replayPrivacyBox, SessionReplayTextAndInputPrivacy.MaskAllInputs);
+            GuanceSdk.SetSessionReplayTextAndInputPrivacy(replayPrivacyBox, SessionReplayTextAndInputPrivacy.MaskAllInputs);
             AppendLog("Replay text/input privacy set to MaskAllInputs.");
         });
     }
@@ -478,7 +478,7 @@ public sealed class MainForm : Form
     {
         RunSample("Allow replay text", () =>
         {
-            RumSdk.SetSessionReplayTextAndInputPrivacy(replayPrivacyBox, SessionReplayTextAndInputPrivacy.Allow);
+            GuanceSdk.SetSessionReplayTextAndInputPrivacy(replayPrivacyBox, SessionReplayTextAndInputPrivacy.Allow);
             AppendLog("Replay text/input privacy set to Allow.");
         });
     }
@@ -487,7 +487,7 @@ public sealed class MainForm : Form
     {
         RunSample("Hide replay touch", () =>
         {
-            RumSdk.SetSessionReplayTouchPrivacy(replayPrivacyBox, SessionReplayTouchPrivacy.Hide);
+            GuanceSdk.SetSessionReplayTouchPrivacy(replayPrivacyBox, SessionReplayTouchPrivacy.Hide);
             AppendLog("Replay touch privacy set to Hide.");
         });
     }
@@ -496,7 +496,7 @@ public sealed class MainForm : Form
     {
         RunSample("Show replay touch", () =>
         {
-            RumSdk.SetSessionReplayTouchPrivacy(replayPrivacyBox, SessionReplayTouchPrivacy.Show);
+            GuanceSdk.SetSessionReplayTouchPrivacy(replayPrivacyBox, SessionReplayTouchPrivacy.Show);
             AppendLog("Replay touch privacy set to Show.");
         });
     }
@@ -505,7 +505,7 @@ public sealed class MainForm : Form
     {
         RunSample("Hide replay element", () =>
         {
-            RumSdk.SetSessionReplayHidden(replayHiddenTarget);
+            GuanceSdk.SetSessionReplayHidden(replayHiddenTarget);
             AppendLog("Replay element hidden.");
         });
     }
@@ -514,7 +514,7 @@ public sealed class MainForm : Form
     {
         RunSample("Show replay element", () =>
         {
-            RumSdk.SetSessionReplayHidden(replayHiddenTarget, false);
+            GuanceSdk.SetSessionReplayHidden(replayHiddenTarget, false);
             AppendLog("Replay element visible.");
         });
     }
@@ -523,7 +523,7 @@ public sealed class MainForm : Form
     {
         await RunSampleAsync("Flush", async () =>
         {
-            await RumSdk.FlushAsync();
+            await GuanceSdk.FlushAsync();
             AppendLog("Flush completed.");
         });
     }
@@ -532,7 +532,7 @@ public sealed class MainForm : Form
     {
         RunSample("Diagnostics snapshot", () =>
         {
-            var snapshot = RumSdk.GetDiagnosticsSnapshot();
+            var snapshot = GuanceSdk.GetDiagnosticsSnapshot();
             AppendLog(
                 $"Snapshot session={snapshot.SessionId} sampled={snapshot.SessionSampled} " +
                 $"activeView={snapshot.HasActiveView} activeActions={snapshot.ActiveActionCount} " +
@@ -548,7 +548,7 @@ public sealed class MainForm : Form
         {
             if (!diagnosticListenerAttached)
             {
-                RumSdk.AddDiagnosticListener(OnRumDiagnostic);
+                GuanceSdk.AddDiagnosticListener(OnRumDiagnostic);
                 diagnosticListenerAttached = true;
             }
 
@@ -627,7 +627,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        RumSdk.RemoveDiagnosticListener(OnRumDiagnostic);
+        GuanceSdk.RemoveDiagnosticListener(OnRumDiagnostic);
         diagnosticListenerAttached = false;
     }
 

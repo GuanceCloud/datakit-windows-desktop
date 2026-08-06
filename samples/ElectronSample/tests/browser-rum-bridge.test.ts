@@ -82,6 +82,69 @@ function replayEvent(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function logEvent(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    name: "log",
+    data: {
+      message: "Renderer request failed\nwith context",
+      status: "warn",
+      service: "browser",
+      view: { id: "browser-view", url: "file:///index.html" },
+      request_id: "request-1",
+      ...overrides,
+    },
+  });
+}
+
+function nativeConfiguration() {
+  return {
+    transport: {
+      datawayUrl: "",
+      datakitUrl: "http://datakit.example.test:9529",
+      clientToken: "",
+      proxyUrl: "",
+      httpTimeoutMs: 10_000,
+    },
+    application: {
+      id: "win_sample",
+      service: "windows-sample",
+      env: "local",
+      version: "0.1.0",
+    },
+    runtime: { cachePath: "C:\\temp\\rum-cache", debug: true },
+    cache: {
+      maxBytes: 128 * 1024 * 1024,
+      maxFiles: 1024,
+      maxAgeSeconds: 7 * 24 * 60 * 60,
+      maxBatchItems: 50,
+      maxBatchBytes: 512 * 1024,
+    },
+    upload: {
+      maxBytesPerSecond: 256 * 1024,
+      burstBytes: 2 * 1024 * 1024,
+      maxRequestsPerSecond: 2,
+      maxBatchesPerCycle: 4,
+    },
+    rum: {
+      enabled: true,
+      sampleRate: 1,
+      sessionReplay: {
+        enabled: true,
+        sampleRate: 0.75,
+        onErrorSampleRate: 0.25,
+        privacyLevel: "mask" as const,
+      },
+    },
+    log: { enabled: true, sampleRate: 0.5 },
+    trace: {
+      enabled: true,
+      sampleRate: 100,
+      type: "w3c_traceparent" as const,
+      allowedUrls: [],
+    },
+  };
+}
+
 describe("Browser RUM WebView-compatible bridge", () => {
   it("executes the production preload and forwards the official bridge contract over IPC", () => {
     const { exposed, send } = executePreload();
@@ -102,6 +165,13 @@ describe("Browser RUM WebView-compatible bridge", () => {
 
     expect(exposed.FTWebViewJavascriptBridge).toBeDefined();
     expect(exposed.guanceDesktop).toBeUndefined();
+  });
+
+  it("keeps the desktop preload but omits monitoring for a disabled page", () => {
+    const { exposed } = executePreload(["--guance-monitoring-disabled"]);
+
+    expect(exposed.guanceDesktop).toBeDefined();
+    expect(exposed.FTWebViewJavascriptBridge).toBeUndefined();
   });
 
   it("advertises experimental replay only when native configuration enables it", () => {
@@ -159,6 +229,20 @@ describe("Browser RUM WebView-compatible bridge", () => {
     expect(result.line.endsWith("\n")).toBe(true);
   });
 
+  it("converts Browser Logs to the private native log command", () => {
+    const parsed = parseBridgeEvent(logEvent());
+    const result = browserBridgeEventToNativeInput(logEvent());
+
+    expect(parsed).toMatchObject({
+      name: "log",
+      record: { status: "warn", request_id: "request-1" },
+    });
+    expect(result.measurement).toBe("log");
+    expect(result.line).toContain("@guance-log\tstatus=warning\tmessage=");
+    expect(result.line).toContain("\tproperty-key=");
+    expect(result.line.endsWith("\n")).toBe(true);
+  });
+
   it("rejects malformed replay, unsupported measurements, and malformed payloads", () => {
     expect(() => parseBridgeEvent(replayEvent({ timestamp: 0 }))).toThrow(
       "positive millisecond",
@@ -175,6 +259,25 @@ describe("Browser RUM WebView-compatible bridge", () => {
       expect(parseBridgePayload(rumEvent({ measurement })).measurement).toBe(measurement);
     },
   );
+
+  it("preserves Browser trace identifiers on native RUM resources", () => {
+    const event = rumEvent({
+      measurement: "resource",
+      tags: {
+        resource_url: "https://api.example.test/orders",
+        trace_id: "0123456789abcdef0123456789abcdef",
+        span_id: "0123456789abcdef",
+      },
+    });
+
+    const result = browserRumEventToLine(event, {
+      tags: { app_id: "win_sample", session_id: "native-session" },
+    });
+
+    expect(result.line).toContain("trace_id=0123456789abcdef0123456789abcdef");
+    expect(result.line).toContain("span_id=0123456789abcdef");
+    expect(result.line).toContain("session_id=native-session");
+  });
 });
 
 describe("Electron native host adapter", () => {
@@ -211,27 +314,20 @@ describe("Electron native host adapter", () => {
 
   it("passes configuration through a private child-process environment", () => {
     const environment = createNativeEnvironment(
-      {
-        datakitUrl: "http://datakit.example.test:9529",
-        applicationId: "win_sample",
-        service: "windows-sample",
-        env: "local",
-        version: "0.1.0",
-        cachePath: "C:\\temp\\rum.db",
-        sampleRate: 1,
-        sessionReplayEnabled: true,
-        sessionReplaySampleRate: 0.75,
-        sessionReplayOnErrorSampleRate: 0.25,
-        debug: true,
-      },
+      nativeConfiguration(),
       { PATH: "test-path" },
     );
 
     expect(environment.GUANCE_RUM_NATIVE_DATAKIT_URL).toBe("http://datakit.example.test:9529");
     expect(environment.GUANCE_RUM_NATIVE_APP_ID).toBe("win_sample");
+    expect(environment.GUANCE_RUM_NATIVE_LOG_ENABLED).toBe("1");
+    expect(environment.GUANCE_RUM_NATIVE_LOG_SAMPLE_RATE).toBe("0.5");
     expect(environment.GUANCE_RUM_NATIVE_SESSION_REPLAY_ENABLED).toBe("1");
     expect(environment.GUANCE_RUM_NATIVE_SESSION_REPLAY_SAMPLE_RATE).toBe("0.75");
     expect(environment.GUANCE_RUM_NATIVE_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE).toBe("0.25");
+    expect(environment.GUANCE_RUM_NATIVE_MAX_CACHE_BYTES).toBe(String(128 * 1024 * 1024));
+    expect(environment.GUANCE_RUM_NATIVE_MAX_UPLOAD_BYTES_PER_SECOND).toBe(String(256 * 1024));
+    expect(environment.GUANCE_RUM_NATIVE_MAX_UPLOAD_REQUESTS_PER_SECOND).toBe("2");
     expect(environment.GUANCE_RUM_NATIVE_DEBUG).toBe("1");
     expect(environment.PATH).toBe("test-path");
   });
@@ -247,15 +343,10 @@ describe("Electron native host adapter", () => {
     const nativeHost = new NativeRumHost({
       paths: {
         directory: "C:\\native",
-        executablePath: "C:\\native\\guance_rum_electron_bridge.exe",
-        libraryPath: "C:\\native\\guance_rum_native.dll",
+        executablePath: "C:\\native\\guance_windows_electron_bridge.exe",
+        libraryPath: "C:\\native\\guance_windows_native.dll",
       },
-      configuration: {
-        datakitUrl: "http://127.0.0.1:9529",
-        applicationId: "win_sample",
-        sessionReplayEnabled: true,
-        debug: true,
-      },
+      configuration: nativeConfiguration(),
       trustedContext: {
         tags: {
           app_id: "win_sample",
@@ -271,6 +362,7 @@ describe("Electron native host adapter", () => {
 
     nativeHost.start();
     expect(nativeHost.send(rumEvent(), "main-renderer")).toBe(true);
+    expect(nativeHost.send(logEvent(), "main-renderer")).toBe(true);
     expect(nativeHost.send(replayEvent(), "main-renderer")).toBe(true);
     expect(nativeHost.sendLaunch({
       type: "cold",
@@ -288,23 +380,30 @@ describe("Electron native host adapter", () => {
       type: "NotTrusted",
       message: "must be rejected",
     })).toBe(false);
-    expect(write).toHaveBeenCalledTimes(4);
+    nativeHost.configuration.rum.enabled = false;
+    expect(nativeHost.send(logEvent(), "main-renderer")).toBe(true);
+    expect(nativeHost.send(rumEvent(), "main-renderer")).toBe(false);
+
+    expect(write).toHaveBeenCalledTimes(6);
     expect(write.mock.calls[0][0]).toContain("app_id=win_sample");
     expect(write.mock.calls[0][1]).toBe("utf8");
-    expect(write.mock.calls[1][0]).toContain(
+    expect(write.mock.calls[1][0]).toContain("@guance-log\tstatus=warning\tmessage=");
+    expect(write.mock.calls[1][1]).toBe("utf8");
+    expect(write.mock.calls[2][0]).toContain(
       "@guance-replay\tsession_id=native-session\tview_id=browser-view",
     );
-    expect(write.mock.calls[1][1]).toBe("utf8");
-    expect(write.mock.calls[2]).toEqual([
+    expect(write.mock.calls[2][1]).toBe("utf8");
+    expect(write.mock.calls[3]).toEqual([
       "@guance-launch\ttype=cold\tstart_time_ns=100\tduration_ns=60\t" +
         "pre_application_duration_ns=20\tapplication_duration_ns=20\t" +
         "first_frame_duration_ns=20\n",
       "utf8",
     ]);
-    expect(write.mock.calls[3]).toEqual([
+    expect(write.mock.calls[4]).toEqual([
       "@guance-error\ttype=ElectronRendererProcessGone\t" +
         "message=renderer%20crashed%09(exit%2011)\n",
       "utf8",
     ]);
+    expect(write.mock.calls[5][0]).toContain("@guance-log\tstatus=warning\tmessage=");
   });
 });

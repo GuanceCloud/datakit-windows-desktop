@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net8.0-windows10.0.17763.0</TargetFrameworks>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([System.String]::Copy('$(TargetFramework)').Contains('-windows'))">
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Guance.Windows/Guance.Windows.csproj" />
+    <Compile Include="../../samples/Shared/SampleGuanceConfig.cs" Link="Samples/SampleGuanceConfig.cs" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3179.45"
+                      Condition="$([System.String]::Copy('$(TargetFramework)').Contains('-windows'))" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="!$([System.String]::Copy('$(TargetFramework)').Contains('-windows'))">
+    <Compile Remove="DesktopAutoInstrumentationSmokeTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([System.String]::Copy('$(TargetFramework)').Contains('-windows'))">
+    <Compile Remove="CrashProcessSmokeTests.cs" />
+  </ItemGroup>
+
+  <Target Name="BuildCrashSmokeApp" BeforeTargets="Build" Condition="'$(TargetFramework)' == 'net8.0'">
+    <MSBuild Projects="../Guance.Windows.CrashSmoke/Guance.Windows.CrashSmoke.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=net8.0" />
+  </Target>
+</Project>

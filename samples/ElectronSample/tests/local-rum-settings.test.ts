@@ -86,6 +86,40 @@ describe("loadLocalRumSettings", () => {
     ).toBe(100);
   });
 
+  it("reads tracing URL arrays from JSON or a comma-separated environment value", () => {
+    const {
+      createLocalRumSettingsReader,
+      resolveAllowedTraceUrls,
+    } = require("../src/main/local-rum-settings.cjs");
+    const jsonReader = createLocalRumSettingsReader({
+      environment: {},
+      settings: { allowedTracingUrls: ["https://json.example.test"] },
+    });
+    const environmentReader = createLocalRumSettingsReader({
+      environment: {
+        GUANCE_TRACE_ALLOWED_URLS:
+          "https://one.example.test, https://two.example.test",
+        GUANCE_RUM_ALLOWED_TRACING_URLS: "https://legacy.example.test",
+      },
+      settings: {},
+    });
+    const legacyEnvironmentReader = createLocalRumSettingsReader({
+      environment: {
+        GUANCE_RUM_ALLOWED_TRACING_URLS: "https://legacy.example.test",
+      },
+      settings: {},
+    });
+
+    expect(resolveAllowedTraceUrls(jsonReader)).toEqual(["https://json.example.test"]);
+    expect(resolveAllowedTraceUrls(environmentReader)).toEqual([
+      "https://one.example.test",
+      "https://two.example.test",
+    ]);
+    expect(resolveAllowedTraceUrls(legacyEnvironmentReader)).toEqual([
+      "https://legacy.example.test",
+    ]);
+  });
+
   it("lets an intake environment variable override the opposite JSON target", () => {
     const {
       createLocalRumSettingsReader,

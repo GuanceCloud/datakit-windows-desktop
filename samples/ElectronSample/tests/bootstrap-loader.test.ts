@@ -16,12 +16,24 @@ const bootstrap = {
     packaged: false,
     rendererMode: "vite-dev-server",
   },
-  rum: {
-    enabled: true,
+  monitoring: {
+    bridgeEnabled: true,
     debug: false,
-    sessionReplayEnabled: false,
-    sessionReplayPrivacyLevel: "mask",
     userId: "test-user",
+    rum: {
+      enabled: true,
+      sessionReplay: {
+        enabled: false,
+        privacyLevel: "mask",
+      },
+    },
+    log: { enabled: true },
+    trace: {
+      enabled: true,
+      sampleRate: 100,
+      type: "w3c_traceparent",
+      allowedUrls: ["http://127.0.0.1:5000"],
+    },
   },
   hybrid: {
     localOrigin: "http://127.0.0.1:5173",

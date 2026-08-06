@@ -18,14 +18,27 @@ const {
   createLocalRumSettingsReader,
   isSupportedWebViewUrl,
   loadLocalRumSettings,
+  resolveAllowedTraceUrls,
   resolveRumIngestionConfiguration,
   resolveWebViewUrl,
 } = require("./local-rum-settings.cjs");
 const RUM_BRIDGE_CHANNEL = "rum:browser-event";
+const SUPPORTED_BROWSER_TRACE_TYPES = new Set([
+  "ddtrace",
+  "zipkin",
+  "zipkin_single_header",
+  "w3c_traceparent",
+  "w3c_traceparent_64bit",
+  "skywalking_v3",
+  "jaeger",
+]);
 const {
   NativeRumHost,
   resolveNativeRumPaths,
 } = require("./native-rum-host.cjs");
+const {
+  initializeElectronMonitoring,
+} = require("./electron-monitoring.cjs");
 const {
   ElectronApplicationLaunchTracker,
 } = require("./electron-application-launch.cjs");
@@ -50,9 +63,11 @@ let remoteWindow;
 let apiServer;
 let apiBaseUrl;
 let nativeRumHost;
-let nativeRumConfiguration;
+let electronMonitoring;
+let monitoringConfiguration;
 let nativeRumShutdownPromise;
 let launchLifecycleInstalled = false;
+let browserTraceHeaderObserved = false;
 let localRumSettingsReader = createLocalRumSettingsReader({
   environment: process.env,
   settings: {},
@@ -95,6 +110,24 @@ function readPercentageConfiguration(environmentName, jsonName, fallback) {
   );
 }
 
+function readBrowserPercentageConfiguration(environmentName, jsonName, fallback) {
+  return Math.min(
+    100,
+    Math.max(0, readNumberConfiguration(environmentName, jsonName, fallback)),
+  );
+}
+
+function resolveBrowserTraceType() {
+  const configured = readConfiguration(
+    "GUANCE_TRACE_TYPE",
+    "traceType",
+    "w3c_traceparent",
+  ).toLowerCase();
+  return SUPPORTED_BROWSER_TRACE_TYPES.has(configured)
+    ? configured
+    : "w3c_traceparent";
+}
+
 function resolveReplayPrivacyLevel() {
   const configured = readConfiguration(
     "GUANCE_RUM_REPLAY_PRIVACY_LEVEL",
@@ -115,7 +148,7 @@ function resolveReplayPrivacyLevel() {
   return "mask";
 }
 
-function createNativeRumConfiguration() {
+function createMonitoringConfiguration() {
   const { datawayUrl, datakitUrl } = resolveRumIngestionConfiguration(
     localRumSettingsReader,
     IS_SMOKE ? "http://127.0.0.1:9" : "http://127.0.0.1:9529",
@@ -137,9 +170,24 @@ function createNativeRumConfiguration() {
     "sessionSampleRate",
     100,
   );
+  const rumEnabled = readBooleanConfiguration(
+    "GUANCE_RUM_ENABLED",
+    "rumEnabled",
+    true,
+  );
   const sessionReplayEnabled = readBooleanConfiguration(
     "GUANCE_RUM_SESSION_REPLAY_ENABLED",
     "sessionReplayEnabled",
+    IS_SMOKE,
+  );
+  const loggingEnabled = readBooleanConfiguration(
+    "GUANCE_LOG_ENABLED",
+    "loggingEnabled",
+    IS_SMOKE,
+  );
+  const traceEnabled = readBooleanConfiguration(
+    "GUANCE_TRACE_ENABLED",
+    "traceEnabled",
     IS_SMOKE,
   );
   const sessionReplaySampleRate = readPercentageConfiguration(
@@ -154,22 +202,68 @@ function createNativeRumConfiguration() {
   );
 
   return {
-    datawayUrl,
-    datakitUrl,
-    clientToken: readConfiguration("GUANCE_RUM_CLIENT_TOKEN", "clientToken"),
-    applicationId,
-    service,
-    env: environment,
-    version,
-    cachePath: path.join(app.getPath("userData"), "native-rum-queue.db"),
-    proxyUrl: readConfiguration("GUANCE_RUM_PROXY_URL", "proxyUrl"),
-    sampleRate,
-    sessionReplayEnabled,
-    sessionReplaySampleRate,
-    sessionReplayOnErrorSampleRate,
-    sessionReplayPrivacyLevel: resolveReplayPrivacyLevel(),
-    httpTimeoutMs: 10_000,
-    debug: readBooleanConfiguration("GUANCE_RUM_DEBUG", "debug", true),
+    transport: {
+      datawayUrl,
+      datakitUrl,
+      clientToken: readConfiguration("GUANCE_RUM_CLIENT_TOKEN", "clientToken"),
+      proxyUrl: readConfiguration("GUANCE_RUM_PROXY_URL", "proxyUrl"),
+      httpTimeoutMs: 10_000,
+    },
+    application: {
+      id: applicationId,
+      service,
+      env: environment,
+      version,
+    },
+    runtime: {
+      cachePath: path.join(app.getPath("userData"), "native-rum-cache"),
+      debug: readBooleanConfiguration("GUANCE_RUM_DEBUG", "debug", true),
+    },
+    cache: {
+      maxBytes: readNumberConfiguration("GUANCE_RUM_MAX_CACHE_BYTES", "maxCacheBytes", 128 * 1024 * 1024),
+      maxFiles: readNumberConfiguration("GUANCE_RUM_MAX_CACHE_FILES", "maxCacheFiles", 1024),
+      maxAgeSeconds: readNumberConfiguration("GUANCE_RUM_MAX_CACHE_AGE_SECONDS", "maxCacheAgeSeconds", 7 * 24 * 60 * 60),
+      maxBatchItems: readNumberConfiguration("GUANCE_RUM_MAX_BATCH_ITEMS", "maxBatchItems", 50),
+      maxBatchBytes: readNumberConfiguration("GUANCE_RUM_MAX_BATCH_BYTES", "maxBatchBytes", 512 * 1024),
+    },
+    upload: {
+      maxBytesPerSecond: readNumberConfiguration("GUANCE_RUM_MAX_UPLOAD_BYTES_PER_SECOND", "maxUploadBytesPerSecond", 256 * 1024),
+      burstBytes: readNumberConfiguration("GUANCE_RUM_UPLOAD_BURST_BYTES", "uploadBurstBytes", 2 * 1024 * 1024),
+      maxRequestsPerSecond: readNumberConfiguration("GUANCE_RUM_MAX_UPLOAD_REQUESTS_PER_SECOND", "maxUploadRequestsPerSecond", 2),
+      maxBatchesPerCycle: readNumberConfiguration("GUANCE_RUM_MAX_UPLOAD_BATCHES_PER_CYCLE", "maxUploadBatchesPerCycle", 4),
+    },
+    rum: {
+      enabled: rumEnabled,
+      sampleRate,
+      sessionReplay: {
+        enabled: sessionReplayEnabled,
+        sampleRate: sessionReplaySampleRate,
+        onErrorSampleRate: sessionReplayOnErrorSampleRate,
+        privacyLevel: resolveReplayPrivacyLevel(),
+      },
+    },
+    log: {
+      enabled: loggingEnabled,
+      sampleRate: readPercentageConfiguration(
+        "GUANCE_LOG_SAMPLE_RATE",
+        "logSampleRate",
+        100,
+      ),
+    },
+    trace: {
+      enabled: traceEnabled,
+      sampleRate: readBrowserPercentageConfiguration(
+        "GUANCE_TRACE_SAMPLE_RATE",
+        "traceSampleRate",
+        100,
+      ),
+      type: resolveBrowserTraceType(),
+      allowedUrls: resolveAllowedTraceUrls(localRumSettingsReader),
+    },
+    electron: {
+      defaultPage: { enabled: true },
+      pages: {},
+    },
     trustedContext: {
       tags: {
         app_id: applicationId,
@@ -194,11 +288,11 @@ function createNativeRumConfiguration() {
 }
 
 function initializeNativeRumHost() {
-  const configuration = createNativeRumConfiguration();
-  nativeRumConfiguration = configuration;
+  const configuration = createMonitoringConfiguration();
+  monitoringConfiguration = configuration;
   if (
-    !configuration.applicationId ||
-    (!configuration.datawayUrl && !configuration.datakitUrl)
+    !configuration.application.id ||
+    (!configuration.transport.datawayUrl && !configuration.transport.datakitUrl)
   ) {
     console.warn("[electron-main][rum-bridge] disabled: missing ingestion URL or app id");
     return;
@@ -209,13 +303,16 @@ function initializeNativeRumHost() {
     resourcesPath: process.resourcesPath,
     sampleRoot: SAMPLE_ROOT,
   });
-  nativeRumHost = new NativeRumHost({
-    paths,
+  electronMonitoring = initializeElectronMonitoring({
     configuration,
-    trustedContext: configuration.trustedContext,
+    createNativeBridge: (nativeConfiguration) => new NativeRumHost({
+      paths,
+      configuration: nativeConfiguration,
+      trustedContext: nativeConfiguration.trustedContext,
+    }),
   });
+  nativeRumHost = electronMonitoring.nativeBridge;
   applicationLaunch.markSdkInitialized();
-  nativeRumHost.start();
   console.log(
     `[electron-main][rum-bridge] Browser RUM -> C++ Core enabled (${paths.executablePath})`,
   );
@@ -240,7 +337,7 @@ function installLaunchLifecycle() {
       return;
     }
 
-    void applicationLaunch.reportHotAfterFrame(nativeRumHost, window, foreground);
+    void applicationLaunch.reportHotAfterFrame(electronMonitoring, window, foreground);
   });
 }
 
@@ -250,11 +347,18 @@ function shutdownNativeRumHost() {
   }
   const host = nativeRumHost;
   nativeRumHost = undefined;
-  nativeRumShutdownPromise = host?.shutdown() || Promise.resolve();
+  const integration = electronMonitoring;
+  electronMonitoring = undefined;
+  nativeRumShutdownPromise = integration?.shutdown() || host?.shutdown() || Promise.resolve();
   return nativeRumShutdownPromise;
 }
 
-function createBootstrap(isRemoteRenderer = false) {
+function createBootstrap(pageId, isRemoteRenderer = false) {
+  const pagePolicy = electronMonitoring?.pagePolicy(pageId);
+  const configuredTracingUrls = pagePolicy?.trace.allowedUrls || [];
+  const allowedTracingUrls = pagePolicy?.trace.enabled
+    ? [...new Set([...configuredTracingUrls, apiBaseUrl].filter(Boolean))]
+    : [];
   return {
     app: {
       name: app.getName(),
@@ -272,15 +376,26 @@ function createBootstrap(isRemoteRenderer = false) {
           ? "vite-dev-server"
           : "packaged-file",
     },
-    rum: {
-      enabled: Boolean(nativeRumHost),
-      debug: nativeRumConfiguration?.debug ?? false,
-      sessionReplayEnabled: Boolean(
-        nativeRumHost && nativeRumConfiguration?.sessionReplayEnabled,
-      ),
-      sessionReplayPrivacyLevel:
-        nativeRumConfiguration?.sessionReplayPrivacyLevel || "mask",
+    monitoring: {
+      bridgeEnabled: Boolean(electronMonitoring && pagePolicy?.enabled),
+      debug: monitoringConfiguration?.runtime.debug ?? false,
       userId: ACCEPTANCE_USER_ID,
+      rum: {
+        enabled: Boolean(pagePolicy?.rum.enabled),
+        sessionReplay: {
+          enabled: Boolean(pagePolicy?.rum.sessionReplay.enabled),
+          privacyLevel: pagePolicy?.rum.sessionReplay.privacyLevel || "mask",
+        },
+      },
+      log: {
+        enabled: Boolean(pagePolicy?.log.enabled),
+      },
+      trace: {
+        enabled: Boolean(pagePolicy?.trace.enabled),
+        sampleRate: pagePolicy?.trace.sampleRate ?? 100,
+        type: pagePolicy?.trace.type || "w3c_traceparent",
+        allowedUrls: allowedTracingUrls,
+      },
     },
     hybrid: {
       localOrigin: isRemoteRenderer ? apiBaseUrl : DEV_RENDERER_URL || "file://",
@@ -296,14 +411,11 @@ function createBootstrap(isRemoteRenderer = false) {
   };
 }
 
-function createRumPreloadArguments(additionalArguments = []) {
-  const argumentsForPreload = [...additionalArguments];
-  if (nativeRumHost && nativeRumConfiguration?.sessionReplayEnabled) {
-    argumentsForPreload.push(
-      `--guance-rum-replay=${nativeRumConfiguration.sessionReplayPrivacyLevel}`,
-    );
-  }
-  return argumentsForPreload;
+function createRumPreloadArguments(pageId, additionalArguments = []) {
+  return electronMonitoring?.createPreloadArguments(pageId, additionalArguments) || [
+    ...additionalArguments,
+    "--guance-monitoring-disabled",
+  ];
 }
 
 function sendJson(response, statusCode, value) {
@@ -341,7 +453,7 @@ function tryServeRemoteRenderer(requestUrl, response) {
   }
 
   if (requestUrl.pathname === "/remote/bootstrap") {
-    sendJson(response, 200, createBootstrap(true));
+    sendJson(response, 200, createBootstrap("remote", true));
     return true;
   }
 
@@ -379,13 +491,40 @@ function startLocalApi() {
         response.writeHead(204, {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Headers": [
+            "Content-Type",
+            "traceparent",
+            "tracestate",
+            "x-datadog-origin",
+            "x-datadog-parent-id",
+            "x-datadog-sampling-priority",
+            "x-datadog-trace-id",
+            "X-B3-TraceId",
+            "X-B3-SpanId",
+            "X-B3-Sampled",
+            "b3",
+            "uber-trace-id",
+            "sw8",
+          ].join(", "),
         });
         response.end();
         return;
       }
 
       const requestUrl = new URL(request.url || "/", "http://127.0.0.1");
+      if (
+        requestUrl.pathname.startsWith("/api/") &&
+        [
+          "traceparent",
+          "x-datadog-trace-id",
+          "x-b3-traceid",
+          "b3",
+          "uber-trace-id",
+          "sw8",
+        ].some((header) => typeof request.headers[header] === "string")
+      ) {
+        browserTraceHeaderObserved = true;
+      }
       if (tryServeRemoteRenderer(requestUrl, response)) {
         return;
       }
@@ -479,23 +618,6 @@ function isTrustedMainEvent(event) {
   );
 }
 
-function trustedRumRenderer(event) {
-  for (const [label, window] of [
-    ["main-renderer", mainWindow],
-    ["remote-renderer", remoteWindow],
-  ]) {
-    if (
-      window &&
-      !window.isDestroyed() &&
-      event.sender === window.webContents &&
-      event.senderFrame === window.webContents.mainFrame
-    ) {
-      return label;
-    }
-  }
-  return undefined;
-}
-
 function handleTrusted(channel, handler) {
   ipcMain.handle(channel, (event, ...args) => {
     if (!isTrustedMainEvent(event)) {
@@ -535,17 +657,25 @@ async function createRemoteWindow({ forceBuiltIn = false } = {}) {
     backgroundColor: "#07110f",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
-      additionalArguments: createRumPreloadArguments(["--guance-rum-only-preload"]),
+      additionalArguments: createRumPreloadArguments(
+        "remote",
+        ["--guance-rum-only-preload"],
+      ),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
+  electronMonitoring?.registerWebContents(
+    remoteWindow.webContents,
+    "remote",
+    "remote-renderer",
+  );
   remoteWindow.removeMenu();
   secureWebContents(remoteWindow.webContents, remoteUrl);
   monitorElectronWindow(remoteWindow, {
     label: "remote-renderer",
-    sendProcessFailure: (failure) => nativeRumHost?.sendProcessFailure(failure),
+    sendProcessFailure: (failure) => electronMonitoring?.sendProcessFailure(failure),
   });
   remoteWindow.once("ready-to-show", () => remoteWindow?.show());
   remoteWindow.on("closed", () => {
@@ -571,12 +701,9 @@ async function createRemoteWindow({ forceBuiltIn = false } = {}) {
 
 function registerIpc() {
   ipcMain.on(RUM_BRIDGE_CHANNEL, (event, serializedEvent) => {
-    const renderer = trustedRumRenderer(event);
-    if (renderer) {
-      nativeRumHost?.send(serializedEvent, renderer);
-    }
+    electronMonitoring?.send(event, serializedEvent);
   });
-  handleTrusted("app:get-bootstrap", () => createBootstrap(false));
+  handleTrusted("app:get-bootstrap", () => createBootstrap("main", false));
   onTrusted("window:minimize", () => mainWindow?.minimize());
   handleTrusted("window:toggle-maximize", () => {
     if (!mainWindow) {
@@ -744,6 +871,8 @@ function configureSmoke(window) {
             resource: document.querySelector('#metric-resource')?.textContent,
             resourceStatus: document.querySelector('#resource-delta')?.textContent,
             rumInitialized: app?.dataset.rumInitialized === 'true',
+            logInitialized: app?.dataset.logInitialized === 'true',
+            traceEnabled: app?.dataset.traceEnabled === 'true',
             sdkEventTypes: (app?.dataset.rumSdkEventTypes || '').split(',').filter(Boolean),
             sdkResourceCount: Number(app?.dataset.rumSdkResourceCount || '0'),
             verifiedSignals: document.querySelectorAll('.coverage-row.verified').length,
@@ -799,6 +928,7 @@ function configureSmoke(window) {
       const result = {
         local: { ...localResult, acceptanceUserId: undefined },
         remote: { ...remoteResult, acceptanceUserId: undefined },
+        traceHeaderObserved: browserTraceHeaderObserved,
         userCorrelation,
       };
       const passed =
@@ -807,6 +937,9 @@ function configureSmoke(window) {
         localResult.resource !== "\u2014" &&
         localResult.resourceStatus === "HTTP 503" &&
         localResult.rumInitialized === true &&
+        localResult.logInitialized === true &&
+        localResult.traceEnabled === true &&
+        browserTraceHeaderObserved === true &&
         localResult.sdkResourceCount >= 2 &&
         ["view", "action", "resource", "error", "long_task"].every((type) =>
           localResult.sdkEventTypes.includes(type),
@@ -846,22 +979,27 @@ function createMainWindow() {
     backgroundColor: "#07110f",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
-      additionalArguments: createRumPreloadArguments(),
+      additionalArguments: createRumPreloadArguments("main"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
+  electronMonitoring?.registerWebContents(
+    mainWindow.webContents,
+    "main",
+    "main-renderer",
+  );
   const windowCreated = applicationLaunch.markWindowCreated();
 
   mainWindow.removeMenu();
   secureWebContents(mainWindow.webContents, rendererEntry);
   monitorElectronWindow(mainWindow, {
     label: "main-renderer",
-    sendProcessFailure: (failure) => nativeRumHost?.sendProcessFailure(failure),
+    sendProcessFailure: (failure) => electronMonitoring?.sendProcessFailure(failure),
   });
   mainWindow.once("ready-to-show", () => {
-    applicationLaunch.reportCold(nativeRumHost, windowCreated);
+    applicationLaunch.reportCold(electronMonitoring, windowCreated);
     mainWindow?.show();
   });
   mainWindow.on("closed", () => {

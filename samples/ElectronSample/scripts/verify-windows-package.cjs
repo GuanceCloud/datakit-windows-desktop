@@ -17,8 +17,8 @@ const appArchivePath = path.join(packageDirectory, "resources", "app.asar");
 const settingsExamplePath = path.join(packageDirectory, "rum.local.json.example");
 const electronVersionPath = path.join(packageDirectory, "version");
 const nativeDirectory = path.join(packageDirectory, "resources", "native");
-const nativeHostPath = path.join(nativeDirectory, "guance_rum_electron_bridge.exe");
-const nativeCorePath = path.join(nativeDirectory, "guance_rum_native.dll");
+const nativeHostPath = path.join(nativeDirectory, "guance_windows_electron_bridge.exe");
+const nativeCorePath = path.join(nativeDirectory, "guance_windows_native.dll");
 const skipRuntime = process.argv.includes("--skip-runtime");
 
 function fail(message) {
@@ -90,8 +90,11 @@ for (const marker of [
   "[electron-smoke]",
   "[electron-main][rum-bridge] main-renderer -> C++",
   "[Guance.RUM.Native.BrowserBridge] enqueued ",
+  "[Guance.RUM.NativeBridge] Browser log",
   "[Guance.RUM.NativeBridge] flush enqueued=",
   '"rumInitialized":true',
+  '"logInitialized":true',
+  '"traceHeaderObserved":true',
   '"resourceStatus":"HTTP 503"',
   '"userCorrelation":true',
 ]) {

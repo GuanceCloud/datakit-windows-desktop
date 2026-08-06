@@ -15,13 +15,13 @@ const nativeSourceDirectory = path.resolve(
   "..",
   "..",
   "src",
-  "Guance.Rum.NativeCore",
+  "Guance.Windows.Native",
   "bin",
   "win-x64",
 );
 const nativeFiles = [
-  "guance_rum_native.dll",
-  "guance_rum_electron_bridge.exe",
+  "guance_windows_native.dll",
+  "guance_windows_electron_bridge.exe",
 ];
 const expectedApplicationPath = path.join(
   sampleRoot,
@@ -59,7 +59,7 @@ const applicationPaths = await packager({
   buildVersion: packageMetadata.version,
   win32metadata: {
     CompanyName: "Guance",
-    FileDescription: "Guance Windows Electron RUM acceptance application",
+    FileDescription: "Guance Windows observability acceptance application",
     ProductName: packageMetadata.productName,
     InternalName: applicationName,
     OriginalFilename: `${applicationName}.exe`,

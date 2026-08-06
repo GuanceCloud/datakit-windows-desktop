@@ -1,5 +1,5 @@
-using Guance.Rum.Windows;
-using Guance.Rum.Windows.Samples;
+using Guance.Windows;
+using Guance.Windows.Samples;
 using System.Windows.Forms;
 
 namespace WinFormsSample;
@@ -10,9 +10,9 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        RumSdk.Init(SampleRumConfig.Load("rum-winforms-demo", "winforms-sample", args));
-        RumSdk.EnableAutomaticInstrumentation();
+        GuanceSdk.Init(SampleGuanceConfig.Load("rum-winforms-demo", "winforms-sample", args));
+        GuanceSdk.EnableAutomaticInstrumentation();
         Application.Run(new MainForm());
-        RumSdk.ShutdownAsync().GetAwaiter().GetResult();
+        GuanceSdk.ShutdownAsync().GetAwaiter().GetResult();
     }
 }
