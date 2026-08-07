@@ -9,8 +9,20 @@ include(GNUInstallDirs)
 option(BUILD_SHARED_LIBS "Build Guance Windows Native as a shared library" ON)
 option(
     GUANCE_WINDOWS_NATIVE_STAGE_RUNTIME
-    "Write local Windows runtime artifacts to bin/win-x64 for managed/Electron packaging"
+    "Write local Windows runtime artifacts for managed/Electron packaging"
     OFF)
+set(
+    GUANCE_WINDOWS_NATIVE_RUNTIME_ARCH
+    "x64"
+    CACHE STRING
+    "Runtime architecture directory used when staging Windows artifacts")
+set_property(
+    CACHE GUANCE_WINDOWS_NATIVE_RUNTIME_ARCH
+    PROPERTY STRINGS x64 x86 arm64)
+
+if(MSVC)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+endif()
 
 add_library(guance_windows_native
     src/guance_sdk.cpp
@@ -197,7 +209,12 @@ if(BUILD_TESTING)
 endif()
 
 if(WIN32 AND GUANCE_WINDOWS_NATIVE_STAGE_RUNTIME)
-    set(GUANCE_WINDOWS_NATIVE_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/win-x64")
+    if(NOT GUANCE_WINDOWS_NATIVE_RUNTIME_ARCH MATCHES "^(x64|x86|arm64)$")
+        message(FATAL_ERROR
+            "GUANCE_WINDOWS_NATIVE_RUNTIME_ARCH must be x64, x86, or arm64")
+    endif()
+    set(GUANCE_WINDOWS_NATIVE_RUNTIME_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/bin/win-${GUANCE_WINDOWS_NATIVE_RUNTIME_ARCH}")
     foreach(target_name IN LISTS GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS)
         set_target_properties(${target_name} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${GUANCE_WINDOWS_NATIVE_RUNTIME_DIR}"

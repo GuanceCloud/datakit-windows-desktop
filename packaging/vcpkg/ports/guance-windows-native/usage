@@ -1,0 +1,8 @@
+guance-windows-native provides the CMake package GuanceWindowsNative:
+
+    find_package(GuanceWindowsNative CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE Guance::WindowsNative)
+
+The initial port supports the dynamic x64-windows triplet. Session Replay is
+experimental, opt-in, and disabled by default at runtime. The port has no
+default SQLite dependency.
