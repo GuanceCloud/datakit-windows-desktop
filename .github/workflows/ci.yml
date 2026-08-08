@@ -2,33 +2,27 @@ name: ci
 
 on:
   push:
+    branches:
+      - "**"
+    tags:
+      - "nuget_*"
   pull_request:
 
 jobs:
   native:
-    runs-on: windows-latest
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
         arch: [x64, arm64, x86]
     steps:
       - uses: actions/checkout@v4
-      - name: Install Zig
-        shell: pwsh
-        run: |
-          $zigVersion = "0.13.0"
-          $zip = Join-Path $env:RUNNER_TEMP "zig.zip"
-          $dir = Join-Path $env:RUNNER_TEMP "zig"
-          Invoke-WebRequest -Uri "https://ziglang.org/download/$zigVersion/zig-windows-x86_64-$zigVersion.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $dir
-          $zig = Join-Path $dir "zig-windows-x86_64-$zigVersion\zig.exe"
-          "ZIG=$zig" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build native ${{ matrix.arch }}
         shell: pwsh
         run: |
-          $args = @("-ExecutionPolicy", "Bypass", "-File", "build\native-windows-zig.ps1", "-Zig", $env:ZIG, "-TargetArch", "${{ matrix.arch }}")
+          $args = @("-ExecutionPolicy", "Bypass", "-File", "build\native-windows-cmake.ps1", "-TargetArch", "${{ matrix.arch }}")
           if ("${{ matrix.arch }}" -ne "x64") {
-            $args += "-SkipSmoke"
+            $args += "-SkipTests"
           }
           powershell @args
       - uses: actions/upload-artifact@v4
@@ -37,8 +31,10 @@ jobs:
           path: src/Guance.Windows.Native/bin/win-${{ matrix.arch }}/guance_windows_native.dll
 
   managed:
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: native
+    outputs:
+      package-version: ${{ steps.release-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -60,15 +56,34 @@ jobs:
       - run: dotnet test tests/Guance.Windows.Tests/Guance.Windows.Tests.csproj -c Release
       - run: dotnet build src/Guance.Windows/Guance.Windows.csproj -c Release -f net6.0
       - run: dotnet build src/Guance.Windows/Guance.Windows.csproj -c Release -f net6.0-windows10.0.17763.0
+      - name: Resolve release version
+        id: release-version
+        shell: pwsh
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $version = ""
+          if ($env:REF_TYPE -eq "tag") {
+            $version = & .\build\resolve-release-tag.ps1 `
+              -Tag $env:REF_NAME `
+              -ExpectedKind nuget `
+              -CheckChangelog
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       - name: Pack, verify, and consumer smoke
         shell: pwsh
         env:
           REF_TYPE: ${{ github.ref_type }}
-          PACKAGE_VERSION: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $packArgs = @("-ExecutionPolicy", "Bypass", "-File", "build\pack.ps1", "-OutputDirectory", "dist")
+          $packArgs = @(
+            "-ExecutionPolicy", "Bypass",
+            "-File", "build\pack.ps1",
+            "-OutputDirectory", "dist",
+            "-SkipTests")
           if ($env:REF_TYPE -eq "tag") {
-            $packArgs += @("-PackageVersion", $env:PACKAGE_VERSION)
+            $packArgs += @("-ReleaseTag", $env:RELEASE_TAG)
           }
           powershell @packArgs
       - uses: actions/upload-artifact@v4
@@ -80,8 +95,8 @@ jobs:
             dist/release-manifest.json
 
   publish:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    runs-on: windows-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/nuget_')
+    runs-on: windows-2022
     needs: managed
     environment: nuget-release
     permissions:
@@ -100,9 +115,12 @@ jobs:
         id: package
         shell: pwsh
         env:
-          PACKAGE_VERSION: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ needs.managed.outputs.package-version }}
         run: |
           $version = $env:PACKAGE_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Managed release version output is empty."
+          }
           $package = Join-Path "dist" "Guance.Windows.$version.nupkg"
           $symbols = Join-Path "dist" "Guance.Windows.$version.snupkg"
           if (-not (Test-Path -LiteralPath $package)) {
