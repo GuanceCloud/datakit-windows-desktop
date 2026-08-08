@@ -28,6 +28,8 @@ const desktopBridge = Object.freeze({
   selectWorkspace: () => ipcRenderer.invoke("native:select-workspace"),
   openRemoteWorkspace: () => ipcRenderer.invoke("hybrid:open-remote"),
   showNotification: (message) => ipcRenderer.invoke("native:show-notification", message),
+  runNativeAcceptanceScenario: () => ipcRenderer.invoke("native:run-acceptance-scenario"),
+  crashNativeBridge: () => ipcRenderer.invoke("native:crash-bridge"),
 });
 
 if (!process.argv.includes("--guance-rum-only-preload")) {

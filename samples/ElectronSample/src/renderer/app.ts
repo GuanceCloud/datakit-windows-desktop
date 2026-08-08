@@ -330,6 +330,16 @@ function renderShell(bootstrap: DesktopBootstrap): void {
                 <span><strong>长任务</strong><small>Renderer block · 240ms</small></span>
                 <span class="lab-arrow">→</span>
               </button>
+              <button class="lab-action lab-action-native" type="button" id="run-native-scenario" data-guance-action-name="run_complete_native_scenario">
+                <span class="lab-action-icon mint">N</span>
+                <span><strong>完整 Native 场景</strong><small>View · Action · Resource · Error · Long Task · Log · Replay</small></span>
+                <span class="lab-arrow">→</span>
+              </button>
+              <button class="lab-action lab-action-native lab-action-crash" type="button" id="crash-native-bridge" data-guance-action-name="crash_native_bridge">
+                <span class="lab-action-icon red">!</span>
+                <span><strong>Native 崩溃恢复</strong><small>Access violation · Minidump · automatic recovery</small></span>
+                <span class="lab-arrow">→</span>
+              </button>
             </div>
           </article>
 
@@ -1016,6 +1026,50 @@ async function initialize(): Promise<void> {
       void bridge.showNotification("240ms renderer Long Task 已完成。");
     }
     showToast("Long Task 已完成，等待 PerformanceObserver 采集。");
+  });
+
+  document.querySelector<HTMLButtonElement>("#run-native-scenario")?.addEventListener("click", async (event) => {
+    if (!bridge) {
+      showToast("Native Host 不可用。", "danger");
+      return;
+    }
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      const result = await bridge.runNativeAcceptanceScenario();
+      if (!result.accepted) {
+        showToast(result.reason || "Native 场景命令被拒绝。", "danger");
+        return;
+      }
+      appRoot.dataset.nativeScenarioId = result.scenarioId || "";
+      for (const signal of ["view", "action", "resource", "error", "long_task"]) {
+        markCoverage(signal);
+      }
+      showToast(`Native 全场景已提交 · ${result.scenarioId}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector<HTMLButtonElement>("#crash-native-bridge")?.addEventListener("click", async (event) => {
+    if (!bridge) {
+      showToast("Native Host 不可用。", "danger");
+      return;
+    }
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      const result = await bridge.crashNativeBridge();
+      if (!result.accepted) {
+        showToast(result.reason || "Native 崩溃命令被拒绝。", "danger");
+        return;
+      }
+      appRoot.dataset.nativeCrashRecovery = result.recoveryFilter || "";
+      showToast("Native Bridge 已崩溃，正在自动重启并恢复上报。", "danger");
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.querySelectorAll<HTMLButtonElement>(".segmented-control button").forEach((button) => {

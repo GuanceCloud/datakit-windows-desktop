@@ -277,12 +277,58 @@ std::string json_escape(const std::string& value) {
     return ss.str();
 }
 
+uint32_t replay_adler32(const std::string& value) {
+    constexpr uint32_t modulus = 65521;
+    uint32_t a = 1;
+    uint32_t b = 0;
+    for (const unsigned char byte : value) {
+        a = (a + byte) % modulus;
+        b = (b + a) % modulus;
+    }
+    return (b << 16) | a;
+}
+
+std::string zlib_store(const std::string& value) {
+    constexpr std::size_t max_block_size = 65535;
+    const auto block_count = std::max<std::size_t>(
+        1,
+        (value.size() + max_block_size - 1) / max_block_size);
+    std::string encoded;
+    encoded.reserve(value.size() + 6 + block_count * 5);
+
+    // 0x78 0x01 is a valid zlib header for DEFLATE with no preset dictionary.
+    encoded.push_back(static_cast<char>(0x78));
+    encoded.push_back(static_cast<char>(0x01));
+
+    std::size_t offset = 0;
+    do {
+        const auto block_size = std::min(max_block_size, value.size() - offset);
+        const bool final_block = offset + block_size == value.size();
+        const auto length = static_cast<uint16_t>(block_size);
+        const auto inverse_length = static_cast<uint16_t>(~length);
+        encoded.push_back(final_block ? '\x01' : '\x00');
+        encoded.push_back(static_cast<char>(length & 0xff));
+        encoded.push_back(static_cast<char>((length >> 8) & 0xff));
+        encoded.push_back(static_cast<char>(inverse_length & 0xff));
+        encoded.push_back(static_cast<char>((inverse_length >> 8) & 0xff));
+        encoded.append(value, offset, block_size);
+        offset += block_size;
+    } while (offset < value.size());
+
+    const auto checksum = replay_adler32(value);
+    encoded.push_back(static_cast<char>((checksum >> 24) & 0xff));
+    encoded.push_back(static_cast<char>((checksum >> 16) & 0xff));
+    encoded.push_back(static_cast<char>((checksum >> 8) & 0xff));
+    encoded.push_back(static_cast<char>(checksum & 0xff));
+    return encoded;
+}
+
 std::string multipart_field(const std::string& boundary, const std::string& name, const std::string& value) {
     return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"\r\n\r\n" + value + "\r\n";
 }
 
 std::string multipart_file(const std::string& boundary, const std::string& name, const std::string& filename, const std::string& value) {
-    return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + filename + "\"\r\nContent-Type: application/json\r\n\r\n" + value + "\r\n";
+    return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + filename + "\"\r\nContent-Type: application/octet-stream\r\n\r\n" + value + "\r\n";
 }
 
 bool contains_case_insensitive(std::string value, std::string needle) {
@@ -1560,11 +1606,15 @@ bool RumCore::add_recovered_crash(
     event.fields["crash_process_id"] = static_cast<int64_t>(crash.process_id);
     event.fields["crash_thread_id"] = static_cast<int64_t>(crash.thread_id);
     event.fields["crash_timestamp"] = crash.timestamp_ns;
-    event.fields["crash_has_minidump"] =
+    const bool has_minidump =
         (crash.flags & CrashEnvelopeHasMinidump) != 0 && !minidump_path.empty();
+    event.fields["crash_has_minidump"] = has_minidump;
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native.Monitoring] recovered previous-run crash type="
-                  << (cpp_terminate ? "CppTerminate" : "NativeCrash") << std::endl;
+                  << (cpp_terminate ? "CppTerminate" : "NativeCrash")
+                  << " error_stack=" << (stack.str().empty() ? "<empty>" : stack.str())
+                  << " minidump=" << (has_minidump ? "true" : "false")
+                  << std::endl;
     }
     return enqueue(std::move(event));
 }
@@ -1817,9 +1867,10 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
             << ",\"index_in_view\":" << index_in_view
             << ",\"has_full_snapshot\":" << (has_full_snapshot ? "true" : "false")
             << ",\"source\":\"" << kWindowsReplaySource << "\",\"records\":" << records_json << "}";
-    const auto segment_json = segment.str();
+    const auto segment_json = segment.str() + "\n";
+    const auto compressed_segment = zlib_store(segment_json);
     std::string body;
-    body.reserve(segment_json.size() + 1024);
+    body.reserve(compressed_segment.size() + 1024);
     body += multipart_field(boundary, "records_count", std::to_string(records_count));
     body += multipart_field(boundary, "index_in_view", std::to_string(index_in_view));
     body += multipart_field(boundary, "source", kWindowsReplaySource);
@@ -1836,7 +1887,7 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
     body += multipart_field(boundary, "version", config_.version);
     body += multipart_field(boundary, "raw_segment_size", std::to_string(segment_json.size()));
     body += multipart_field(boundary, "has_full_snapshot", has_full_snapshot ? "true" : "false");
-    body += multipart_file(boundary, "segment", view_id.empty() ? "segment" : view_id, segment_json);
+    body += multipart_file(boundary, "segment", view_id.empty() ? "segment" : view_id, compressed_segment);
     body += "--" + boundary + "--\r\n";
     return {"multipart/form-data; boundary=" + boundary, body};
 }

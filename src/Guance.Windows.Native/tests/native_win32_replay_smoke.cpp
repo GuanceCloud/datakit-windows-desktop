@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <cassert>
+#include <cstdint>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -197,6 +198,72 @@ bool contains(const std::string& text, const std::string& needle) {
     return text.find(needle) != std::string::npos;
 }
 
+std::string multipart_segment(const std::string& request) {
+    const auto segment_part = request.find("name=\"segment\"");
+    assert(segment_part != std::string::npos);
+    assert(contains(
+        request.substr(segment_part, 256),
+        "Content-Type: application/octet-stream"));
+
+    const auto data_marker = request.find("\r\n\r\n", segment_part);
+    assert(data_marker != std::string::npos);
+    const auto data_start = data_marker + 4;
+    const auto data_end = request.find("\r\n--guance-rum-replay-", data_start);
+    assert(data_end != std::string::npos);
+    return request.substr(data_start, data_end - data_start);
+}
+
+uint32_t adler32(const std::string& value) {
+    constexpr uint32_t modulus = 65521;
+    uint32_t a = 1;
+    uint32_t b = 0;
+    for (const unsigned char byte : value) {
+        a = (a + byte) % modulus;
+        b = (b + a) % modulus;
+    }
+    return (b << 16) | a;
+}
+
+std::string inflate_stored_zlib(const std::string& encoded) {
+    assert(encoded.size() >= 6);
+    const auto cmf = static_cast<unsigned char>(encoded[0]);
+    const auto flg = static_cast<unsigned char>(encoded[1]);
+    assert((cmf & 0x0f) == 8);
+    assert(((static_cast<unsigned int>(cmf) << 8) | flg) % 31 == 0);
+    assert((flg & 0x20) == 0);
+
+    std::string decoded;
+    std::size_t offset = 2;
+    bool final_block = false;
+    while (!final_block) {
+        assert(offset + 5 <= encoded.size() - 4);
+        const auto header = static_cast<unsigned char>(encoded[offset++]);
+        final_block = (header & 0x01) != 0;
+        assert((header & 0x06) == 0);
+
+        const auto length =
+            static_cast<uint16_t>(static_cast<unsigned char>(encoded[offset])) |
+            static_cast<uint16_t>(static_cast<unsigned char>(encoded[offset + 1]) << 8);
+        const auto inverse_length =
+            static_cast<uint16_t>(static_cast<unsigned char>(encoded[offset + 2])) |
+            static_cast<uint16_t>(static_cast<unsigned char>(encoded[offset + 3]) << 8);
+        offset += 4;
+        assert(static_cast<uint16_t>(length ^ inverse_length) == 0xffff);
+        assert(offset + length <= encoded.size() - 4);
+        decoded.append(encoded, offset, length);
+        offset += length;
+    }
+
+    assert(offset + 4 == encoded.size());
+    const auto expected_adler =
+        (static_cast<uint32_t>(static_cast<unsigned char>(encoded[offset])) << 24) |
+        (static_cast<uint32_t>(static_cast<unsigned char>(encoded[offset + 1])) << 16) |
+        (static_cast<uint32_t>(static_cast<unsigned char>(encoded[offset + 2])) << 8) |
+        static_cast<uint32_t>(static_cast<unsigned char>(encoded[offset + 3]));
+    assert(adler32(decoded) == expected_adler);
+    return decoded;
+}
+
 } // namespace
 
 int main() {
@@ -279,23 +346,26 @@ int main() {
     assert(contains(request, "name=\"sdk_name\"\r\n\r\ndf_windows_rum_sdk\r\n"));
     assert(contains(request, "name=\"has_full_snapshot\""));
     assert(contains(request, "true"));
-    assert(contains(request, "\"wireframes\":["));
-    assert(contains(request, "\"label\":\"Window\""));
-    assert(!contains(request, "secret-value"));
+    const auto initial_segment = inflate_stored_zlib(multipart_segment(request));
+    assert(contains(initial_segment, "\"wireframes\":["));
+    assert(contains(initial_segment, "\"label\":\"Window\""));
+    assert(!contains(initial_segment, "secret-value"));
     assert(contains(requests[1], "name=\"records_count\"\r\n\r\n3\r\n"));
-    assert(contains(requests[1], "\"source\":2"));
-    assert(contains(requests[1], "Smoke Button"));
-    assert(contains(requests[1], "\"event_type\":\"input\""));
-    assert(contains(requests[1], "Smoke Edit"));
-    assert(!contains(requests[1], "secret-value"));
-    assert(contains(requests[1], "\"source\":4"));
-    assert(contains(requests[1], "Native RUM Smoke"));
+    const auto interaction_segment = inflate_stored_zlib(multipart_segment(requests[1]));
+    assert(contains(interaction_segment, "\"source\":2"));
+    assert(contains(interaction_segment, "Smoke Button"));
+    assert(contains(interaction_segment, "\"event_type\":\"input\""));
+    assert(contains(interaction_segment, "Smoke Edit"));
+    assert(!contains(interaction_segment, "secret-value"));
+    assert(contains(interaction_segment, "\"source\":4"));
+    assert(contains(interaction_segment, "Native RUM Smoke"));
     assert(contains(requests[2], "POST /v1/write/rum/replay"));
     assert(contains(requests[2], "name=\"session_id\"\r\n\r\nbrowser-native-session\r\n"));
     assert(contains(requests[2], "name=\"view_id\"\r\n\r\nbrowser-native-view\r\n"));
-    assert(contains(requests[2], "\"session\":{\"id\":\"browser-native-session\"}"));
-    assert(contains(requests[2], "\"view\":{\"id\":\"browser-native-view\"}"));
-    assert(contains(requests[2], browser_record));
+    const auto browser_segment = inflate_stored_zlib(multipart_segment(requests[2]));
+    assert(contains(browser_segment, "\"session\":{\"id\":\"browser-native-session\"}"));
+    assert(contains(browser_segment, "\"view\":{\"id\":\"browser-native-view\"}"));
+    assert(contains(browser_segment, browser_record));
     assert(contains(requests[3], "POST /v1/write/rum"));
     assert(contains(requests[3], "sdk_name=df_windows_rum_sdk"));
     assert(!contains(requests[3], "df_android_rum_sdk"));

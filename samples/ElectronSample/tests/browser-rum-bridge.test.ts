@@ -147,7 +147,7 @@ function nativeConfiguration() {
 
 describe("Browser RUM WebView-compatible bridge", () => {
   it("executes the production preload and forwards the official bridge contract over IPC", () => {
-    const { exposed, send } = executePreload();
+    const { exposed, invoke, send } = executePreload();
     const bridge = exposed.FTWebViewJavascriptBridge;
     const payload = rumEvent();
 
@@ -156,8 +156,12 @@ describe("Browser RUM WebView-compatible bridge", () => {
     expect(bridge.getPrivacyLevel()).toBe("mask");
     expect(bridge.getAllowedWebViewHosts()).toBeNull();
     bridge.sendEvent(payload);
+    exposed.guanceDesktop.runNativeAcceptanceScenario();
+    exposed.guanceDesktop.crashNativeBridge();
 
     expect(send).toHaveBeenCalledWith("rum:browser-event", payload);
+    expect(invoke).toHaveBeenCalledWith("native:run-acceptance-scenario");
+    expect(invoke).toHaveBeenCalledWith("native:crash-bridge");
   });
 
   it("exposes only the RUM bridge to the remote workspace", () => {
@@ -376,15 +380,28 @@ describe("Electron native host adapter", () => {
       type: "ElectronRendererProcessGone",
       message: "renderer crashed\t(exit 11)",
     })).toBe(true);
+    expect(nativeHost.sendNativeAcceptanceScenario({
+      scenarioId: "native-scenario-1",
+      windowHandle: 12345n,
+      width: 1440,
+      height: 900,
+    })).toBe(true);
+    expect(nativeHost.crashForAcceptance()).toBe(true);
     expect(nativeHost.sendProcessFailure({
       type: "NotTrusted",
       message: "must be rejected",
+    })).toBe(false);
+    expect(nativeHost.sendNativeAcceptanceScenario({
+      scenarioId: "invalid scenario",
+      windowHandle: 12345n,
+      width: 1440,
+      height: 900,
     })).toBe(false);
     nativeHost.configuration.rum.enabled = false;
     expect(nativeHost.send(logEvent(), "main-renderer")).toBe(true);
     expect(nativeHost.send(rumEvent(), "main-renderer")).toBe(false);
 
-    expect(write).toHaveBeenCalledTimes(6);
+    expect(write).toHaveBeenCalledTimes(8);
     expect(write.mock.calls[0][0]).toContain("app_id=win_sample");
     expect(write.mock.calls[0][1]).toBe("utf8");
     expect(write.mock.calls[1][0]).toContain("@guance-log\tstatus=warning\tmessage=");
@@ -404,6 +421,56 @@ describe("Electron native host adapter", () => {
         "message=renderer%20crashed%09(exit%2011)\n",
       "utf8",
     ]);
-    expect(write.mock.calls[5][0]).toContain("@guance-log\tstatus=warning\tmessage=");
+    expect(write.mock.calls[5]).toEqual([
+      "@guance-native-scenario\tscenario_id=native-scenario-1\t" +
+        "window_handle=12345\twidth=1440\theight=900\n",
+      "utf8",
+    ]);
+    expect(write.mock.calls[6]).toEqual(["@guance-native-crash\n", "utf8"]);
+    expect(write.mock.calls[7][0]).toContain("@guance-log\tstatus=warning\tmessage=");
+  });
+
+  it("restarts the native host once after a controlled acceptance crash", async () => {
+    vi.useFakeTimers();
+    try {
+      const createChild = () => Object.assign(new EventEmitter(), {
+        stdin: Object.assign(new EventEmitter(), {
+          writable: true,
+          write: vi.fn(),
+          end: vi.fn(),
+        }),
+        stdout: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
+        stderr: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
+      });
+      const firstChild = createChild();
+      const secondChild = createChild();
+      const spawnProcess = vi.fn()
+        .mockReturnValueOnce(firstChild)
+        .mockReturnValueOnce(secondChild);
+      const nativeHost = new NativeRumHost({
+        paths: {
+          directory: "C:\\native",
+          executablePath: "C:\\native\\guance_windows_electron_bridge.exe",
+          libraryPath: "C:\\native\\guance_windows_native.dll",
+        },
+        configuration: nativeConfiguration(),
+        trustedContext: { tags: {}, fields: {} },
+        spawnProcess,
+        fileExists: () => true,
+        logger: { log: vi.fn(), error: vi.fn() },
+      });
+
+      nativeHost.start();
+      expect(nativeHost.crashForAcceptance()).toBe(true);
+      firstChild.emit("exit", 3, null);
+      expect(nativeHost.child).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+      expect(nativeHost.child).toBe(secondChild);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

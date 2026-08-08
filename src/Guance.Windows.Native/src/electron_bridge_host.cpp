@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <crtdbg.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -9,7 +11,11 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstdint>
+#include <exception>
 #include <iostream>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -26,6 +32,8 @@ constexpr const char* kLaunchCommandPrefix = "@guance-launch\t";
 constexpr const char* kErrorCommandPrefix = "@guance-error\t";
 constexpr const char* kReplayCommandPrefix = "@guance-replay\t";
 constexpr const char* kLogCommandPrefix = "@guance-log\t";
+constexpr const char* kNativeScenarioCommandPrefix = "@guance-native-scenario\t";
+constexpr const char* kNativeCrashCommand = "@guance-native-crash";
 
 std::string utf8_from_wide(const std::wstring& value) {
     if (value.empty()) {
@@ -226,6 +234,11 @@ void log_diagnostics(
     if (guance_sdk_get_diagnostics(handle, &diagnostics) != 1) {
         return;
     }
+    guance_log_diagnostics log_diagnostics{};
+    guance_log_diagnostics_init(&log_diagnostics);
+    if (guance_log_get_diagnostics(handle, &log_diagnostics) != 1) {
+        return;
+    }
     if (has_previous && same_diagnostics(previous, diagnostics)) {
         return;
     }
@@ -246,6 +259,14 @@ void log_diagnostics(
         << " replay_status=" << diagnostics.last_replay_upload_status_code
         << " replay_error=" << diagnostics.last_replay_upload_error_code
         << " replay_latency_ms=" << diagnostics.last_replay_upload_latency_ms
+        << " log_enqueued=" << log_diagnostics.logs_enqueued
+        << " log_dropped=" << log_diagnostics.logs_dropped
+        << " log_success=" << log_diagnostics.upload_success_count
+        << " log_retry=" << log_diagnostics.upload_retry_count
+        << " log_terminal=" << log_diagnostics.upload_terminal_failure_count
+        << " log_status=" << log_diagnostics.last_upload_status_code
+        << " log_error=" << log_diagnostics.last_upload_error_code
+        << " log_latency_ms=" << log_diagnostics.last_upload_latency_ms
         << " cache_bytes=" << diagnostics.cache_allocated_bytes
         << " cache_files=" << diagnostics.cache_file_count
         << std::endl;
@@ -423,6 +444,212 @@ bool valid_log_property_key(const std::string& value) {
                return std::isalnum(character) || character == '_' ||
                       character == '.' || character == '-';
            });
+}
+
+bool valid_scenario_id(const std::string& value) {
+    return !value.empty() && value.size() <= 96 &&
+           std::all_of(value.begin(), value.end(), [](unsigned char character) {
+               return std::isalnum(character) || character == '_' ||
+                      character == '.' || character == '-';
+           });
+}
+
+ControlCommandResult handle_native_scenario_command(
+    guance_sdk_handle handle,
+    const std::string& line,
+    const HostConfiguration& host) {
+    if (line.rfind(kNativeScenarioCommandPrefix, 0) != 0) {
+        return ControlCommandResult::not_command;
+    }
+
+    std::istringstream input(line);
+    std::string part;
+    if (!std::getline(input, part, '\t') || part != "@guance-native-scenario") {
+        return ControlCommandResult::rejected;
+    }
+    std::unordered_map<std::string, std::string> fields;
+    while (std::getline(input, part, '\t')) {
+        const auto separator = part.find('=');
+        if (separator == std::string::npos ||
+            !fields.emplace(part.substr(0, separator), part.substr(separator + 1)).second) {
+            return ControlCommandResult::rejected;
+        }
+    }
+    if (fields.size() != 4) {
+        return ControlCommandResult::rejected;
+    }
+
+    std::string scenario_id;
+    int64_t window_handle_value = 0;
+    int64_t width = 0;
+    int64_t height = 0;
+    if (!percent_decode(fields["scenario_id"], scenario_id) ||
+        !valid_scenario_id(scenario_id) ||
+        !parse_int64(fields["window_handle"], window_handle_value) ||
+        window_handle_value <= 0 ||
+        static_cast<uint64_t>(window_handle_value) >
+            static_cast<uint64_t>((std::numeric_limits<uintptr_t>::max)()) ||
+        !parse_int64(fields["width"], width) || width <= 0 || width > 10000 ||
+        !parse_int64(fields["height"], height) || height <= 0 || height > 10000) {
+        return ControlCommandResult::rejected;
+    }
+
+    const auto window_handle = static_cast<uintptr_t>(window_handle_value);
+    if (!IsWindow(reinterpret_cast<HWND>(window_handle))) {
+        return ControlCommandResult::rejected;
+    }
+
+    guance_rum_add_rum_context(handle, "acceptance_scenario_id", scenario_id.c_str());
+    guance_rum_add_rum_context(handle, "acceptance_origin", "native_cpp");
+    guance_rum_add_rum_context(handle, "desktop_runtime", "electron");
+    guance_rum_start_view(handle, "electron.native.acceptance");
+
+    if (host.session_replay_enabled) {
+        guance_rum_register_replay_window(handle, window_handle);
+        guance_rum_start_session_replay(handle);
+        guance_rum_capture_replay_resize(
+            handle,
+            window_handle,
+            "Electron native acceptance window",
+            static_cast<double>(width),
+            static_cast<double>(height));
+        guance_rum_capture_replay_click(
+            handle,
+            window_handle,
+            "Run complete native scenario",
+            static_cast<double>(width / 2),
+            static_cast<double>(height / 2));
+        guance_rum_capture_replay_input(
+            handle,
+            window_handle,
+            "Native acceptance masked input");
+    }
+
+    const std::string action_id = guance_rum_start_action(
+        handle,
+        "Complete native acceptance scenario",
+        "click");
+    if (action_id.empty()) {
+        guance_rum_stop_view(handle);
+        return ControlCommandResult::rejected;
+    }
+
+    const std::string success_resource_id = guance_rum_start_resource(
+        handle,
+        "https://native.acceptance.guance.invalid/api/orders/42?outcome=success",
+        "GET");
+    if (success_resource_id.empty()) {
+        guance_rum_stop_action(handle, action_id.c_str());
+        guance_rum_stop_view(handle);
+        return ControlCommandResult::rejected;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(24));
+    guance_rum_stop_resource_ext(
+        handle,
+        success_resource_id.c_str(),
+        200,
+        4096,
+        384,
+        "application/json",
+        "0123456789abcdef0123456789abcdef",
+        "0123456789abcdef",
+        "HTTP/2");
+
+    const std::string failure_resource_id = guance_rum_start_resource(
+        handle,
+        "https://native.acceptance.guance.invalid/api/orders/42?outcome=failure",
+        "POST");
+    if (failure_resource_id.empty()) {
+        guance_rum_stop_action(handle, action_id.c_str());
+        guance_rum_stop_view(handle);
+        return ControlCommandResult::rejected;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    guance_rum_stop_resource_ext(
+        handle,
+        failure_resource_id.c_str(),
+        503,
+        512,
+        768,
+        "application/json",
+        "fedcba9876543210fedcba9876543210",
+        "fedcba9876543210",
+        "HTTP/1.1");
+
+    guance_rum_add_long_task(
+        handle,
+        320'000'000,
+        "NativeAcceptanceScenario::Run -> NativeWorker::Complete");
+    guance_rum_add_error(
+        handle,
+        "NativeAcceptanceScenario::Run\nNativeFailureFixture::Emit",
+        "Synthetic handled native acceptance error",
+        "NativeAcceptanceError",
+        "logger");
+
+    const guance_log_property log_properties[] = {
+        {"acceptance_scenario_id", scenario_id.c_str()},
+        {"acceptance_origin", "native_cpp"},
+        {"native_resource_success", "200"},
+        {"native_resource_failure", "503"},
+    };
+    if (host.logging_enabled) {
+        guance_log_add(
+            handle,
+            "Complete Electron native acceptance scenario emitted",
+            "info",
+            log_properties,
+            static_cast<uint32_t>(std::size(log_properties)));
+    }
+
+    guance_rum_stop_action(handle, action_id.c_str());
+    guance_rum_add_action(handle, "Native background synchronization", "custom", 180'000'000);
+    guance_rum_stop_view(handle);
+
+    if (host.debug) {
+        std::cout
+            << "[Guance.RUM.NativeBridge] native acceptance scenario"
+            << " scenario_id=" << scenario_id
+            << " signals=view,action,resource,error,long_task"
+            << " resources=2"
+            << " log=" << (host.logging_enabled ? "enabled" : "disabled")
+            << " replay=" << (host.session_replay_enabled ? "enabled" : "disabled")
+            << std::endl;
+    }
+    return ControlCommandResult::accepted;
+}
+
+__declspec(noinline) void controlled_native_crash_leaf() {
+    *reinterpret_cast<volatile int*>(0x1) = 42;
+}
+
+__declspec(noinline) void controlled_native_crash_worker() {
+    volatile int preserve_frame = 1;
+    controlled_native_crash_leaf();
+    if (preserve_frame != 1) {
+        std::abort();
+    }
+}
+
+[[noreturn]] __declspec(noinline) void trigger_controlled_native_access_violation() {
+    controlled_native_crash_worker();
+    std::abort();
+}
+
+ControlCommandResult handle_native_crash_command(
+    const std::string& line,
+    bool debug) {
+    if (line.rfind(kNativeCrashCommand, 0) != 0) {
+        return ControlCommandResult::not_command;
+    }
+    if (!debug || line != kNativeCrashCommand) {
+        return ControlCommandResult::rejected;
+    }
+
+    std::cout
+        << "[Guance.RUM.NativeBridge] triggering controlled native access violation"
+        << std::endl;
+    trigger_controlled_native_access_violation();
 }
 
 ControlCommandResult handle_log_command(
@@ -620,6 +847,9 @@ ControlCommandResult handle_error_command(
 } // namespace
 
 int main() {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+
     try {
         const auto host = load_configuration();
         if ((host.dataway_url.empty() && host.datakit_url.empty()) || host.app_id.empty()) {
@@ -674,12 +904,27 @@ int main() {
             return 3;
         }
 
+        if (host.debug) {
+            guance_sdk_native_monitoring_config monitoring{};
+            guance_sdk_native_monitoring_config_init(&monitoring);
+            monitoring.enable_native_crash_reporting = 1;
+            monitoring.enable_minidump = 1;
+            if (guance_sdk_enable_native_monitoring(handle, &monitoring) != 1) {
+                guance_sdk_shutdown(handle);
+                std::cerr
+                    << "[Guance.RUM.NativeBridge] native crash reporting configuration failed"
+                    << std::endl;
+                return 3;
+            }
+        }
+
         std::cout
             << "[Guance.RUM.NativeBridge] ready"
             << " transport=" << (host.dataway_url.empty() ? "datakit" : "dataway")
             << " app_id=" << host.app_id
             << " logging=" << (host.logging_enabled ? "enabled" : "disabled")
             << " replay_experimental=" << (host.session_replay_enabled ? "enabled" : "disabled")
+            << " crash_recovery=" << (host.debug ? "enabled" : "disabled")
             << std::endl;
 
         std::atomic<bool> stopping{false};
@@ -708,6 +953,22 @@ int main() {
         while (std::getline(std::cin, line)) {
             if (line.size() >= kMaxInputLineBytes) {
                 std::cerr << "[Guance.RUM.NativeBridge] rejected oversized input line" << std::endl;
+                continue;
+            }
+            const auto scenario_result = handle_native_scenario_command(handle, line, host);
+            if (scenario_result == ControlCommandResult::accepted) {
+                continue;
+            }
+            if (scenario_result == ControlCommandResult::rejected) {
+                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid native scenario command" << std::endl;
+                continue;
+            }
+            const auto crash_result = handle_native_crash_command(line, host.debug);
+            if (crash_result == ControlCommandResult::accepted) {
+                continue;
+            }
+            if (crash_result == ControlCommandResult::rejected) {
+                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid native crash command" << std::endl;
                 continue;
             }
             const auto launch_result = handle_launch_command(handle, line, host.debug);

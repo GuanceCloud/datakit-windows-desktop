@@ -635,6 +635,19 @@ function onTrusted(channel, handler) {
   });
 }
 
+function readNativeWindowHandle(window) {
+  if (!window || window.isDestroyed() || process.platform !== "win32") {
+    return 0n;
+  }
+  const handle = window.getNativeWindowHandle();
+  if (!Buffer.isBuffer(handle) || handle.length < 4) {
+    return 0n;
+  }
+  return handle.length >= 8
+    ? handle.readBigUInt64LE(0)
+    : BigInt(handle.readUInt32LE(0));
+}
+
 async function createRemoteWindow({ forceBuiltIn = false } = {}) {
   const configuredUrl = resolveWebViewUrl(localRumSettingsReader);
   const remoteUrl = !forceBuiltIn && configuredUrl ? configuredUrl : `${apiBaseUrl}/remote/`;
@@ -743,6 +756,34 @@ function registerIpc() {
       return true;
     }
     return false;
+  });
+  handleTrusted("native:run-acceptance-scenario", () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !nativeRumHost) {
+      return { accepted: false, reason: "Native RUM host is unavailable." };
+    }
+    const scenarioId = `native-${crypto.randomUUID()}`;
+    const bounds = mainWindow.getBounds();
+    const accepted = nativeRumHost.sendNativeAcceptanceScenario({
+      scenarioId,
+      windowHandle: readNativeWindowHandle(mainWindow),
+      width: bounds.width,
+      height: bounds.height,
+    });
+    return accepted
+      ? {
+          accepted: true,
+          scenarioId,
+          signals: ["view", "action", "resource", "error", "long_task", "log", "replay"],
+        }
+      : { accepted: false, scenarioId, reason: "Native scenario command was rejected." };
+  });
+  handleTrusted("native:crash-bridge", () => {
+    if (!nativeRumHost) {
+      return { accepted: false, reason: "Native RUM host is unavailable." };
+    }
+    return nativeRumHost.crashForAcceptance()
+      ? { accepted: true, recoveryFilter: "error_origin=native_crash_recovery" }
+      : { accepted: false, reason: "Native crash command was rejected." };
   });
 }
 

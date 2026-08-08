@@ -1,5 +1,6 @@
 #include "line_protocol.h"
 
+#include <algorithm>
 #include <cassert>
 #include <iostream>
 
@@ -19,6 +20,7 @@ int main() {
     event.fields["duration"] = int64_t{123};
     event.fields["ok"] = true;
     event.fields["message"] = std::string{"a \"quoted\" value"};
+    event.fields["multiline"] = std::string{"first\r\nsecond"};
     event.timestamp_ns = 42;
 
     const auto line = guance::rum::format_line_protocol(event);
@@ -26,6 +28,8 @@ int main() {
     assert(line.find("action_name=save\\,button") != std::string::npos);
     assert(line.find("duration=123i") != std::string::npos);
     assert(line.find("message=\"a \\\"quoted\\\" value\"") != std::string::npos);
+    assert(line.find("multiline=\"first\\r\\nsecond\"") != std::string::npos);
+    assert(std::count(line.begin(), line.end(), '\n') == 1);
     assert(line.rfind(" 42\n") == line.size() - 4);
     std::cout << line;
     return 0;

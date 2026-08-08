@@ -67,6 +67,17 @@ export interface DesktopBridge {
     instrumentation?: "built-in" | "external";
   }>;
   showNotification(message: string): Promise<boolean>;
+  runNativeAcceptanceScenario(): Promise<{
+    accepted: boolean;
+    scenarioId?: string;
+    signals?: string[];
+    reason?: string;
+  }>;
+  crashNativeBridge(): Promise<{
+    accepted: boolean;
+    recoveryFilter?: string;
+    reason?: string;
+  }>;
 }
 
 declare global {

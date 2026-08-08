@@ -38,6 +38,14 @@ std::string escape_field_string(std::string value) {
     std::string out;
     out.reserve(value.size());
     for (const char c : value) {
+        if (c == '\r') {
+            out.append("\\r");
+            continue;
+        }
+        if (c == '\n') {
+            out.append("\\n");
+            continue;
+        }
         if (c == '\\' || c == '"') {
             out.push_back('\\');
         }

@@ -101,6 +101,8 @@ class NativeRumHost {
     this.child = undefined;
     this.accepted = 0;
     this.rejected = 0;
+    this.restartAfterCrash = false;
+    this.restartTimer = undefined;
   }
 
   start() {
@@ -131,11 +133,27 @@ class NativeRumHost {
       this.logger.error("[electron-main][rum-bridge] native host failed", error);
     });
     child.once?.("exit", (code, signal) => {
+      const shouldRestart = this.restartAfterCrash;
+      this.restartAfterCrash = false;
       this.logger.log(
         `[electron-main][rum-bridge] native host exited code=${code} signal=${signal || "none"}`,
       );
       if (this.child === child) {
         this.child = undefined;
+      }
+      if (shouldRestart) {
+        this.logger.log("[electron-main][rum-bridge] restarting native host after acceptance crash");
+        this.restartTimer = setTimeout(() => {
+          this.restartTimer = undefined;
+          if (this.child) {
+            return;
+          }
+          try {
+            this.start();
+          } catch (error) {
+            this.logger.error("[electron-main][rum-bridge] native host restart failed", error);
+          }
+        }, 250);
       }
     });
   }
@@ -290,7 +308,91 @@ class NativeRumHost {
     }
   }
 
+  sendNativeAcceptanceScenario({ scenarioId, windowHandle, width, height }) {
+    if (!this.child?.stdin?.writable) {
+      this.rejected += 1;
+      this.logger.error("[electron-main][rum-bridge] native host is unavailable");
+      return false;
+    }
+
+    try {
+      if (!this.configuration.rum.enabled) {
+        throw new Error("RUM collection is not enabled in the native configuration.");
+      }
+      if (typeof scenarioId !== "string" || !/^[A-Za-z0-9_.-]{1,96}$/.test(scenarioId)) {
+        throw new Error("scenarioId must be a safe identifier.");
+      }
+      const handle = launchInteger(windowHandle, "windowHandle");
+      const safeWidth = launchInteger(width, "width");
+      const safeHeight = launchInteger(height, "height");
+      if (handle === "0" || Number(safeWidth) < 1 || Number(safeWidth) > 10_000 ||
+          Number(safeHeight) < 1 || Number(safeHeight) > 10_000) {
+        throw new Error("Native scenario window information is invalid.");
+      }
+
+      const command = [
+        "@guance-native-scenario",
+        `scenario_id=${encodeURIComponent(scenarioId)}`,
+        `window_handle=${handle}`,
+        `width=${safeWidth}`,
+        `height=${safeHeight}`,
+      ].join("\t") + "\n";
+      this.child.stdin.write(command, "utf8");
+      this.accepted += 1;
+      if (this.configuration.runtime.debug) {
+        this.logger.log(
+          `[electron-main][rum-bridge] Electron -> C++ native acceptance ` +
+          `scenario_id=${scenarioId} accepted=${this.accepted}`,
+        );
+      }
+      return true;
+    } catch (error) {
+      this.rejected += 1;
+      this.logger.error(
+        `[electron-main][rum-bridge] rejected native acceptance scenario: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+      return false;
+    }
+  }
+
+  crashForAcceptance() {
+    if (!this.child?.stdin?.writable) {
+      this.rejected += 1;
+      this.logger.error("[electron-main][rum-bridge] native host is unavailable");
+      return false;
+    }
+
+    try {
+      if (!this.configuration.runtime.debug) {
+        throw new Error("Native crash acceptance is available only when debug is enabled.");
+      }
+      this.restartAfterCrash = true;
+      this.child.stdin.write("@guance-native-crash\n", "utf8");
+      this.accepted += 1;
+      this.logger.log(
+        `[electron-main][rum-bridge] controlled native crash accepted=${this.accepted}`,
+      );
+      return true;
+    } catch (error) {
+      this.restartAfterCrash = false;
+      this.rejected += 1;
+      this.logger.error(
+        `[electron-main][rum-bridge] rejected controlled native crash: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+      return false;
+    }
+  }
+
   shutdown() {
+    this.restartAfterCrash = false;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = undefined;
+    }
     const child = this.child;
     this.child = undefined;
     if (!child) {
