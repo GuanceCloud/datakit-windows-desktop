@@ -8,6 +8,9 @@ on:
       - "nuget_*"
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   native:
     runs-on: windows-2022
