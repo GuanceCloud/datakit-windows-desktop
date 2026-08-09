@@ -21,6 +21,21 @@ public sealed class SampleGuanceConfigTests : IDisposable
         "GUANCE_RUM_VERSION",
         "GUANCE_RUM_DEBUG",
         "GUANCE_RUM_SAMPLE_RATE",
+        "GUANCE_LOG_ENABLED",
+        "GUANCE_LOG_SAMPLE_RATE",
+        "GUANCE_TRACE_ENABLED",
+        "GUANCE_TRACE_SAMPLE_RATE",
+        "GUANCE_TRACE_TYPE",
+        "GUANCE_TRACE_ALLOWED_URLS",
+        "GUANCE_RUM_MAX_CACHE_BYTES",
+        "GUANCE_RUM_MAX_CACHE_FILES",
+        "GUANCE_RUM_MAX_CACHE_AGE_SECONDS",
+        "GUANCE_RUM_MAX_BATCH_ITEMS",
+        "GUANCE_RUM_MAX_BATCH_BYTES",
+        "GUANCE_RUM_MAX_UPLOAD_BYTES_PER_SECOND",
+        "GUANCE_RUM_UPLOAD_BURST_BYTES",
+        "GUANCE_RUM_MAX_UPLOAD_REQUESTS_PER_SECOND",
+        "GUANCE_RUM_MAX_UPLOAD_BATCHES_PER_CYCLE",
         "GUANCE_RUM_SESSION_REPLAY_ENABLED",
         "GUANCE_RUM_SESSION_REPLAY_SAMPLE_RATE",
         "GUANCE_RUM_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE",
@@ -97,6 +112,71 @@ public sealed class SampleGuanceConfigTests : IDisposable
         Assert.Equal(SessionReplayTextAndInputPrivacy.MaskSensitiveInputs, config.SessionReplay.TextAndInputPrivacy);
         Assert.Equal(SessionReplayTouchPrivacy.Hide, config.SessionReplay.TouchPrivacy);
         Assert.Equal(SessionReplayImagePrivacy.MaskLargeOnly, config.SessionReplay.ImagePrivacy);
+    }
+
+    [Fact]
+    public void Load_AppliesLoggingTraceCacheAndUploadSettings()
+    {
+        File.WriteAllText(
+            Path.Combine(temporaryDirectory, "rum.local.json"),
+            """
+            {
+              "loggingEnabled": true,
+              "logSampleRate": 60,
+              "traceEnabled": true,
+              "traceSampleRate": 40,
+              "traceType": "w3c_traceparent",
+              "allowedTracingUrls": ["https://api.example.test/v1/"],
+              "maxCacheBytes": 1048576,
+              "maxCacheFiles": 20,
+              "maxCacheAgeSeconds": 3600,
+              "maxBatchItems": 10,
+              "maxBatchBytes": 65536,
+              "maxUploadBytesPerSecond": 32768,
+              "uploadBurstBytes": 131072,
+              "maxUploadRequestsPerSecond": 1.5,
+              "maxUploadBatchesPerCycle": 2,
+              "diagnosticConsoleEnabled": false
+            }
+            """);
+
+        var config = SampleGuanceConfig.Load("default-app", "default-service", Array.Empty<string>());
+
+        Assert.True(config.Logging.EnableCustomLog);
+        Assert.Equal(0.6, config.Logging.SampleRate);
+        Assert.True(config.Trace.EnableAutoTrace);
+        Assert.Equal(0.4, config.Trace.SampleRate);
+        Assert.Equal(TraceType.TraceParent, config.Trace.TraceType);
+        Assert.True(config.Trace.ShouldTrace!(new Uri("https://api.example.test/v1/orders")));
+        Assert.False(config.Trace.ShouldTrace!(new Uri("https://other.example.test/v1/orders")));
+        Assert.Equal(1048576, config.Cache.MaxDiskBytes);
+        Assert.Equal(20, config.Cache.MaxFiles);
+        Assert.Equal(TimeSpan.FromHours(1), config.Cache.MaxAge);
+        Assert.Equal(10, config.Cache.MaxBatchItems);
+        Assert.Equal(65536, config.Cache.MaxBatchBytes);
+        Assert.Equal(32768, config.Upload.MaxBytesPerSecond);
+        Assert.Equal(131072, config.Upload.BurstBytes);
+        Assert.Equal(1.5, config.Upload.MaxRequestsPerSecond);
+        Assert.Equal(2, config.Upload.MaxBatchesPerCycle);
+    }
+
+    [Fact]
+    public void Load_DisablesAutomaticTraceWhenAllowListIsEmpty()
+    {
+        File.WriteAllText(
+            Path.Combine(temporaryDirectory, "rum.local.json"),
+            """
+            {
+              "traceEnabled": true,
+              "allowedTracingUrls": [],
+              "diagnosticConsoleEnabled": false
+            }
+            """);
+
+        var config = SampleGuanceConfig.Load("default-app", "default-service", Array.Empty<string>());
+
+        Assert.False(config.Trace.EnableAutoTrace);
+        Assert.False(config.Trace.ShouldTrace!(new Uri("https://api.example.test/")));
     }
 
     [Fact]

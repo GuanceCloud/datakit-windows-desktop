@@ -16,11 +16,14 @@ public sealed class GuanceTraceListener : TraceListener
         () => new StringBuilder(),
         trackAllValues: true);
 
+    /// <summary>Creates a listener that forwards trace output through the supplied client.</summary>
+    /// <param name="client">The client that accepts forwarded logs.</param>
     public GuanceTraceListener(GuanceClient client)
     {
         this.client = client ?? throw new ArgumentNullException(nameof(client));
     }
 
+    /// <inheritdoc />
     public override void Write(string? message)
     {
         if (message is not null)
@@ -33,6 +36,7 @@ public sealed class GuanceTraceListener : TraceListener
         }
     }
 
+    /// <inheritdoc />
     public override void WriteLine(string? message)
     {
         var buffer = buffers.Value!;
@@ -43,6 +47,7 @@ public sealed class GuanceTraceListener : TraceListener
         }
     }
 
+    /// <inheritdoc />
     public override void TraceEvent(
         TraceEventCache? eventCache,
         string source,
@@ -53,6 +58,7 @@ public sealed class GuanceTraceListener : TraceListener
         Forward(message ?? string.Empty, ToLogStatus(eventType), CreateProperties(source, eventType, id));
     }
 
+    /// <inheritdoc />
     public override void TraceEvent(
         TraceEventCache? eventCache,
         string source,
@@ -67,6 +73,7 @@ public sealed class GuanceTraceListener : TraceListener
         Forward(message, ToLogStatus(eventType), CreateProperties(source, eventType, id));
     }
 
+    /// <inheritdoc />
     public override void Fail(string? message, string? detailMessage)
     {
         var content = string.IsNullOrWhiteSpace(detailMessage)
@@ -75,6 +82,7 @@ public sealed class GuanceTraceListener : TraceListener
         Forward(content, LogStatus.Critical, null);
     }
 
+    /// <inheritdoc />
     public override void Flush()
     {
         foreach (var buffer in buffers.Values)
@@ -88,6 +96,7 @@ public sealed class GuanceTraceListener : TraceListener
         base.Flush();
     }
 
+    /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
         if (disposing)

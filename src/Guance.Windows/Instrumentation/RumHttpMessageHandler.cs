@@ -3,16 +3,21 @@ using System.Net.Http;
 
 namespace Guance.Windows;
 
+/// <summary>Tracks HTTP resources and injects configured trace headers for requests sent through the handler.</summary>
 public sealed class RumHttpMessageHandler : DelegatingHandler
 {
     private readonly GuanceClient client;
 
+    /// <summary>Creates an instrumented HTTP delegating handler.</summary>
+    /// <param name="client">The Guance client that owns the resource lifecycle.</param>
+    /// <param name="innerHandler">The handler that sends the request.</param>
     public RumHttpMessageHandler(GuanceClient client, HttpMessageHandler innerHandler)
         : base(innerHandler)
     {
         this.client = client;
     }
 
+    /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         request.Options.Set(HttpInstrumentationMarks.ManualHandlerInstrumented, true);

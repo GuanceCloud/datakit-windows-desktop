@@ -81,15 +81,20 @@ inline void shutdown_cpp(guance_sdk_handle handle) {
 
 namespace guance::rum {
 
+/** @brief Selects whether a Resource is subject to automatic collection policy. */
 enum class ResourceCollectionKind {
-    manual,
-    automatic
+    manual, /**< Always start a caller-requested Resource. */
+    automatic /**< Apply the configured automatic Resource filter. */
 };
 
-// The SDK handle is non-owning and must remain valid until this scope is
-// completed or destroyed. A scope must not be accessed concurrently.
+/** @brief RAII lifetime for one native RUM Resource.
+ *
+ * The SDK handle is non-owning and must remain valid until this scope is
+ * completed or destroyed. A scope must not be accessed concurrently.
+ */
 class ResourceScope final {
 public:
+    /** Starts a manual or automatically filtered Resource. */
     ResourceScope(
         guance_sdk_handle handle,
         const char* url,
@@ -116,13 +121,17 @@ public:
         }
     }
 
+    /** Stops an incomplete Resource as a failed request. */
     ~ResourceScope() {
         fail();
     }
 
+    /** Resource scopes cannot be copied. */
     ResourceScope(const ResourceScope&) = delete;
+    /** Resource scopes cannot be copy-assigned. */
     ResourceScope& operator=(const ResourceScope&) = delete;
 
+    /** Transfers ownership of an active Resource. */
     ResourceScope(ResourceScope&& other) noexcept
         : handle_(std::exchange(other.handle_, nullptr)),
           resource_id_(std::move(other.resource_id_)),
@@ -131,6 +140,7 @@ public:
         other.resource_type_.clear();
     }
 
+    /** Stops the current Resource, then takes ownership from another scope. */
     ResourceScope& operator=(ResourceScope&& other) noexcept {
         if (this == &other) {
             return *this;
@@ -144,14 +154,17 @@ public:
         return *this;
     }
 
+    /** Returns true while the Resource is active. */
     [[nodiscard]] bool active() const noexcept {
         return handle_ != nullptr && !resource_id_.empty();
     }
 
+    /** Returns the SDK-generated Resource identifier, or an empty string when inactive. */
     [[nodiscard]] const char* id() const noexcept {
         return resource_id_.c_str();
     }
 
+    /** Completes the Resource and attaches response, trace, and protocol metadata. */
     void complete(
         int status_code,
         int64_t response_size = -1,
@@ -176,6 +189,7 @@ public:
         resource_id_.clear();
     }
 
+    /** Completes the Resource without a response status. */
     void fail() noexcept {
         complete(0);
     }

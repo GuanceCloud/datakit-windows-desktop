@@ -17,17 +17,22 @@
 
 namespace guance::rum {
 
+/** @brief WinHTTP request completion model used by WinHttpResource. */
 enum class WinHttpRequestMode {
-    synchronous,
-    asynchronous
+    synchronous, /**< Complete the Resource when WinHttpReceiveResponse returns. */
+    asynchronous /**< The caller completes the Resource from its WinHTTP callback. */
 };
 
-// Non-owning request adapter. The SDK handle and WinHTTP request must outlive
-// this object, and access from WinHTTP callbacks must be externally serialized.
-// For async WinHTTP, keep this object alive through the terminal callback and
-// call complete_from_response after WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE.
+/** @brief Non-owning WinHTTP adapter for RUM Resource and trace propagation.
+ *
+ * The SDK handle and WinHTTP request must outlive this object, and access from
+ * WinHTTP callbacks must be externally serialized. For asynchronous WinHTTP,
+ * keep this object alive through the terminal callback and call
+ * complete_from_response after WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE.
+ */
 class WinHttpResource final {
 public:
+    /** Starts an automatically filtered HTTP Resource and prepares trace headers. */
     WinHttpResource(
         guance_sdk_handle handle,
         HINTERNET request,
@@ -49,13 +54,17 @@ public:
         initialize_trace(handle, url, method);
     }
 
+    /** WinHTTP Resource adapters cannot be copied. */
     WinHttpResource(const WinHttpResource&) = delete;
+    /** WinHTTP Resource adapters cannot be copy-assigned. */
     WinHttpResource& operator=(const WinHttpResource&) = delete;
 
+    /** Stops an incomplete Resource as a failed request. */
     ~WinHttpResource() {
         fail();
     }
 
+    /** Transfers ownership of an active request adapter. */
     WinHttpResource(WinHttpResource&& other) noexcept
         : request_(std::exchange(other.request_, nullptr)),
           request_size_(other.request_size_),
@@ -67,6 +76,7 @@ public:
         other.trace_context_active_ = false;
     }
 
+    /** Stops the current Resource, then takes ownership from another adapter. */
     WinHttpResource& operator=(WinHttpResource&& other) noexcept {
         if (this == &other) {
             return *this;
@@ -83,6 +93,7 @@ public:
         return *this;
     }
 
+    /** Calls WinHttpSendRequest after applying configured trace headers. */
     BOOL send(
         LPCWSTR additional_headers = WINHTTP_NO_ADDITIONAL_HEADERS,
         DWORD headers_length = 0,
@@ -114,6 +125,7 @@ public:
         return sent;
     }
 
+    /** Calls WinHttpReceiveResponse and completes synchronous requests. */
     BOOL receive(LPVOID reserved = nullptr) noexcept {
         if (request_ == nullptr) {
             SetLastError(ERROR_INVALID_HANDLE);
@@ -136,6 +148,7 @@ public:
         return TRUE;
     }
 
+    /** Reads response metadata and completes an asynchronous or synchronous Resource. */
     bool complete_from_response() noexcept {
         if (request_ == nullptr) {
             return false;
@@ -208,6 +221,7 @@ public:
         return has_status != FALSE;
     }
 
+    /** Completes the Resource without a response status. */
     void fail() noexcept {
         resource_.complete(
             0,
@@ -217,6 +231,7 @@ public:
             linked_span_id());
     }
 
+    /** Returns true while the underlying Resource is active. */
     [[nodiscard]] bool active() const noexcept {
         return resource_.active();
     }

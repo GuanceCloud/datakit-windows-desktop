@@ -8,6 +8,7 @@ using Guance.Windows.Transport;
 
 namespace Guance.Windows;
 
+/// <summary>Owns one configured Windows RUM, logging, tracing, Replay, queue, and upload runtime.</summary>
 public sealed class GuanceClient : IAsyncDisposable
 {
     private sealed record DefaultClientComponents(
@@ -84,6 +85,8 @@ public sealed class GuanceClient : IAsyncDisposable
     private string? lastQueueError;
     private volatile bool webViewAutoInstrumentationEnabled = true;
 
+    /// <summary>Creates and starts a client from validated configuration.</summary>
+    /// <param name="config">The immutable SDK configuration.</param>
     public GuanceClient(GuanceConfig config)
         : this(CreateDefaultComponents(config))
     {
@@ -167,8 +170,10 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Gets the configuration used to create this client.</summary>
     public GuanceConfig Config => config;
 
+    /// <summary>Occurs when the SDK emits a transport, queue, or instrumentation diagnostic.</summary>
     public event EventHandler<RumDiagnosticEvent>? DiagnosticEvent;
 
     private static DefaultClientComponents CreateDefaultComponents(GuanceConfig config)
@@ -185,6 +190,7 @@ public sealed class GuanceClient : IAsyncDisposable
             new LogTransport(config));
     }
 
+    /// <summary>Starts forwarding <see cref="Trace" /> output to Guance Logging.</summary>
     public void EnableAutomaticLogCapture()
     {
         if (!config.Logging.EnableCustomLog)
@@ -204,6 +210,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Stops forwarding <see cref="Trace" /> output.</summary>
     public void DisableAutomaticLogCapture()
     {
         lock (automaticLogCaptureGate)
@@ -219,6 +226,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Returns current RUM, Replay, queue, and upload diagnostics.</summary>
     public RumDiagnosticsSnapshot GetDiagnosticsSnapshot()
     {
         lock (stateGate)
@@ -264,6 +272,7 @@ public sealed class GuanceClient : IAsyncDisposable
             config.Cache.MaxFiles);
     }
 
+    /// <summary>Enables the selected automatic UI, HTTP, exception, and launch instrumentation modules.</summary>
     public void EnableAutomaticInstrumentation(AutomaticInstrumentationOptions? options = null)
     {
         if (automaticInstrumentation is null)
@@ -279,16 +288,19 @@ public sealed class GuanceClient : IAsyncDisposable
         automaticInstrumentation.Start();
     }
 
+    /// <summary>Attaches a WinUI 3 window for View and Action instrumentation.</summary>
     public void AttachWinUIWindow(object window, string? viewName = null)
     {
         WinUIReflectionInstrumentation.Attach(this, window, viewName);
     }
 
+    /// <summary>Attaches a supported WebView2 control to the native RUM bridge.</summary>
     public void AttachWebView(object webView)
     {
         webViewInstrumentation.Attach(webView);
     }
 
+    /// <summary>Detaches a previously attached WebView2 control.</summary>
     public void DetachWebView(object webView)
     {
         webViewInstrumentation.Detach(webView);
@@ -315,30 +327,37 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Starts Session Replay recording when Replay is enabled and the session is sampled.</summary>
     public void StartSessionReplayRecording() => sessionReplay.Start();
 
+    /// <summary>Stops Session Replay recording and flushes the active segment.</summary>
     public void StopSessionReplayRecording() => sessionReplay.Stop();
 
+    /// <summary>Overrides text and input privacy for a UI element.</summary>
     public void SetSessionReplayTextAndInputPrivacy(object element, SessionReplayTextAndInputPrivacy? privacy)
     {
         sessionReplayPrivacy.SetTextAndInputPrivacy(element, privacy);
     }
 
+    /// <summary>Overrides pointer and touch privacy for a UI element.</summary>
     public void SetSessionReplayTouchPrivacy(object element, SessionReplayTouchPrivacy? privacy)
     {
         sessionReplayPrivacy.SetTouchPrivacy(element, privacy);
     }
 
+    /// <summary>Overrides image privacy for a UI element.</summary>
     public void SetSessionReplayImagePrivacy(object element, SessionReplayImagePrivacy? privacy)
     {
         sessionReplayPrivacy.SetImagePrivacy(element, privacy);
     }
 
+    /// <summary>Includes or excludes an element subtree from Session Replay.</summary>
     public void SetSessionReplayHidden(object element, bool hidden = true)
     {
         sessionReplayPrivacy.SetHidden(element, hidden);
     }
 
+    /// <summary>Sets user identity and attributes for subsequently created telemetry.</summary>
     public void SetUser(string id, string? name = null, string? email = null, IReadOnlyDictionary<string, object?>? extra = null)
     {
         if (string.IsNullOrWhiteSpace(id))
@@ -349,11 +368,13 @@ public sealed class GuanceClient : IAsyncDisposable
         userInfo = new UserInfo(id, name, email, extra ?? new Dictionary<string, object?>());
     }
 
+    /// <summary>Clears the current user identity for subsequent telemetry.</summary>
     public void ClearUser()
     {
         userInfo = null;
     }
 
+    /// <summary>Adds or replaces a context value shared by RUM and logs.</summary>
     public void AddGlobalContext(string key, object? value)
     {
         lock (stateGate)
@@ -362,6 +383,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Adds or replaces a context value attached only to RUM events.</summary>
     public void AddRumGlobalContext(string key, object? value)
     {
         lock (stateGate)
@@ -370,6 +392,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Starts a RUM View and closes the previous active View.</summary>
     public void StartView(string name, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
@@ -395,6 +418,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Stops the active RUM View.</summary>
     public void StopView(IReadOnlyDictionary<string, object?>? properties = null)
     {
         ActiveView? viewToClose;
@@ -411,6 +435,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Starts a scoped RUM Action that stops when the returned scope is disposed.</summary>
     public RumActionScope StartAction(string name, string type, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
@@ -419,6 +444,7 @@ public sealed class GuanceClient : IAsyncDisposable
         return new RumActionScope(this, action.Id);
     }
 
+    /// <summary>Adds a completed RUM Action with a known duration.</summary>
     public void AddAction(string name, string type, TimeSpan duration, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
@@ -443,6 +469,7 @@ public sealed class GuanceClient : IAsyncDisposable
 
     internal void NotifyApplicationFrameRendered() => applicationLaunch.CompleteFrame();
 
+    /// <summary>Starts a manually tracked RUM Resource and returns its identifier.</summary>
     public string StartResource(string url, string method, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
@@ -452,6 +479,7 @@ public sealed class GuanceClient : IAsyncDisposable
         return resourceId;
     }
 
+    /// <summary>Stops a RUM Resource using explicit phase timing information.</summary>
     public void StopResource(
         string resourceId,
         int statusCode,
@@ -478,6 +506,7 @@ public sealed class GuanceClient : IAsyncDisposable
             MergeResourceTimingProperties(timing, properties));
     }
 
+    /// <summary>Stops a RUM Resource using elapsed time measured since it was started.</summary>
     public void StopResource(
         string resourceId,
         int statusCode,
@@ -568,11 +597,13 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Adds a RUM Error from an exception.</summary>
     public void AddError(Exception exception, IReadOnlyDictionary<string, object?>? properties = null)
     {
         AddError(exception.ToString(), exception.Message, exception.GetType().Name, "logger", properties);
     }
 
+    /// <summary>Adds a RUM Error from explicit stack, message, type, and source values.</summary>
     public void AddError(string stack, string message, string errorType, string source = "logger", IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
@@ -596,6 +627,7 @@ public sealed class GuanceClient : IAsyncDisposable
         IncrementError(view, action);
     }
 
+    /// <summary>Adds a RUM Long Task.</summary>
     public void AddLongTask(TimeSpan duration, string? stack = null, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
@@ -616,6 +648,7 @@ public sealed class GuanceClient : IAsyncDisposable
         IncrementLongTask(view, action);
     }
 
+    /// <summary>Adds a custom log with a predefined status.</summary>
     public void AddLog(
         string content,
         LogStatus status,
@@ -624,6 +657,7 @@ public sealed class GuanceClient : IAsyncDisposable
         AddLog(content, LogStatusNames.ToProtocolValue(status), properties);
     }
 
+    /// <summary>Adds a custom log with an application-defined status.</summary>
     public void AddLog(
         string content,
         string status,
@@ -632,6 +666,7 @@ public sealed class GuanceClient : IAsyncDisposable
         logPipeline.AddLog(content, status, properties);
     }
 
+    /// <summary>Adds a batch of custom logs.</summary>
     public void AddLogs(IEnumerable<LogEntry> logs)
     {
         ArgumentNullException.ThrowIfNull(logs);
@@ -646,16 +681,19 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Returns current log queue and upload diagnostics.</summary>
     public LogDiagnosticsSnapshot GetLogDiagnosticsSnapshot()
     {
         return logPipeline.GetDiagnosticsSnapshot();
     }
 
+    /// <summary>Attempts to upload all currently queued telemetry.</summary>
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
         await uploadScheduler.DrainAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Stops instrumentation, flushes queues, and releases client resources.</summary>
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         DisableAutomaticLogCapture();
@@ -668,6 +706,7 @@ public sealed class GuanceClient : IAsyncDisposable
         shutdown.Cancel();
     }
 
+    /// <summary>Asynchronously shuts down and releases the client.</summary>
     public async ValueTask DisposeAsync()
     {
         await ShutdownAsync().ConfigureAwait(false);

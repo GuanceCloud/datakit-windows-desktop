@@ -1,17 +1,31 @@
 namespace Guance.Windows;
 
+/// <summary>Describes measured or fallback timing information for a RUM resource.</summary>
 public sealed class RumResourceTiming
 {
+    /// <summary>Gets a label identifying the timing provider.</summary>
     public string Source { get; init; } = "manual";
+    /// <summary>Gets the timing precision label, such as phase or total_elapsed_fallback.</summary>
     public string Precision { get; init; } = "phase";
+    /// <summary>Gets a description of the available timing phases.</summary>
     public string? Phase { get; init; }
+    /// <summary>Gets DNS lookup duration when measured.</summary>
     public TimeSpan? Dns { get; init; }
+    /// <summary>Gets TCP connection duration when measured.</summary>
     public TimeSpan? Tcp { get; init; }
+    /// <summary>Gets TLS handshake duration when measured.</summary>
     public TimeSpan? Ssl { get; init; }
+    /// <summary>Gets time to first byte when measured or estimated.</summary>
     public TimeSpan? Ttfb { get; init; }
+    /// <summary>Gets the total resource duration when measured.</summary>
     public TimeSpan? TotalDuration { get; init; }
+    /// <summary>Indicates whether time to first byte is an estimate.</summary>
     public bool TtfbEstimated { get; init; }
 
+    /// <summary>Creates fallback timing when only total elapsed time is available.</summary>
+    /// <param name="elapsed">The measured total elapsed time.</param>
+    /// <param name="source">A label identifying the timing source.</param>
+    /// <returns>A duration-only timing value with estimated TTFB.</returns>
     public static RumResourceTiming FromTotalElapsed(TimeSpan elapsed, string source)
     {
         return new RumResourceTiming
@@ -25,6 +39,14 @@ public sealed class RumResourceTiming
         };
     }
 
+    /// <summary>Creates timing from independently measured network phases.</summary>
+    /// <param name="dns">DNS lookup duration.</param>
+    /// <param name="tcp">TCP connection duration.</param>
+    /// <param name="ssl">TLS handshake duration.</param>
+    /// <param name="ttfb">Time to first byte.</param>
+    /// <param name="totalDuration">Total resource duration.</param>
+    /// <param name="source">A label identifying the timing source.</param>
+    /// <returns>A phase-precision timing value.</returns>
     public static RumResourceTiming FromPhases(
         TimeSpan? dns = null,
         TimeSpan? tcp = null,

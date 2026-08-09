@@ -10,6 +10,7 @@ public partial class App : Application
     {
         GuanceSdk.Init(SampleGuanceConfig.Load("rum-wpf-demo", "wpf-sample", e.Args));
         GuanceSdk.EnableAutomaticInstrumentation();
+        GuanceSdk.AddLog("WPF sample started.", LogStatus.Info);
         base.OnStartup(e);
     }
 

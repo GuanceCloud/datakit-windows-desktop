@@ -15,6 +15,7 @@ public partial class App : Application
         InitializeComponent();
         GuanceSdk.Init(SampleGuanceConfig.Load("rum-winui-demo", "winui-sample"));
         GuanceSdk.EnableAutomaticInstrumentation();
+        GuanceSdk.AddLog("WinUI 3 sample started.", LogStatus.Info);
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

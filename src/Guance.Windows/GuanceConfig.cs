@@ -2,6 +2,7 @@ using System.Net.Http;
 
 namespace Guance.Windows;
 
+/// <summary>Configures transport, RUM, logging, tracing, privacy, caching, and upload behavior.</summary>
 public sealed class GuanceConfig
 {
     private static readonly HashSet<string> SupportedEnvironments = new(StringComparer.OrdinalIgnoreCase)
@@ -13,28 +14,51 @@ public sealed class GuanceConfig
         "local"
     };
 
+    /// <summary>Gets the public DataWay intake base URL.</summary>
     public string? DatawayUrl { get; init; }
+    /// <summary>Gets the local DataKit intake base URL.</summary>
     public string? DatakitUrl { get; init; }
+    /// <summary>Gets the DataWay client token. It is not required for local DataKit intake.</summary>
     public string? ClientToken { get; init; }
+    /// <summary>Gets the RUM application identifier created in Guance.</summary>
     public string RumAppId { get; init; } = string.Empty;
+    /// <summary>Gets the service name attached to RUM and log data.</summary>
     public string ServiceName { get; init; } = "df_rum_windows";
+    /// <summary>Gets the deployment environment: prod, gray, pre, common, or local.</summary>
     public string Env { get; init; } = "prod";
+    /// <summary>Gets the monitored application version.</summary>
     public string Version { get; init; } = "1.0.0";
+    /// <summary>Enables SDK diagnostic output.</summary>
     public bool Debug { get; init; }
+    /// <summary>Gets the normal RUM session sampling rate in the inclusive range 0 through 1.</summary>
     public double SampleRate { get; init; } = 1.0;
+    /// <summary>Gets the additional error-session sampling rate in the inclusive range 0 through 1.</summary>
     public double SessionErrorSampleRate { get; init; }
+    /// <summary>Gets distributed trace propagation settings.</summary>
     public TraceConfig Trace { get; init; } = new();
+    /// <summary>Gets application logging settings.</summary>
     public LogConfig Logging { get; init; } = new();
+    /// <summary>Gets URL and HTTP header privacy settings.</summary>
     public RumPrivacyConfig Privacy { get; init; } = new();
+    /// <summary>Gets experimental Session Replay settings.</summary>
     public RumSessionReplayConfig SessionReplay { get; init; } = new();
+    /// <summary>Gets shared disk-cache settings.</summary>
     public CacheOptions Cache { get; init; } = new();
+    /// <summary>Gets aggregate telemetry upload limits.</summary>
     public UploadOptions Upload { get; init; } = new();
+    /// <summary>Gets the interval between scheduled queue-drain attempts.</summary>
     public TimeSpan FlushInterval { get; init; } = TimeSpan.FromSeconds(15);
+    /// <summary>Gets the timeout applied to intake HTTP requests.</summary>
     public TimeSpan HttpTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    /// <summary>Enables compression of intake request bodies.</summary>
     public bool CompressIntakeRequests { get; init; }
+    /// <summary>Gets an optional directory for persistent telemetry queues.</summary>
     public string? CacheDirectory { get; init; }
+    /// <summary>Gets an optional factory for the HTTP handler used by intake transports.</summary>
     public Func<HttpMessageHandler>? HttpMessageHandlerFactory { get; init; }
+    /// <summary>Gets an optional provider for precise HTTP resource phase timings.</summary>
     public RumHttpResourceTimingProvider? HttpResourceTimingProvider { get; init; }
+    /// <summary>Gets an optional callback for SDK diagnostic events.</summary>
     public Action<RumDiagnosticEvent>? DiagnosticListener { get; init; }
 
     internal void Validate()

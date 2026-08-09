@@ -442,12 +442,15 @@ public partial class MainWindow : Window
         RunSample("Diagnostics snapshot", () =>
         {
             var snapshot = GuanceSdk.GetDiagnosticsSnapshot();
+            var cache = GuanceSdk.GetCacheDiagnosticsSnapshot();
+            var logs = GuanceSdk.GetLogDiagnosticsSnapshot();
             AppendLog(
                 $"Snapshot session={snapshot.SessionId} sampled={snapshot.SessionSampled} " +
                 $"activeView={snapshot.HasActiveView} activeActions={snapshot.ActiveActionCount} " +
                 $"activeResources={snapshot.ActiveResourceCount} enqueued={snapshot.RumEventsEnqueued} " +
                 $"rumOk={snapshot.RumUploadSuccessCount} replayOk={snapshot.ReplayUploadSuccessCount} " +
-                $"lastRumStatus={snapshot.LastRumUploadStatusCode}");
+                $"lastRumStatus={snapshot.LastRumUploadStatusCode} cacheBytes={cache.AllocatedBytes} " +
+                $"logsEnqueued={logs.LogsEnqueued} logUploadOk={logs.UploadSuccessCount}");
         });
     }
 

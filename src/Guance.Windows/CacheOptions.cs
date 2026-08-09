@@ -42,6 +42,10 @@ public sealed class CacheOptions
     /// currently above their share.
     /// </summary>
     public double RumShare { get; init; } = 0.25;
+
+    /// <summary>Soft share of the cache reserved for log batches.</summary>
     public double LogShare { get; init; } = 0.15;
+
+    /// <summary>Soft share of the cache reserved for Session Replay segments.</summary>
     public double SessionReplayShare { get; init; } = 0.60;
 }

@@ -33,7 +33,10 @@ public sealed class UploadOptions
     /// </summary>
     public int MaxBatchesPerCycle { get; init; } = 4;
 
+    /// <summary>Gets the relative scheduling weight for RUM uploads.</summary>
     public int RumWeight { get; init; } = 4;
+    /// <summary>Gets the relative scheduling weight for log uploads.</summary>
     public int LogWeight { get; init; } = 2;
+    /// <summary>Gets the relative scheduling weight for Session Replay uploads.</summary>
     public int SessionReplayWeight { get; init; } = 1;
 }

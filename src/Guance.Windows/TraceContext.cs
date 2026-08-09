@@ -7,6 +7,10 @@ namespace Guance.Windows;
 /// </summary>
 public sealed class TraceContext
 {
+    /// <summary>Creates a custom trace context.</summary>
+    /// <param name="headers">Headers to add to the outgoing request.</param>
+    /// <param name="traceId">The trace identifier associated with the RUM resource.</param>
+    /// <param name="spanId">The span identifier associated with the RUM resource.</param>
     public TraceContext(
         IReadOnlyDictionary<string, string> headers,
         string? traceId,
@@ -35,7 +39,10 @@ public sealed class TraceContext
         SpanId = spanId;
     }
 
+    /// <summary>Gets the case-insensitive request headers to inject.</summary>
     public IReadOnlyDictionary<string, string> Headers { get; }
+    /// <summary>Gets the trace identifier used for RUM correlation.</summary>
     public string? TraceId { get; }
+    /// <summary>Gets the span identifier used for RUM correlation.</summary>
     public string? SpanId { get; }
 }

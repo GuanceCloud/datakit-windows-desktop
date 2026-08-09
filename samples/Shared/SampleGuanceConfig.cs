@@ -74,6 +74,28 @@ internal static class SampleGuanceConfig
             SampleRate = PercentageToRate(settings.SessionSampleRate ?? 100),
             Debug = settings.Debug ?? true,
             DiagnosticListener = settings.DiagnosticConsoleEnabled == true ? LogDiagnostic : null,
+            Logging = new LogConfig
+            {
+                EnableCustomLog = settings.LoggingEnabled ?? false,
+                EnableLinkRumData = true,
+                SampleRate = PercentageToRate(settings.LogSampleRate ?? 100)
+            },
+            Trace = CreateTraceConfig(settings),
+            Cache = new CacheOptions
+            {
+                MaxDiskBytes = settings.MaxCacheBytes ?? 128L * 1024 * 1024,
+                MaxFiles = settings.MaxCacheFiles ?? 1_024,
+                MaxAge = TimeSpan.FromSeconds(settings.MaxCacheAgeSeconds ?? 7L * 24 * 60 * 60),
+                MaxBatchItems = settings.MaxBatchItems ?? 50,
+                MaxBatchBytes = settings.MaxBatchBytes ?? 512L * 1024
+            },
+            Upload = new UploadOptions
+            {
+                MaxBytesPerSecond = settings.MaxUploadBytesPerSecond ?? 256L * 1024,
+                BurstBytes = settings.UploadBurstBytes ?? 2L * 1024 * 1024,
+                MaxRequestsPerSecond = settings.MaxUploadRequestsPerSecond ?? 2,
+                MaxBatchesPerCycle = settings.MaxUploadBatchesPerCycle ?? 4
+            },
             SessionReplay = new RumSessionReplayConfig
             {
                 Enabled = settings.SessionReplayEnabled ?? false,
@@ -91,6 +113,24 @@ internal static class SampleGuanceConfig
             }
         };
         return new SampleRumSettings(rum, EmptyToNull(settings.WebViewUrl));
+    }
+
+    private static TraceConfig CreateTraceConfig(LocalRumSettings settings)
+    {
+        var allowedUrls = (settings.AllowedTracingUrls ?? Array.Empty<string>())
+            .Select(value => Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null)
+            .Where(uri => uri is not null && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            .Cast<Uri>()
+            .ToArray();
+
+        return new TraceConfig
+        {
+            EnableAutoTrace = settings.TraceEnabled == true && allowedUrls.Length > 0,
+            EnableLinkRumData = true,
+            SampleRate = PercentageToRate(settings.TraceSampleRate ?? 100),
+            TraceType = ParseTraceType(settings.TraceType),
+            ShouldTrace = requestUri => allowedUrls.Any(allowed => allowed.IsBaseOf(requestUri))
+        };
     }
 
     private static void ApplyJsonSettings(LocalRumSettings settings)
@@ -122,6 +162,21 @@ internal static class SampleGuanceConfig
             Version = Environment.GetEnvironmentVariable("GUANCE_RUM_VERSION"),
             Debug = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DEBUG")),
             SessionSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SAMPLE_RATE")),
+            LoggingEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_LOG_ENABLED")),
+            LogSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_LOG_SAMPLE_RATE")),
+            TraceEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_TRACE_ENABLED")),
+            TraceSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_TRACE_SAMPLE_RATE")),
+            TraceType = Environment.GetEnvironmentVariable("GUANCE_TRACE_TYPE"),
+            AllowedTracingUrls = SplitList(Environment.GetEnvironmentVariable("GUANCE_TRACE_ALLOWED_URLS")),
+            MaxCacheBytes = ParseLong(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_CACHE_BYTES")),
+            MaxCacheFiles = ParseInt(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_CACHE_FILES")),
+            MaxCacheAgeSeconds = ParseLong(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_CACHE_AGE_SECONDS")),
+            MaxBatchItems = ParseInt(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_BATCH_ITEMS")),
+            MaxBatchBytes = ParseLong(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_BATCH_BYTES")),
+            MaxUploadBytesPerSecond = ParseLong(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_UPLOAD_BYTES_PER_SECOND")),
+            UploadBurstBytes = ParseLong(Environment.GetEnvironmentVariable("GUANCE_RUM_UPLOAD_BURST_BYTES")),
+            MaxUploadRequestsPerSecond = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_UPLOAD_REQUESTS_PER_SECOND")),
+            MaxUploadBatchesPerCycle = ParseInt(Environment.GetEnvironmentVariable("GUANCE_RUM_MAX_UPLOAD_BATCHES_PER_CYCLE")),
             SessionReplayEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY_ENABLED")),
             SessionReplaySampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY_SAMPLE_RATE")),
             SessionReplayOnErrorSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE")),
@@ -169,6 +224,24 @@ internal static class SampleGuanceConfig
                 case "--session-sample-rate":
                     commandLine.SessionSampleRate = ParseDouble(value);
                     break;
+                case "--logging-enabled":
+                    commandLine.LoggingEnabled = ParseBool(value);
+                    break;
+                case "--log-sample-rate":
+                    commandLine.LogSampleRate = ParseDouble(value);
+                    break;
+                case "--trace-enabled":
+                    commandLine.TraceEnabled = ParseBool(value);
+                    break;
+                case "--trace-sample-rate":
+                    commandLine.TraceSampleRate = ParseDouble(value);
+                    break;
+                case "--trace-type":
+                    commandLine.TraceType = value;
+                    break;
+                case "--allowed-tracing-urls":
+                    commandLine.AllowedTracingUrls = SplitList(value);
+                    break;
                 case "--session-replay-enabled":
                     commandLine.SessionReplayEnabled = ParseBool(value);
                     break;
@@ -215,6 +288,24 @@ internal static class SampleGuanceConfig
         target.Version = Coalesce(source.Version, target.Version);
         target.Debug = source.Debug ?? target.Debug;
         target.SessionSampleRate = source.SessionSampleRate ?? target.SessionSampleRate;
+        target.LoggingEnabled = source.LoggingEnabled ?? target.LoggingEnabled;
+        target.LogSampleRate = source.LogSampleRate ?? target.LogSampleRate;
+        target.TraceEnabled = source.TraceEnabled ?? target.TraceEnabled;
+        target.TraceSampleRate = source.TraceSampleRate ?? target.TraceSampleRate;
+        target.TraceType = Coalesce(source.TraceType, target.TraceType);
+        if (source.AllowedTracingUrls is not null)
+        {
+            target.AllowedTracingUrls = source.AllowedTracingUrls;
+        }
+        target.MaxCacheBytes = source.MaxCacheBytes ?? target.MaxCacheBytes;
+        target.MaxCacheFiles = source.MaxCacheFiles ?? target.MaxCacheFiles;
+        target.MaxCacheAgeSeconds = source.MaxCacheAgeSeconds ?? target.MaxCacheAgeSeconds;
+        target.MaxBatchItems = source.MaxBatchItems ?? target.MaxBatchItems;
+        target.MaxBatchBytes = source.MaxBatchBytes ?? target.MaxBatchBytes;
+        target.MaxUploadBytesPerSecond = source.MaxUploadBytesPerSecond ?? target.MaxUploadBytesPerSecond;
+        target.UploadBurstBytes = source.UploadBurstBytes ?? target.UploadBurstBytes;
+        target.MaxUploadRequestsPerSecond = source.MaxUploadRequestsPerSecond ?? target.MaxUploadRequestsPerSecond;
+        target.MaxUploadBatchesPerCycle = source.MaxUploadBatchesPerCycle ?? target.MaxUploadBatchesPerCycle;
         target.SessionReplayEnabled = source.SessionReplayEnabled ?? target.SessionReplayEnabled;
         target.SessionReplaySampleRate = source.SessionReplaySampleRate ?? target.SessionReplaySampleRate;
         target.SessionReplayOnErrorSampleRate = source.SessionReplayOnErrorSampleRate ?? target.SessionReplayOnErrorSampleRate;
@@ -347,6 +438,23 @@ internal static class SampleGuanceConfig
             : null;
     }
 
+    private static int? ParseInt(string? value)
+    {
+        return int.TryParse(value, out var result) ? result : null;
+    }
+
+    private static long? ParseLong(string? value)
+    {
+        return long.TryParse(value, out var result) ? result : null;
+    }
+
+    private static string[]? SplitList(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
     private static double PercentageToRate(double value)
     {
         return Math.Clamp(value, 0, 100) / 100;
@@ -356,6 +464,20 @@ internal static class SampleGuanceConfig
         where T : struct, Enum
     {
         return Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;
+    }
+
+    private static TraceType ParseTraceType(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "ddtrace" or "dd_trace" => TraceType.DdTrace,
+            "zipkin_multi_header" => TraceType.ZipkinMultiHeader,
+            "zipkin_single_header" => TraceType.ZipkinSingleHeader,
+            "traceparent" or "w3c_traceparent" => TraceType.TraceParent,
+            "skywalking" => TraceType.SkyWalking,
+            "jaeger" => TraceType.Jaeger,
+            _ => TraceType.DdTrace
+        };
     }
 
     private sealed class LocalRumSettings
@@ -368,6 +490,21 @@ internal static class SampleGuanceConfig
         public string? Env { get; set; }
         public string? Version { get; set; }
         public double? SessionSampleRate { get; set; }
+        public bool? LoggingEnabled { get; set; }
+        public double? LogSampleRate { get; set; }
+        public bool? TraceEnabled { get; set; }
+        public double? TraceSampleRate { get; set; }
+        public string? TraceType { get; set; }
+        public string[]? AllowedTracingUrls { get; set; }
+        public long? MaxCacheBytes { get; set; }
+        public int? MaxCacheFiles { get; set; }
+        public long? MaxCacheAgeSeconds { get; set; }
+        public int? MaxBatchItems { get; set; }
+        public long? MaxBatchBytes { get; set; }
+        public long? MaxUploadBytesPerSecond { get; set; }
+        public long? UploadBurstBytes { get; set; }
+        public double? MaxUploadRequestsPerSecond { get; set; }
+        public int? MaxUploadBatchesPerCycle { get; set; }
         public bool? SessionReplayEnabled { get; set; }
         public double? SessionReplaySampleRate { get; set; }
         public double? SessionReplayOnErrorSampleRate { get; set; }
