@@ -21,6 +21,7 @@ Set-StrictMode -Version Latest
 Repair-ProcessPath
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+$solution = Join-Path $repositoryRoot "Guance.Windows.sln"
 $project = Join-Path $repositoryRoot "src\Guance.Windows\Guance.Windows.csproj"
 $tests = Join-Path $repositoryRoot "tests\Guance.Windows.Tests\Guance.Windows.Tests.csproj"
 $resolver = Join-Path $PSScriptRoot "resolve-release-tag.ps1"
@@ -48,7 +49,11 @@ $isReleaseBuild = $PSBoundParameters.ContainsKey("ReleaseTag")
 if (-not $PSBoundParameters.ContainsKey("PackageVersion") -and
     -not $PSBoundParameters.ContainsKey("ReleaseTag")) {
     [xml]$projectXml = Get-Content -LiteralPath $project -Raw
-    $PackageVersion = [string]($projectXml.Project.PropertyGroup.Version | Select-Object -First 1)
+    $versionNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Version")
+    if ($null -eq $versionNode) {
+        throw "Package version was not found in $project."
+    }
+    $PackageVersion = [string]$versionNode.InnerText
 }
 
 $semverPattern = "^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:alpha|beta)\.(?:[1-9][0-9]*))?$"
@@ -63,7 +68,7 @@ $outputPath = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 }
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
-Invoke-DotNet -Arguments @("restore", $project)
+Invoke-DotNet -Arguments @("restore", $solution)
 if (-not $SkipTests) {
     Invoke-DotNet -Arguments @("test", $tests, "-c", $Configuration, "--no-restore")
 }
