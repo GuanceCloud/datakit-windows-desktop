@@ -26,4 +26,6 @@ dist-*/
 release/
 samples/rum.local.json
 /docs/
+/.preview/
+/tools/windows-doc-preview/
 /.worktrees/

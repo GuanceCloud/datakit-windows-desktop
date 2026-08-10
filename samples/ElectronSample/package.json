@@ -12,7 +12,7 @@
     "electron:install": "node node_modules/electron/install.js",
     "dev": "npm run electron:install && npm run build && concurrently --kill-others --success command-electron --names renderer,electron \"vite --host 127.0.0.1\" \"wait-on http-get://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "tsc --noEmit && vite build",
-    "native:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../../build/native-windows.ps1",
+    "native:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../../build/native-windows-cmake.ps1 -TargetArch x64 -Configuration Release",
     "start": "npm run electron:install && npm run build && electron .",
     "smoke": "npm run electron:install && npm run build && cross-env ELECTRON_SMOKE=1 electron .",
     "package:win": "npm run native:build && node scripts/package-windows.mjs",
