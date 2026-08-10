@@ -21,8 +21,21 @@ const char* const kDefaultRedactedQueryParameterNames[] = {
     "password",
     "passwd",
     "secret",
+    "client_secret",
     "api_key",
-    "apikey"
+    "apikey",
+    "auth",
+    "authorization"
+};
+
+const char* const kDefaultRedactedHeaderNames[] = {
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "x-datakit-token"
 };
 
 thread_local unsigned int suppression_depth = 0;
@@ -105,7 +118,19 @@ ResourceCollectionConfig default_resource_collection_config() {
     config.redacted_query_parameter_names.assign(
         std::begin(kDefaultRedactedQueryParameterNames),
         std::end(kDefaultRedactedQueryParameterNames));
+    config.redacted_header_names.assign(
+        std::begin(kDefaultRedactedHeaderNames),
+        std::end(kDefaultRedactedHeaderNames));
     return config;
+}
+
+const char* const* default_redacted_header_names() noexcept {
+    return kDefaultRedactedHeaderNames;
+}
+
+uint32_t default_redacted_header_name_count() noexcept {
+    return static_cast<uint32_t>(
+        sizeof(kDefaultRedactedHeaderNames) / sizeof(kDefaultRedactedHeaderNames[0]));
 }
 
 const char* const* default_redacted_query_parameter_names() noexcept {
@@ -135,13 +160,32 @@ bool resource_collection_config_from_c(
         return false;
     }
 
-    ResourceCollectionConfig parsed;
+    ResourceCollectionConfig parsed = default_resource_collection_config();
     parsed.enabled = source.enabled != 0;
     parsed.capture_url_query = source.capture_url_query != 0;
     parsed.redact_all_url_query_values = source.redact_all_url_query_values != 0;
     parsed.redacted_value = source.redacted_value;
     parsed.should_collect = source.should_collect;
     parsed.user_data = source.user_data;
+    constexpr std::size_t extended_size =
+        offsetof(guance_rum_resource_collection_config, redacted_header_name_count) +
+        sizeof(source.redacted_header_name_count);
+    if (source.struct_size >= extended_size) {
+        if (source.redacted_header_name_count > kMaxRedactedQueryParameterNames ||
+            (source.redacted_header_name_count > 0 && source.redacted_header_names == nullptr)) {
+            return false;
+        }
+        parsed.capture_http_headers = source.capture_http_headers != 0;
+        parsed.redacted_header_names.clear();
+        parsed.redacted_header_names.reserve(source.redacted_header_name_count);
+        for (uint32_t index = 0; index < source.redacted_header_name_count; ++index) {
+            const char* name = source.redacted_header_names[index];
+            if (name == nullptr || name[0] == '\0') {
+                return false;
+            }
+            parsed.redacted_header_names.push_back(ascii_lower(name));
+        }
+    }
     parsed.redacted_query_parameter_names.reserve(source.redacted_query_parameter_name_count);
     for (uint32_t index = 0; index < source.redacted_query_parameter_name_count; ++index) {
         const char* name = source.redacted_query_parameter_names[index];
@@ -153,6 +197,47 @@ bool resource_collection_config_from_c(
 
     destination = std::move(parsed);
     return true;
+}
+
+std::string sanitize_http_headers(
+    const std::string& headers,
+    const ResourceCollectionConfig& config) {
+    if (!config.capture_http_headers) {
+        return {};
+    }
+
+    std::istringstream input(headers);
+    std::ostringstream output;
+    std::string line;
+    bool first = true;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const auto separator = line.find(':');
+        std::string header_name = separator == std::string::npos
+            ? std::string{}
+            : line.substr(0, separator);
+        while (!header_name.empty() && std::isspace(static_cast<unsigned char>(header_name.back()))) {
+            header_name.pop_back();
+        }
+        const auto first_name_character = std::find_if_not(
+            header_name.begin(),
+            header_name.end(),
+            [](unsigned char character) { return std::isspace(character); });
+        header_name.erase(header_name.begin(), first_name_character);
+        if (separator != std::string::npos &&
+            contains_name(config.redacted_header_names, ascii_lower(std::move(header_name)))) {
+            const bool has_space = separator + 1 < line.size() && line[separator + 1] == ' ';
+            line = line.substr(0, separator + 1) + (has_space ? " " : "") + config.redacted_value;
+        }
+        if (!first) {
+            output << '\n';
+        }
+        first = false;
+        output << line;
+    }
+    return output.str();
 }
 
 bool should_collect_resource(

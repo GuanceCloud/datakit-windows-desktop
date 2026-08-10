@@ -326,7 +326,7 @@ internal sealed class WebViewInstrumentationManager : IDisposable
             {
                 case "view":
                     context["view_type"] = "webview";
-                    var fallbackName = HttpHeaderRedactor.RedactUrl(message.Url!, client.Config.Privacy);
+                    var fallbackName = message.Url!;
                     client.StartView(
                         string.IsNullOrWhiteSpace(message.Title) ? fallbackName : message.Title!,
                         context);
@@ -410,7 +410,7 @@ internal sealed class WebViewInstrumentationManager : IDisposable
             var context = new Dictionary<string, object?>(StringComparer.Ordinal);
             if (!string.IsNullOrWhiteSpace(url))
             {
-                context["webview_url"] = HttpHeaderRedactor.RedactUrl(url, client.Config.Privacy);
+                context["webview_url"] = url;
             }
             if (!string.IsNullOrWhiteSpace(hostViewId))
             {

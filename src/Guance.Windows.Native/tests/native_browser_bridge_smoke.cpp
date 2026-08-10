@@ -22,6 +22,24 @@ void require(bool condition, const char* message) {
     }
 }
 
+int modify_browser_data(
+    const char* key,
+    const guance_data_value*,
+    guance_data_value* replacement,
+    void*) {
+    if (std::string(key) == "browser_numeric_tag") {
+        replacement->type = GUANCE_DATA_VALUE_INT64;
+        replacement->value.int64_value = 42;
+        return 1;
+    }
+    if (std::string(key) == "is_active") {
+        replacement->type = GUANCE_DATA_VALUE_BOOL;
+        replacement->value.bool_value = 1;
+        return 1;
+    }
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -39,6 +57,12 @@ int main() {
 
     guance_sdk_handle handle = guance_sdk_init(&config);
     require(handle != nullptr, "native core failed to initialize");
+    guance_data_modifier_config modifiers{};
+    guance_data_modifier_config_init(&modifiers);
+    modifiers.data_modifier = modify_browser_data;
+    require(
+        guance_configure_data_modifiers(handle, &modifiers) == 1,
+        "native browser modifiers failed to configure");
 
     const std::array<const char*, 5> measurements{
         "view",
@@ -49,9 +73,15 @@ int main() {
     };
     std::string valid;
     for (const char* measurement : measurements) {
-        valid =
-            std::string(measurement) +
-            ",app_id=electron-browser-bridge-smoke,sdk_name=df_windows_rum_sdk "
+        const std::string resource_url = std::string(measurement) == "resource"
+            ? ",resource_url=https://api.example.test/items?token\\=secret"
+            : "";
+        const std::string view_referrer = std::string(measurement) == "view"
+            ? ",view_referrer=https://ref.example.test/?token\\=secret"
+            : "";
+        valid = std::string(measurement) +
+            ",app_id=electron-browser-bridge-smoke,browser_numeric_tag=raw,sdk_name=df_windows_rum_sdk" +
+            resource_url + view_referrer + " "
             "is_active=false,time_spent=1i 1722300000000000000\n";
         require(
             guance_sdk_write_line(handle, valid.data(), valid.size()) == 1,
@@ -146,6 +176,16 @@ int main() {
             queued_lines.find("action_type=launch_hot") != std::string::npos &&
                 queued_lines.find("action_name=app\\ hot\\ start") != std::string::npos,
             "hot launch action contract was not persisted");
+        require(
+            queued_lines.find("is_active=true") != std::string::npos,
+            "browser bridge data modifier was bypassed");
+        require(
+            queued_lines.find("browser_numeric_tag=42") != std::string::npos,
+            "browser bridge tag modifier did not preserve replacement semantics");
+        require(
+            queued_lines.find("token\\=%3Credacted%3E") != std::string::npos &&
+                queued_lines.find("token\\=secret") == std::string::npos,
+            "browser bridge URL privacy was bypassed");
     }
 
     guance_sdk_shutdown(handle);

@@ -25,6 +25,7 @@ if(MSVC)
 endif()
 
 add_library(guance_windows_native
+    src/data_modifier.cpp
     src/guance_sdk.cpp
     src/line_protocol.cpp
     src/crash_envelope.cpp

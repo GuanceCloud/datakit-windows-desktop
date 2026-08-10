@@ -89,8 +89,8 @@ internal sealed class HttpDiagnosticObserver : IObserver<DiagnosticListener>, IO
             responseSize: response?.Content.Headers.ContentLength ?? -1,
             requestSize: request.Content?.Headers.ContentLength ?? -1,
             resourceType: DetectResourceType(request, response),
-            requestHeader: HttpHeaderRedactor.Format(request.Headers, request.Content?.Headers, client.Config.Privacy),
-            responseHeader: response is null ? null : HttpHeaderRedactor.Format(response.Headers, response.Content.Headers, client.Config.Privacy),
+            requestHeader: HttpHeaderRedactor.FormatRaw(request.Headers, request.Content?.Headers),
+            responseHeader: response is null ? null : HttpHeaderRedactor.FormatRaw(response.Headers, response.Content.Headers),
             properties: CreateResourceProperties(request, response, resource, exception: null));
     }
 

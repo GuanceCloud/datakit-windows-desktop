@@ -171,11 +171,13 @@ public:
         int64_t request_size = -1,
         const char* trace_id = nullptr,
         const char* span_id = nullptr,
-        const char* http_protocol = nullptr) noexcept {
+        const char* http_protocol = nullptr,
+        const char* request_header = nullptr,
+        const char* response_header = nullptr) noexcept {
         if (!active()) {
             return;
         }
-        (guance_rum_stop_resource_ext)(
+        (guance_rum_stop_resource_ext_with_headers)(
             handle_,
             resource_id_.c_str(),
             status_code,
@@ -184,7 +186,9 @@ public:
             resource_type_.empty() ? nullptr : resource_type_.c_str(),
             trace_id,
             span_id,
-            http_protocol);
+            http_protocol,
+            request_header,
+            response_header);
         handle_ = nullptr;
         resource_id_.clear();
     }

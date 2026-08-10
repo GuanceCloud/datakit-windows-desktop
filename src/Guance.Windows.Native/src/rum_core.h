@@ -2,6 +2,7 @@
 
 #include "guance_sdk.h"
 #include "crash_envelope.h"
+#include "data_modifier.h"
 #include "hang_state_machine.h"
 #include "line_protocol.h"
 #include "queue_store.h"
@@ -14,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -117,8 +119,9 @@ public:
     std::string start_resource(const char* url, const char* method);
     std::string start_auto_resource(const char* url, const char* method);
     void stop_resource(const char* resource_id, int status_code, int64_t response_size);
-    void stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol);
+    void stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol, const char* request_header = nullptr, const char* response_header = nullptr);
     bool configure_resource_collection(const guance_rum_resource_collection_config& config);
+    bool configure_data_modifiers(const guance_data_modifier_config& config);
     bool configure_trace(const guance_trace_config& config);
     bool configure_logging(const guance_log_config& config);
     bool add_log(
@@ -210,6 +213,7 @@ private:
 
     RumEvent base_event(const std::string& measurement, int64_t timestamp_ns);
     bool enqueue(RumEvent event);
+    void apply_modifiers(RumEvent& event);
     bool sampled_for(const std::string& measurement) const;
     void capture_session_replay_snapshot();
     std::string build_session_replay_snapshot_record(int64_t timestamp_ms);
@@ -246,6 +250,8 @@ private:
     std::shared_ptr<CacheQuota> cache_quota_;
     std::unique_ptr<NativeMonitoring> native_monitoring_;
     ResourceCollectionConfig resource_collection_config_ = default_resource_collection_config();
+    ResourceCollectionConfig modifier_privacy_config_ = default_resource_collection_config();
+    DataModifierConfig data_modifier_config_;
     TraceConfig trace_config_;
     LogConfig log_config_;
     std::vector<ReplaySegment> replay_error_buffer_;
@@ -256,6 +262,7 @@ private:
     std::unordered_map<uintptr_t, bool> replay_hidden_;
     mutable std::mutex mutex_;
     mutable std::mutex log_mutex_;
+    mutable std::shared_mutex data_modifier_mutex_;
     mutable std::mutex upload_mutex_;
     bool session_sampled_ = true;
     bool session_error_sampled_ = false;

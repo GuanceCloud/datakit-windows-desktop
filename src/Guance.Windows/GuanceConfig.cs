@@ -40,6 +40,10 @@ public sealed class GuanceConfig
     public LogConfig Logging { get; init; } = new();
     /// <summary>Gets URL and HTTP header privacy settings.</summary>
     public RumPrivacyConfig Privacy { get; init; } = new();
+    /// <summary>Gets an optional modifier applied to every existing RUM and log tag and field before caching.</summary>
+    public DataModifier? DataModifier { get; init; }
+    /// <summary>Gets an optional event-level modifier applied after <see cref="DataModifier"/>.</summary>
+    public LineDataModifier? LineDataModifier { get; init; }
     /// <summary>Gets experimental Session Replay settings.</summary>
     public RumSessionReplayConfig SessionReplay { get; init; } = new();
     /// <summary>Gets shared disk-cache settings.</summary>

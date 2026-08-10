@@ -18,6 +18,7 @@ int main() {
     event.tags["app_id"] = "app id";
     event.tags["action_name"] = "save,button";
     event.fields["duration"] = int64_t{123};
+    event.fields["ratio"] = 0.12345678901234567;
     event.fields["ok"] = true;
     event.fields["message"] = std::string{"a \"quoted\" value"};
     event.fields["multiline"] = std::string{"first\r\nsecond"};
@@ -27,10 +28,17 @@ int main() {
     assert(line.find("app_id=app\\ id") != std::string::npos);
     assert(line.find("action_name=save\\,button") != std::string::npos);
     assert(line.find("duration=123i") != std::string::npos);
+    assert(line.find("ratio=0.12345678901234566") != std::string::npos);
     assert(line.find("message=\"a \\\"quoted\\\" value\"") != std::string::npos);
     assert(line.find("multiline=\"first\\r\\nsecond\"") != std::string::npos);
     assert(std::count(line.begin(), line.end(), '\n') == 1);
     assert(line.rfind(" 42\n") == line.size() - 4);
+    guance::rum::RumEvent parsed;
+    assert(guance::rum::parse_line_protocol(line, parsed));
+    assert(parsed.measurement == event.measurement);
+    assert(parsed.tags == event.tags);
+    assert(parsed.fields == event.fields);
+    assert(parsed.timestamp_ns == event.timestamp_ns);
     std::cout << line;
     return 0;
 }

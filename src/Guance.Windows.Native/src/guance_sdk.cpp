@@ -66,6 +66,18 @@ void guance_rum_resource_collection_config_init(
         guance::rum::default_redacted_query_parameter_names();
     config->redacted_query_parameter_name_count =
         guance::rum::default_redacted_query_parameter_name_count();
+    config->capture_http_headers = 1;
+    config->redacted_header_names = guance::rum::default_redacted_header_names();
+    config->redacted_header_name_count = guance::rum::default_redacted_header_name_count();
+}
+
+void guance_data_modifier_config_init(guance_data_modifier_config* config) {
+    if (config == nullptr) {
+        return;
+    }
+    *config = guance_data_modifier_config{};
+    config->struct_size = sizeof(guance_data_modifier_config);
+    config->version = GUANCE_DATA_MODIFIER_CONFIG_VERSION;
 }
 
 void guance_trace_config_init(guance_trace_config* config) {
@@ -191,6 +203,19 @@ int guance_rum_configure_resource_collection(
     }
     try {
         return static_cast<RumCore*>(handle)->configure_resource_collection(*config) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int guance_configure_data_modifiers(
+    guance_sdk_handle handle,
+    const guance_data_modifier_config* config) {
+    if (handle == nullptr || config == nullptr) {
+        return 0;
+    }
+    try {
+        return static_cast<RumCore*>(handle)->configure_data_modifiers(*config) ? 1 : 0;
     } catch (...) {
         return 0;
     }
@@ -455,6 +480,37 @@ void guance_rum_stop_resource_ext(
     if (handle != nullptr) {
         try {
             static_cast<RumCore*>(handle)->stop_resource_ext(resource_id, status_code, response_size, request_size, resource_type, trace_id, span_id, http_protocol);
+        } catch (...) {
+            // Public C ABI calls must not propagate C++ exceptions.
+        }
+    }
+}
+
+void guance_rum_stop_resource_ext_with_headers(
+    guance_sdk_handle handle,
+    const char* resource_id,
+    int status_code,
+    int64_t response_size,
+    int64_t request_size,
+    const char* resource_type,
+    const char* trace_id,
+    const char* span_id,
+    const char* http_protocol,
+    const char* request_header,
+    const char* response_header) {
+    if (handle != nullptr) {
+        try {
+            static_cast<RumCore*>(handle)->stop_resource_ext(
+                resource_id,
+                status_code,
+                response_size,
+                request_size,
+                resource_type,
+                trace_id,
+                span_id,
+                http_protocol,
+                request_header,
+                response_header);
         } catch (...) {
             // Public C ABI calls must not propagate C++ exceptions.
         }

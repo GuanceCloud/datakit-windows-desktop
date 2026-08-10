@@ -2,8 +2,11 @@
 
 #include <chrono>
 #include <iomanip>
+#include <limits>
+#include <locale>
 #include <random>
 #include <sstream>
+#include <vector>
 #include <stdexcept>
 
 namespace guance::rum {
@@ -65,19 +68,147 @@ std::string field_value_to_string(const FieldValue& value) {
             return std::to_string(v) + "i";
         } else if constexpr (std::is_same_v<T, double>) {
             std::ostringstream ss;
-            ss << std::fixed << std::setprecision(6) << v;
+            ss.imbue(std::locale::classic());
+            ss << std::setprecision(std::numeric_limits<double>::max_digits10) << v;
             auto result = ss.str();
-            while (result.size() > 3 && result.back() == '0') {
-                result.pop_back();
-            }
-            if (result.back() == '.') {
-                result.push_back('0');
+            if (result.find_first_of(".eE") == std::string::npos) {
+                result += ".0";
             }
             return result;
         } else {
             return "\"" + escape_field_string(v) + "\"";
         }
     }, value);
+}
+
+std::string unescape(std::string_view value) {
+    std::string result;
+    result.reserve(value.size());
+    bool escaped = false;
+    for (const char character : value) {
+        if (escaped) {
+            result.push_back(character);
+            escaped = false;
+        } else if (character == '\\') {
+            escaped = true;
+        } else {
+            result.push_back(character);
+        }
+    }
+    if (escaped) {
+        result.push_back('\\');
+    }
+    return result;
+}
+
+std::string unescape_field_string(std::string_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (value[index] != '\\' || index + 1 >= value.size()) {
+            result.push_back(value[index]);
+            continue;
+        }
+        const char escaped = value[++index];
+        if (escaped == 'r') {
+            result.push_back('\r');
+        } else if (escaped == 'n') {
+            result.push_back('\n');
+        } else {
+            result.push_back(escaped);
+        }
+    }
+    return result;
+}
+
+std::vector<std::string_view> split_unescaped(
+    std::string_view value,
+    char separator,
+    bool honor_quotes) {
+    std::vector<std::string_view> parts;
+    std::size_t start = 0;
+    bool escaped = false;
+    bool quoted = false;
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        const char character = value[index];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (character == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (honor_quotes && character == '"') {
+            quoted = !quoted;
+            continue;
+        }
+        if (!quoted && character == separator) {
+            parts.push_back(value.substr(start, index - start));
+            start = index + 1;
+        }
+    }
+    if (quoted) {
+        return {};
+    }
+    parts.push_back(value.substr(start));
+    return parts;
+}
+
+std::size_t find_unescaped(std::string_view value, char character) {
+    bool escaped = false;
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (escaped) {
+            escaped = false;
+        } else if (value[index] == '\\') {
+            escaped = true;
+        } else if (value[index] == character) {
+            return index;
+        }
+    }
+    return std::string_view::npos;
+}
+
+bool parse_int64(std::string_view value, int64_t& result) {
+    try {
+        std::size_t consumed = 0;
+        const auto parsed = std::stoll(std::string(value), &consumed);
+        if (consumed != value.size()) {
+            return false;
+        }
+        result = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool parse_field_value(std::string_view value, FieldValue& result) {
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        result = unescape_field_string(value.substr(1, value.size() - 2));
+        return true;
+    }
+    if (value == "true" || value == "false") {
+        result = value == "true";
+        return true;
+    }
+    if (!value.empty() && value.back() == 'i') {
+        int64_t parsed = 0;
+        if (!parse_int64(value.substr(0, value.size() - 1), parsed)) {
+            return false;
+        }
+        result = parsed;
+        return true;
+    }
+    std::istringstream input{std::string(value)};
+    input.imbue(std::locale::classic());
+    double parsed = 0;
+    input >> std::noskipws >> parsed;
+    if (!input || input.peek() != std::char_traits<char>::eof()) {
+        return false;
+    }
+    result = parsed;
+    return true;
 }
 
 } // namespace
@@ -108,6 +239,81 @@ std::string format_line_protocol(const RumEvent& event) {
 
     ss << " " << event.timestamp_ns << "\n";
     return ss.str();
+}
+
+bool parse_line_protocol(std::string_view line, RumEvent& event) {
+    if (line.empty() || line.back() != '\n') {
+        return false;
+    }
+    line.remove_suffix(1);
+    if (line.empty() ||
+        line.find_first_of("\r\n") != std::string_view::npos ||
+        line.find('\0') != std::string_view::npos) {
+        return false;
+    }
+
+    const auto first_space = find_unescaped(line, ' ');
+    if (first_space == std::string_view::npos) {
+        return false;
+    }
+    bool escaped = false;
+    bool quoted = false;
+    std::size_t second_space = std::string_view::npos;
+    for (std::size_t index = first_space + 1; index < line.size(); ++index) {
+        const char character = line[index];
+        if (escaped) {
+            escaped = false;
+        } else if (character == '\\') {
+            escaped = true;
+        } else if (character == '"') {
+            quoted = !quoted;
+        } else if (!quoted && character == ' ') {
+            second_space = index;
+            break;
+        }
+    }
+    if (second_space == std::string_view::npos || quoted) {
+        return false;
+    }
+
+    RumEvent parsed;
+    const auto head_parts = split_unescaped(line.substr(0, first_space), ',', false);
+    if (head_parts.empty() || head_parts.front().empty()) {
+        return false;
+    }
+    parsed.measurement = unescape(head_parts.front());
+    for (std::size_t index = 1; index < head_parts.size(); ++index) {
+        const auto equals = find_unescaped(head_parts[index], '=');
+        if (equals == std::string_view::npos || equals == 0) {
+            return false;
+        }
+        parsed.tags[unescape(head_parts[index].substr(0, equals))] =
+            unescape(head_parts[index].substr(equals + 1));
+    }
+
+    const auto field_parts = split_unescaped(
+        line.substr(first_space + 1, second_space - first_space - 1),
+        ',',
+        true);
+    if (field_parts.empty()) {
+        return false;
+    }
+    for (const auto part : field_parts) {
+        const auto equals = find_unescaped(part, '=');
+        if (equals == std::string_view::npos || equals == 0) {
+            return false;
+        }
+        FieldValue value;
+        if (!parse_field_value(part.substr(equals + 1), value)) {
+            return false;
+        }
+        parsed.fields[unescape(part.substr(0, equals))] = std::move(value);
+    }
+    if (!parse_int64(line.substr(second_space + 1), parsed.timestamp_ns)) {
+        return false;
+    }
+    event = std::move(parsed);
+    return true;
 }
 
 int64_t unix_time_nanoseconds() {

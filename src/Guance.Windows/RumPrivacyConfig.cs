@@ -32,6 +32,7 @@ public sealed class RumPrivacyConfig
         "refresh_token",
         "client_secret",
         "password",
+        "passwd",
         "secret",
         "api_key",
         "apikey",

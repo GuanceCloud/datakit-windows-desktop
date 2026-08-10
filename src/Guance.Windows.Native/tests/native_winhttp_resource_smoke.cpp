@@ -104,6 +104,7 @@ public:
                 const char response[] =
                     "HTTP/1.1 200 OK\r\n"
                     "Content-Length: 0\r\n"
+                    "Set-Cookie: response-secret\r\n"
                     "Connection: close\r\n\r\n";
                 send(client, response, static_cast<int>(sizeof(response) - 1), 0);
                 closesocket(client);
@@ -165,6 +166,44 @@ int collect_non_ignored(const char* url, const char*, void* user_data) {
     return std::string(url).find("/ignored") == std::string::npos ? 1 : 0;
 }
 
+int modify_data(
+    const char* key,
+    const guance_data_value* value,
+    guance_data_value* replacement,
+    void* user_data) {
+    auto* saw_raw_url = static_cast<bool*>(user_data);
+    if (std::string(key) == "resource_url" &&
+        value->type == GUANCE_DATA_VALUE_STRING &&
+        value->value.string_value != nullptr) {
+        const std::string url(value->value.string_value);
+        *saw_raw_url = url.find("token=secret") != std::string::npos;
+    }
+    if (std::string(key) != "operation") {
+        return 0;
+    }
+
+    replacement->type = GUANCE_DATA_VALUE_STRING;
+    replacement->value.string_value = "data-modified";
+    return 1;
+}
+
+void modify_line(
+    const char* measurement,
+    guance_data_item* data,
+    uint32_t data_count,
+    void*) {
+    if (std::string(measurement) != "df_rum_windows_log") {
+        return;
+    }
+    for (uint32_t index = 0; index < data_count; ++index) {
+        if (std::string(data[index].key) == "operation") {
+            assert(data[index].value.type == GUANCE_DATA_VALUE_STRING);
+            assert(std::string(data[index].value.value.string_value) == "data-modified");
+            data[index].value.value.string_value = "line-modified";
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +231,13 @@ int main() {
     resources.user_data = &filter_calls;
     const int configured = guance_rum_configure_resource_collection(handle, &resources);
     assert(configured == 1);
+    bool saw_raw_url = false;
+    guance_data_modifier_config modifiers{};
+    guance_data_modifier_config_init(&modifiers);
+    modifiers.data_modifier = modify_data;
+    modifiers.line_data_modifier = modify_line;
+    modifiers.user_data = &saw_raw_url;
+    assert(guance_configure_data_modifiers(handle, &modifiers) == 1);
     guance_trace_config trace{};
     guance_trace_config_init(&trace);
     trace.enable_auto_trace = 1;
@@ -260,6 +306,12 @@ int main() {
         static_cast<DWORD>(-1L),
         WINHTTP_ADDREQ_FLAG_ADD);
     assert(added_existing_trace);
+    const wchar_t authorization[] = L"Authorization: request-secret";
+    assert(WinHttpAddRequestHeaders(
+        request,
+        authorization,
+        static_cast<DWORD>(-1L),
+        WINHTTP_ADDREQ_FLAG_ADD));
 
     const auto resource_url = datakit_url + "/instrumented?token=secret&keep=1";
     {
@@ -312,6 +364,10 @@ int main() {
     assert(contains(requests[2], "span_id=" + span_id));
     assert(contains(requests[2], "token\\=%3Credacted%3E&keep\\=1"));
     assert(!contains(requests[2], "token\\=secret"));
+    assert(contains(requests[2], "Authorization: <redacted>"));
+    assert(contains(requests[2], "Set-Cookie: <redacted>"));
+    assert(!contains(requests[2], "request-secret"));
+    assert(!contains(requests[2], "response-secret"));
     assert(!contains(requests[2], "/ignored"));
     assert(contains(requests[3], "POST /v1/write/logging"));
     assert(contains(requests[3], "df_rum_windows_log,"));
@@ -319,7 +375,8 @@ int main() {
     assert(contains(requests[3], "action_name=NativeLogAction"));
     assert(contains(requests[3], "message=\"native log message\""));
     assert(contains(requests[3], "status=\"warning\""));
-    assert(contains(requests[3], "operation=\"save\""));
+    assert(contains(requests[3], "operation=\"line-modified\""));
+    assert(saw_raw_url);
 
     guance_sdk_diagnostics diagnostics{};
     const int has_diagnostics = guance_sdk_get_diagnostics(handle, &diagnostics);

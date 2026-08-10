@@ -474,8 +474,7 @@ public sealed class GuanceClient : IAsyncDisposable
     {
         session.Touch();
         var resourceId = Guid.NewGuid().ToString("N");
-        var redactedUrl = HttpHeaderRedactor.RedactUrl(url, config.Privacy);
-        resources[resourceId] = new ActiveResource(resourceId, redactedUrl, method, SnapshotView(), SnapshotAction(), Clock.UnixTimeNanoseconds(), Stopwatch.StartNew(), properties);
+        resources[resourceId] = new ActiveResource(resourceId, url, method, SnapshotView(), SnapshotAction(), Clock.UnixTimeNanoseconds(), Stopwatch.StartNew(), properties);
         return resourceId;
     }
 
@@ -568,6 +567,7 @@ public sealed class GuanceClient : IAsyncDisposable
         if (statusCode >= 400 || !string.IsNullOrWhiteSpace(errorStack))
         {
             var path = uri?.AbsolutePath;
+            var privacySafeUrl = HttpHeaderRedactor.RedactUrl(resource.Url, config.Privacy);
             var errorProperties = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 [RumConstants.ResourceId] = resource.Id,
@@ -590,7 +590,7 @@ public sealed class GuanceClient : IAsyncDisposable
 
             AddError(
                 errorStack ?? string.Empty,
-                errorMessage ?? $"[{statusCode}][{resource.Url}]",
+                errorMessage ?? $"[{statusCode}][{privacySafeUrl}]",
                 "network",
                 "network",
                 errorProperties);
@@ -846,7 +846,7 @@ public sealed class GuanceClient : IAsyncDisposable
         ApplyTrustedEventContext(rumEvent);
         rumEvent
             .WithTag("is_web_view", true)
-            .WithTag("webview_url", HttpHeaderRedactor.RedactUrl(sourceUrl, config.Privacy))
+            .WithTag("webview_url", sourceUrl)
             .WithTag("webview_host_view_id", hostViewId)
             .WithTag("webview_host_view_name", hostViewName);
 
@@ -894,10 +894,6 @@ public sealed class GuanceClient : IAsyncDisposable
             }
 
             var value = ConvertWebViewJsonValue(property.Value);
-            if (value is string text && IsWebViewUrlProperty(property.Name))
-            {
-                value = HttpHeaderRedactor.RedactUrl(text, config.Privacy);
-            }
             if (asTags)
             {
                 rumEvent.WithTag(property.Name, value);
@@ -907,12 +903,6 @@ public sealed class GuanceClient : IAsyncDisposable
                 rumEvent.WithField(property.Name, value);
             }
         }
-    }
-
-    private static bool IsWebViewUrlProperty(string key)
-    {
-        return key.EndsWith("_url", StringComparison.OrdinalIgnoreCase) ||
-               key.EndsWith("_referrer", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsSafeWebViewPropertyKey(string key)
@@ -1089,6 +1079,7 @@ public sealed class GuanceClient : IAsyncDisposable
             return;
         }
 
+        TelemetryModifierPipeline.Apply(rumEvent, config);
         var line = LineProtocolFormatter.Format(rumEvent);
         Task<BatchAppendResult> enqueueTask;
         try

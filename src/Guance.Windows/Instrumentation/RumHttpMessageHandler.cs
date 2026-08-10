@@ -38,8 +38,8 @@ public sealed class RumHttpMessageHandler : DelegatingHandler
                 responseSize: responseSize,
                 requestSize: request.Content?.Headers.ContentLength ?? -1,
                 resourceType: response.Content.Headers.ContentType?.MediaType,
-                requestHeader: HttpHeaderRedactor.Format(request.Headers, request.Content?.Headers, client.Config.Privacy),
-                responseHeader: HttpHeaderRedactor.Format(response.Headers, response.Content.Headers, client.Config.Privacy),
+                requestHeader: HttpHeaderRedactor.FormatRaw(request.Headers, request.Content?.Headers),
+                responseHeader: HttpHeaderRedactor.FormatRaw(response.Headers, response.Content.Headers),
                 properties: CreateResourceProperties(request, response, traceContext, stopwatch, exception: null));
             return response;
         }

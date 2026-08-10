@@ -36,7 +36,18 @@ int main(void) {
     assert(resources.redacted_value != NULL);
     assert(resources.redacted_query_parameter_names != NULL);
     assert(resources.redacted_query_parameter_name_count > 0);
+    assert(resources.capture_http_headers == 1);
+    assert(resources.redacted_header_names != NULL);
+    assert(resources.redacted_header_name_count > 0);
     assert(guance_rum_configure_resource_collection(NULL, &resources) == 0);
+
+    guance_data_modifier_config modifiers;
+    guance_data_modifier_config_init(&modifiers);
+    assert(modifiers.struct_size == sizeof(modifiers));
+    assert(modifiers.version == GUANCE_DATA_MODIFIER_CONFIG_VERSION);
+    assert(modifiers.data_modifier == NULL);
+    assert(modifiers.line_data_modifier == NULL);
+    assert(guance_configure_data_modifiers(NULL, &modifiers) == 0);
 
     guance_trace_config trace;
     guance_trace_config_init(&trace);

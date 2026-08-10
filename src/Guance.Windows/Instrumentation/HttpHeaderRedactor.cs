@@ -4,6 +4,14 @@ namespace Guance.Windows;
 
 internal static class HttpHeaderRedactor
 {
+    public static string? FormatRaw(HttpHeaders? headers, HttpContentHeaders? contentHeaders = null)
+    {
+        var values = new List<string>();
+        AppendRaw(values, headers);
+        AppendRaw(values, contentHeaders);
+        return values.Count == 0 ? null : string.Join(Environment.NewLine, values);
+    }
+
     public static string? Format(HttpHeaders? headers, HttpContentHeaders? contentHeaders = null, RumPrivacyConfig? privacy = null)
     {
         privacy ??= new RumPrivacyConfig();
@@ -60,6 +68,37 @@ internal static class HttpHeaderRedactor
         return prefix + string.Join("&", parts) + fragment;
     }
 
+    public static string RedactHeaderBlock(string value, RumPrivacyConfig? privacy = null)
+    {
+        privacy ??= new RumPrivacyConfig();
+        if (!privacy.CaptureHttpHeaders)
+        {
+            return string.Empty;
+        }
+
+        var sensitiveHeaders = new HashSet<string>(privacy.RedactedHeaderNames, StringComparer.OrdinalIgnoreCase);
+        var lines = value.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            var separator = line.IndexOf(':');
+            if (separator <= 0)
+            {
+                separator = line.IndexOf('=');
+            }
+
+            if (separator <= 0 || !sensitiveHeaders.Contains(line[..separator].Trim()))
+            {
+                continue;
+            }
+
+            var spacing = separator + 1 < line.Length && line[separator + 1] == ' ' ? " " : string.Empty;
+            lines[index] = line[..(separator + 1)] + spacing + privacy.RedactedValue;
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
     private static void Append(List<string> values, HttpHeaders? headers, HashSet<string> sensitiveHeaders, string redactedValue)
     {
         if (headers is null)
@@ -73,6 +112,19 @@ internal static class HttpHeaderRedactor
                 ? redactedValue
                 : string.Join(",", header.Value);
             values.Add($"{header.Key}: {value}");
+        }
+    }
+
+    private static void AppendRaw(List<string> values, HttpHeaders? headers)
+    {
+        if (headers is null)
+        {
+            return;
+        }
+
+        foreach (var header in headers)
+        {
+            values.Add($"{header.Key}: {string.Join(",", header.Value)}");
         }
     }
 

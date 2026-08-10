@@ -86,6 +86,7 @@ internal sealed class LogPipeline : IAsyncDisposable
         }
 
         var logEvent = createEvent(TruncateUtf8(content, MaxContentBytes), normalizedStatus, properties);
+        TelemetryModifierPipeline.Apply(logEvent, config);
         var line = LineProtocolFormatter.Format(logEvent);
         try
         {

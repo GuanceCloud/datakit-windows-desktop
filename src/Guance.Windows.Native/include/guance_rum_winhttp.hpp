@@ -211,13 +211,20 @@ public:
             }
         }
 
+        std::string request_headers;
+        std::string response_headers;
+        query_raw_headers(true, request_headers);
+        query_raw_headers(false, response_headers);
+
         resource_.complete(
             has_status ? static_cast<int>(status_code) : 0,
             response_size,
             request_size_,
             linked_trace_id(),
             linked_span_id(),
-            protocol[0] == '\0' ? nullptr : protocol);
+            protocol[0] == '\0' ? nullptr : protocol,
+            request_headers.empty() ? nullptr : request_headers.c_str(),
+            response_headers.empty() ? nullptr : response_headers.c_str());
         return has_status != FALSE;
     }
 
@@ -348,6 +355,36 @@ private:
         return true;
     }
 
+    bool query_raw_headers(bool request_headers, std::string& destination) const {
+        DWORD value_size = 0;
+        const DWORD query = WINHTTP_QUERY_RAW_HEADERS_CRLF |
+            (request_headers ? WINHTTP_QUERY_FLAG_REQUEST_HEADERS : 0);
+        WinHttpQueryHeaders(
+            request_,
+            query,
+            WINHTTP_HEADER_NAME_BY_INDEX,
+            WINHTTP_NO_OUTPUT_BUFFER,
+            &value_size,
+            WINHTTP_NO_HEADER_INDEX);
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || value_size == 0) {
+            return false;
+        }
+
+        std::vector<wchar_t> value(
+            (value_size + sizeof(wchar_t) - 1) / sizeof(wchar_t),
+            L'\0');
+        if (WinHttpQueryHeaders(
+                request_,
+                query,
+                WINHTTP_HEADER_NAME_BY_INDEX,
+                value.data(),
+                &value_size,
+                WINHTTP_NO_HEADER_INDEX) == FALSE) {
+            return false;
+        }
+        return to_utf8(std::wstring(value.data()), destination);
+    }
+
     void restore_request_header(const PreparedTraceHeader& header) noexcept {
         try {
             if (header.had_previous_value) {
@@ -389,6 +426,39 @@ private:
                 static_cast<int>(value.size()),
                 converted.data(),
                 wide_length) != wide_length) {
+            return false;
+        }
+        destination = std::move(converted);
+        return true;
+    }
+
+    static bool to_utf8(const std::wstring& value, std::string& destination) {
+        if (value.empty()) {
+            destination.clear();
+            return true;
+        }
+        const int utf8_length = WideCharToMultiByte(
+            CP_UTF8,
+            WC_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            nullptr,
+            0,
+            nullptr,
+            nullptr);
+        if (utf8_length <= 0) {
+            return false;
+        }
+        std::string converted(static_cast<std::size_t>(utf8_length), '\0');
+        if (WideCharToMultiByte(
+                CP_UTF8,
+                WC_ERR_INVALID_CHARS,
+                value.data(),
+                static_cast<int>(value.size()),
+                converted.data(),
+                utf8_length,
+                nullptr,
+                nullptr) != utf8_length) {
             return false;
         }
         destination = std::move(converted);

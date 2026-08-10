@@ -13,6 +13,10 @@ int reject_private(const char* url, const char*, void*) {
 
 int main() {
     auto config = guance::rum::default_resource_collection_config();
+    assert(guance::rum::sanitize_http_headers(
+        "Authorization: secret\r\nX-Keep: visible\r\nSet-Cookie: session",
+        config) ==
+        "Authorization: <redacted>\nX-Keep: visible\nSet-Cookie: <redacted>");
     assert(guance::rum::sanitize_resource_url(
         "https://example.com/items?TOKEN=secret&keep=1#result",
         config) ==
@@ -44,6 +48,10 @@ int main() {
     c_config.redacted_value = "hidden";
     c_config.redacted_query_parameter_names = names;
     c_config.redacted_query_parameter_name_count = 1;
+    const char* header_names[] = {"x-private"};
+    c_config.capture_http_headers = 1;
+    c_config.redacted_header_names = header_names;
+    c_config.redacted_header_name_count = 1;
     c_config.should_collect = reject_private;
 
     guance::rum::ResourceCollectionConfig parsed;
@@ -52,6 +60,10 @@ int main() {
         "https://example.com?credential=value",
         parsed) ==
         "https://example.com?credential=hidden");
+    assert(guance::rum::sanitize_http_headers(
+        "X-Private: value\nX-Keep: visible",
+        parsed) ==
+        "X-Private: hidden\nX-Keep: visible");
     assert(guance::rum::should_collect_resource(
         parsed,
         "https://example.com/public",

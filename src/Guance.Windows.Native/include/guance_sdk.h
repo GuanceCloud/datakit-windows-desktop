@@ -106,7 +106,7 @@ typedef int (*guance_rum_resource_should_collect_callback)(
     const char* method,
     void* user_data);
 
-/** @brief Configures automatic native HTTP Resource filtering and URL redaction.
+/** @brief Configures automatic native HTTP Resource filtering, URL redaction, and HTTP-header privacy.
  *
  * String and name-list values are copied by guance_rum_configure_resource_collection.
  * The callback and user_data are retained and must remain valid until the SDK
@@ -126,7 +126,78 @@ typedef struct guance_rum_resource_collection_config {
 
     guance_rum_resource_should_collect_callback should_collect; /**< Optional request filter. */
     void* user_data; /**< Opaque value passed to should_collect. */
+
+    int capture_http_headers; /**< Non-zero to retain request and response headers after redaction. */
+    const char* const* redacted_header_names; /**< Sensitive HTTP header names. */
+    uint32_t redacted_header_name_count; /**< Number of sensitive header names. */
 } guance_rum_resource_collection_config;
+
+/** Version written to guance_data_modifier_config::version. */
+#define GUANCE_DATA_MODIFIER_CONFIG_VERSION 1u
+
+/** @brief Value kinds exposed to native telemetry modifier callbacks. */
+typedef enum guance_data_value_type {
+    GUANCE_DATA_VALUE_NULL = 0,
+    GUANCE_DATA_VALUE_BOOL = 1,
+    GUANCE_DATA_VALUE_INT64 = 2,
+    GUANCE_DATA_VALUE_DOUBLE = 3,
+    GUANCE_DATA_VALUE_STRING = 4
+} guance_data_value_type;
+
+/** @brief One strongly typed telemetry value. String replacements are copied synchronously. */
+typedef struct guance_data_value {
+    guance_data_value_type type;
+    union {
+        int bool_value;
+        int64_t int64_value;
+        double double_value;
+        const char* string_value;
+    } value;
+} guance_data_value;
+
+/** @brief One existing tag or field supplied to a line modifier. */
+typedef struct guance_data_item {
+    const char* key;
+    guance_data_value value;
+} guance_data_item;
+
+/**
+ * @brief Modifies one existing tag or field.
+ * @return Non-zero to apply replacement; zero, or a NULL replacement value, keeps the current value.
+ */
+typedef int (*guance_data_modifier_callback)(
+    const char* key,
+    const guance_data_value* value,
+    guance_data_value* replacement,
+    void* user_data);
+
+/**
+ * @brief Modifies existing values from one event in place.
+ *
+ * The item count and keys are immutable. Setting an item to GUANCE_DATA_VALUE_NULL keeps its
+ * current value. Callbacks are synchronous and may be invoked concurrently. They must not re-enter
+ * the same SDK instance.
+ */
+typedef void (*guance_line_data_modifier_callback)(
+    const char* measurement,
+    guance_data_item* data,
+    uint32_t data_count,
+    void* user_data);
+
+/**
+ * @brief Configures general RUM and log modifiers executed immediately before disk caching.
+ *
+ * Data modifiers run before line modifiers; configured HTTP privacy rules run last. Callback
+ * pointers and user_data are retained until reconfiguration or shutdown. Reconfiguration waits
+ * for callbacks already in progress before returning.
+ */
+typedef struct guance_data_modifier_config {
+    uint32_t struct_size;
+    uint32_t version;
+    guance_data_modifier_callback data_modifier;
+    guance_line_data_modifier_callback line_data_modifier;
+    void* user_data;
+} guance_data_modifier_config;
 
 /** Version written to guance_trace_config::version. */
 #define GUANCE_TRACE_CONFIG_VERSION 1u
@@ -325,6 +396,9 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_native_monitoring_config_init(
 /** Initializes a versioned native HTTP Resource collection configuration. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_resource_collection_config_init(
     guance_rum_resource_collection_config* config);
+/** Initializes a versioned general telemetry modifier configuration. */
+GUANCE_WINDOWS_NATIVE_EXPORT void guance_data_modifier_config_init(
+    guance_data_modifier_config* config);
 /** Initializes a versioned trace configuration with supported defaults. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_trace_config_init(
     guance_trace_config* config);
@@ -341,6 +415,10 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_log_diagnostics_init(
 GUANCE_WINDOWS_NATIVE_EXPORT int guance_rum_configure_resource_collection(
     guance_sdk_handle handle,
     const guance_rum_resource_collection_config* config);
+/** Applies general RUM and log modifiers. Returns non-zero on success. */
+GUANCE_WINDOWS_NATIVE_EXPORT int guance_configure_data_modifiers(
+    guance_sdk_handle handle,
+    const guance_data_modifier_config* config);
 /** Applies distributed trace propagation configuration. Returns non-zero on success. */
 GUANCE_WINDOWS_NATIVE_EXPORT int guance_trace_configure(
     guance_sdk_handle handle,
@@ -420,6 +498,19 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_stop_resource_ext(
     const char* trace_id,
     const char* span_id,
     const char* http_protocol);
+/** Stops a Resource and additionally captures raw request and response headers for privacy filtering. */
+GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_stop_resource_ext_with_headers(
+    guance_sdk_handle handle,
+    const char* resource_id,
+    int status_code,
+    int64_t response_size,
+    int64_t request_size,
+    const char* resource_type,
+    const char* trace_id,
+    const char* span_id,
+    const char* http_protocol,
+    const char* request_header,
+    const char* response_header);
 /** Adds a RUM Error. All supplied strings are copied before return. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_add_error(guance_sdk_handle handle, const char* stack, const char* message, const char* error_type, const char* source);
 /** Adds a RUM Long Task with duration_ns measured in nanoseconds. */

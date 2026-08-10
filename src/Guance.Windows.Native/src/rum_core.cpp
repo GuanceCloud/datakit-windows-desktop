@@ -975,17 +975,24 @@ bool RumCore::write_line(const char* line, std::size_t length) {
     if (!measurement) {
         return false;
     }
-    if (!sampled_for(*measurement)) {
+    RumEvent event;
+    if (!parse_line_protocol(std::string_view(line, length), event) ||
+        event.measurement != *measurement) {
+        return false;
+    }
+    if (!sampled_for(event.measurement)) {
         return true;
     }
 
-    const bool persisted = queue_->enqueue(std::string(line, length));
+    apply_modifiers(event);
+    const auto modified_line = format_line_protocol(event);
+    const bool persisted = queue_->enqueue(modified_line);
     if (!persisted) return false;
     rum_events_enqueued_.fetch_add(1);
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native.BrowserBridge] enqueued "
                   << *measurement
-                  << " (" << length << " bytes)"
+                  << " (" << modified_line.size() << " bytes)"
                   << std::endl;
     }
     return true;
@@ -1220,7 +1227,7 @@ std::string RumCore::start_resource_impl(
 
     Resource resource{
         uuid32(),
-        sanitize_resource_url(original_url, collection_config),
+        original_url,
         resource_method,
         {},
         {},
@@ -1251,8 +1258,24 @@ bool RumCore::configure_resource_collection(
         return false;
     }
 
-    std::lock_guard lock(mutex_);
-    resource_collection_config_ = std::move(parsed);
+    {
+        std::lock_guard lock(mutex_);
+        resource_collection_config_ = parsed;
+    }
+    {
+        std::unique_lock lock(data_modifier_mutex_);
+        modifier_privacy_config_ = std::move(parsed);
+    }
+    return true;
+}
+
+bool RumCore::configure_data_modifiers(const guance_data_modifier_config& config) {
+    DataModifierConfig parsed;
+    if (!data_modifier_config_from_c(config, parsed)) {
+        return false;
+    }
+    std::unique_lock lock(data_modifier_mutex_);
+    data_modifier_config_ = parsed;
     return true;
 }
 
@@ -1378,6 +1401,7 @@ bool RumCore::add_log(
     event.fields["message"] = truncate_log_content(content);
     event.fields["status"] = normalized_status;
 
+    apply_modifiers(event);
     if (!log_queue_->enqueue(format_line_protocol(event))) {
         logs_dropped_.fetch_add(1);
         return false;
@@ -1404,7 +1428,7 @@ void RumCore::stop_resource(const char* resource_id, int status_code, int64_t re
     stop_resource_ext(resource_id, status_code, response_size, -1, nullptr, nullptr, nullptr, nullptr);
 }
 
-void RumCore::stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol) {
+void RumCore::stop_resource_ext(const char* resource_id, int status_code, int64_t response_size, int64_t request_size, const char* resource_type, const char* trace_id, const char* span_id, const char* http_protocol, const char* request_header, const char* response_header) {
     Resource resource;
     {
         std::lock_guard lock(mutex_);
@@ -1444,6 +1468,8 @@ void RumCore::stop_resource_ext(const char* resource_id, int status_code, int64_
     event.tags["span_id"] = str_or_empty(span_id);
     event.tags["resource_http_protocol"] = str_or_empty(http_protocol);
     event.fields["duration"] = elapsed_since(resource.started_monotonic_ns);
+    event.fields["request_header"] = str_or_empty(request_header);
+    event.fields["response_header"] = str_or_empty(response_header);
     if (response_size >= 0) {
         event.fields["resource_size"] = response_size;
     }
@@ -2040,9 +2066,15 @@ bool RumCore::enqueue(RumEvent event) {
         // be retried forever when the application intentionally samples them out.
         return true;
     }
+    apply_modifiers(event);
     const bool persisted = queue_->enqueue(format_line_protocol(event));
     if (persisted) rum_events_enqueued_.fetch_add(1);
     return persisted;
+}
+
+void RumCore::apply_modifiers(RumEvent& event) {
+    std::shared_lock lock(data_modifier_mutex_);
+    apply_data_modifiers(event, modifier_privacy_config_, data_modifier_config_);
 }
 
 bool RumCore::consume_upload_budget(int64_t payload_bytes) {
