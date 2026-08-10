@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -676,20 +675,19 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
     private void LogFullSnapshotMapping(SessionReplayNode root, IReadOnlyList<object> wireframes)
     {
-        if (!config.Debug)
+        if (!SdkDiagnostics.IsEnabled)
         {
             return;
         }
 
         var message = $"[Guance.RUM.SessionReplay] full snapshot mapped root tag={root.TagName} text={Truncate(root.Text)} rect=({root.X:0.##},{root.Y:0.##},{root.Width:0.##},{root.Height:0.##}) wireframes={wireframes.Count}";
-        Debug.WriteLine(message);
-        Console.WriteLine(message);
+        SdkDiagnostics.WriteLine(message);
         LogNodeMapping(root, depth: 0);
     }
 
     private void LogNodeMapping(SessionReplayNode node, int depth)
     {
-        if (!config.Debug || depth > 8)
+        if (!SdkDiagnostics.IsEnabled || depth > 8)
         {
             return;
         }
@@ -698,8 +696,7 @@ internal sealed class SessionReplayManager : IAsyncDisposable
             ? "placeholder"
             : string.IsNullOrEmpty(node.Text) ? "shape" : "text";
         var message = $"[Guance.RUM.SessionReplay] node->wireframe depth={depth} tag={node.TagName} type={wireframeType} text={Truncate(node.Text)} hidden={node.Hidden} rect=({node.X:0.##},{node.Y:0.##},{node.Width:0.##},{node.Height:0.##}) attrs={node.Attributes.Count} children={node.Children.Count}";
-        Debug.WriteLine(message);
-        Console.WriteLine(message);
+        SdkDiagnostics.WriteLine(message);
 
         foreach (var child in node.Children)
         {
@@ -709,15 +706,14 @@ internal sealed class SessionReplayManager : IAsyncDisposable
 
     private void LogIncrementalEvent(string eventType, string? target, double x, double y, string? value, object record)
     {
-        if (!config.Debug)
+        if (!SdkDiagnostics.IsEnabled)
         {
             return;
         }
 
         var recordJson = Encoding.UTF8.GetString(JsonSerializer.SerializeToUtf8Bytes(record, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         var message = $"[Guance.RUM.SessionReplay] incremental event={eventType} target={target ?? string.Empty} x={x:0.##} y={y:0.##} value={Truncate(value)} record={recordJson}";
-        Debug.WriteLine(message);
-        Console.WriteLine(message);
+        SdkDiagnostics.WriteLine(message);
     }
 
     private static string Truncate(string? value)

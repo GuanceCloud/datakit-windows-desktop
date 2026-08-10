@@ -108,7 +108,7 @@ internal sealed class AutomaticInstrumentation : IDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[Guance.RUM] crash flush failed: {ex}");
+            client.ReportDiagnostic(RumDiagnosticLevel.Warning, "crash_flush", "Crash flush failed.", ex);
         }
     }
 }

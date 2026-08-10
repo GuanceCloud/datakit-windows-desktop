@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http;
-using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -176,50 +175,6 @@ public sealed class LogInputTests
             .ToArray();
         Assert.Contains(bodies, body => body.Contains("message=\"first\"", StringComparison.Ordinal));
         Assert.Contains(bodies, body => body.Contains("status=\"audit\"", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TraceCapture_WhenEnabled_AutomaticallyForwardsTraceEvent()
-    {
-        var requests = new List<CapturedRequest>();
-        await using var client = CreateClient(requests, new LogConfig
-        {
-            EnableCustomLog = true,
-            EnableTraceCapture = true
-        });
-
-        var message = "trace-warning-" + Guid.NewGuid().ToString("N");
-        Trace.TraceWarning(message);
-        Trace.Flush();
-        await client.FlushAsync();
-
-        var bodies = requests
-            .Where(item => item.Uri.AbsolutePath == "/v1/write/logging")
-            .Select(item => item.Body)
-            .ToArray();
-        Assert.Contains(bodies, body =>
-            body.Contains($"message=\"{message}\"", StringComparison.Ordinal) &&
-            body.Contains("status=\"warning\"", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TraceCapture_FlushesBufferedWriteWithoutNewline()
-    {
-        var requests = new List<CapturedRequest>();
-        await using var client = CreateClient(requests, new LogConfig
-        {
-            EnableCustomLog = true,
-            EnableTraceCapture = true
-        });
-
-        var message = "trace-write-" + Guid.NewGuid().ToString("N");
-        Trace.Write(message);
-        Trace.Flush();
-        await client.FlushAsync();
-
-        Assert.Contains(
-            requests.Where(item => item.Uri.AbsolutePath == "/v1/write/logging"),
-            item => item.Body.Contains($"message=\"{message}\"", StringComparison.Ordinal));
     }
 
     [Fact]

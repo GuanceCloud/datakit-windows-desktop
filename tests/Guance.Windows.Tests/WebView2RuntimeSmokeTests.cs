@@ -328,7 +328,6 @@ public sealed class WebView2RuntimeSmokeTests
                 ServiceName = "wpf-webview-replay-validation",
                 Env = "local",
                 Version = "0.1.0-webview-slot-validation",
-                Debug = false,
                 FlushInterval = TimeSpan.FromHours(1),
                 HttpTimeout = TimeSpan.FromSeconds(20),
                 SessionReplay = new RumSessionReplayConfig

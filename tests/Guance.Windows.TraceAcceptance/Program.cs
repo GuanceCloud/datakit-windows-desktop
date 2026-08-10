@@ -30,7 +30,6 @@ try
         ServiceName = "windows-trace-live-acceptance",
         Env = local.Env,
         Version = local.Version,
-        Debug = local.Debug,
         CacheDirectory = cacheDirectory,
         HttpTimeout = TimeSpan.FromSeconds(15),
         FlushInterval = TimeSpan.FromHours(1),

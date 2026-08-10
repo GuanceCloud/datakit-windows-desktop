@@ -56,7 +56,6 @@ public sealed class GuanceClient : IAsyncDisposable
     private readonly Dictionary<string, object?> globalContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?> rumGlobalContext = new(StringComparer.Ordinal);
     private readonly object stateGate = new();
-    private readonly object automaticLogCaptureGate = new();
     private readonly object rumQueueWriteGate = new();
     private readonly HashSet<Task> pendingRumQueueWrites = new();
     private readonly RetryBackoff rumRetryBackoff;
@@ -66,7 +65,6 @@ public sealed class GuanceClient : IAsyncDisposable
     private readonly CancellationTokenSource shutdown = new();
     private long lastReplayPendingFlushAt;
     private AutomaticInstrumentation? automaticInstrumentation;
-    private GuanceTraceListener? traceLogListener;
     private ActiveView? activeView;
     private UserInfo? userInfo;
     private long rumEventsEnqueued;
@@ -164,10 +162,6 @@ public sealed class GuanceClient : IAsyncDisposable
             },
             shutdown.Token);
         uploadScheduler = scheduler;
-        if (config.Logging.EnableTraceCapture)
-        {
-            EnableAutomaticLogCapture();
-        }
     }
 
     /// <summary>Gets the configuration used to create this client.</summary>
@@ -188,42 +182,6 @@ public sealed class GuanceClient : IAsyncDisposable
             new SessionReplayTransport(config),
             config.Logging.EnableCustomLog ? new BatchFileLogQueue(config) : new DisabledLogQueue(),
             new LogTransport(config));
-    }
-
-    /// <summary>Starts forwarding <see cref="Trace" /> output to Guance Logging.</summary>
-    public void EnableAutomaticLogCapture()
-    {
-        if (!config.Logging.EnableCustomLog)
-        {
-            throw new InvalidOperationException("Logging.EnableCustomLog must be enabled before automatic log capture.");
-        }
-
-        lock (automaticLogCaptureGate)
-        {
-            if (traceLogListener is not null)
-            {
-                return;
-            }
-
-            traceLogListener = new GuanceTraceListener(this);
-            Trace.Listeners.Add(traceLogListener);
-        }
-    }
-
-    /// <summary>Stops forwarding <see cref="Trace" /> output.</summary>
-    public void DisableAutomaticLogCapture()
-    {
-        lock (automaticLogCaptureGate)
-        {
-            if (traceLogListener is null)
-            {
-                return;
-            }
-
-            Trace.Listeners.Remove(traceLogListener);
-            traceLogListener.Dispose();
-            traceLogListener = null;
-        }
     }
 
     /// <summary>Returns current RUM, Replay, queue, and upload diagnostics.</summary>
@@ -696,7 +654,6 @@ public sealed class GuanceClient : IAsyncDisposable
     /// <summary>Stops instrumentation, flushes queues, and releases client resources.</summary>
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
-        DisableAutomaticLogCapture();
         webViewInstrumentation.Dispose();
         StopView();
         // Shutdown is deliberately bounded. Remaining ready batches stay durable
@@ -1213,10 +1170,6 @@ public sealed class GuanceClient : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
             var result = await transport.SendAsync(batch.Items, cancellationToken).ConfigureAwait(false);
             RecordRumUploadResult(result);
-            if (config.Debug && result.ErrorMessage is not null)
-            {
-                Debug.WriteLine($"[Guance.RUM] upload status={result.StatusCode} retry={result.RetryLater}: {result.ErrorMessage}");
-            }
 
             if (result.DeleteFromQueue)
             {
@@ -1275,10 +1228,6 @@ public sealed class GuanceClient : IAsyncDisposable
             await uploadRateLimiter.WaitAsync(batch.PayloadBytes, cancellationToken).ConfigureAwait(false);
             var result = await sessionReplayTransport.SendAsync(segment, cancellationToken).ConfigureAwait(false);
             RecordReplayUploadResult(result);
-            if (config.Debug && result.ErrorMessage is not null)
-            {
-                Debug.WriteLine($"[Guance.RUM.SessionReplay] upload status={result.StatusCode} retry={result.RetryLater}: {result.ErrorMessage}");
-            }
 
             if (result.DeleteFromQueue)
             {
@@ -1300,7 +1249,7 @@ public sealed class GuanceClient : IAsyncDisposable
 
     private void LogSessionReplayUploadPayload(QueuedSessionReplaySegment segment)
     {
-        if (!config.Debug)
+        if (!SdkDiagnostics.IsEnabled)
         {
             return;
         }
@@ -1310,17 +1259,16 @@ public sealed class GuanceClient : IAsyncDisposable
             var json = SessionReplaySegmentBuilder.TryGetDebugPayload(segment.ContentType, segment.Body);
             if (string.IsNullOrWhiteSpace(json))
             {
-                Debug.WriteLine("[Guance.RUM.SessionReplay] upload payload structure unavailable.");
+                SdkDiagnostics.WriteLine("[Guance.RUM.SessionReplay] upload payload structure unavailable.");
                 return;
             }
 
             var message = "[Guance.RUM.SessionReplay] upload payload structure:\n" + json;
-            Debug.WriteLine(message);
-            Console.WriteLine(message);
+            SdkDiagnostics.WriteLine(message);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[Guance.RUM.SessionReplay] failed to print upload payload structure: {ex.Message}");
+            SdkDiagnostics.WriteLine($"[Guance.RUM.SessionReplay] failed to print upload payload structure: {ex.Message}");
         }
     }
 
@@ -1382,6 +1330,11 @@ public sealed class GuanceClient : IAsyncDisposable
         EmitDiagnostic(level, "webview", message, exception: exception);
     }
 
+    internal void ReportDiagnostic(RumDiagnosticLevel level, string source, string message, Exception? exception = null)
+    {
+        EmitDiagnostic(level, source, message, exception: exception);
+    }
+
     private void EmitDiagnostic(RumDiagnosticLevel level, string source, string message, int? statusCode = null, Exception? exception = null)
     {
         PublishDiagnostic(new RumDiagnosticEvent(
@@ -1395,13 +1348,15 @@ public sealed class GuanceClient : IAsyncDisposable
 
     private void PublishDiagnostic(RumDiagnosticEvent item)
     {
+        SdkDiagnostics.Write(item);
+
         try
         {
             config.DiagnosticListener?.Invoke(item);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[Guance.RUM] diagnostic listener failed: {ex}");
+            SdkDiagnostics.WriteLine($"[Guance.RUM] diagnostic listener failed: {ex}");
         }
 
         try
@@ -1410,7 +1365,7 @@ public sealed class GuanceClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[Guance.RUM] diagnostic event handler failed: {ex}");
+            SdkDiagnostics.WriteLine($"[Guance.RUM] diagnostic event handler failed: {ex}");
         }
     }
 

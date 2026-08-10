@@ -28,8 +28,6 @@ public sealed class GuanceConfig
     public string Env { get; init; } = "prod";
     /// <summary>Gets the monitored application version.</summary>
     public string Version { get; init; } = "1.0.0";
-    /// <summary>Enables SDK diagnostic output.</summary>
-    public bool Debug { get; init; }
     /// <summary>Gets the normal RUM session sampling rate in the inclusive range 0 through 1.</summary>
     public double SampleRate { get; init; } = 1.0;
     /// <summary>Gets the additional error-session sampling rate in the inclusive range 0 through 1.</summary>
@@ -122,11 +120,6 @@ public sealed class GuanceConfig
         if (Logging.SampleRate is < 0 or > 1)
         {
             throw new InvalidOperationException("Logging.SampleRate must be between 0 and 1.");
-        }
-
-        if (Logging.EnableTraceCapture && !Logging.EnableCustomLog)
-        {
-            throw new InvalidOperationException("Logging.EnableCustomLog must be enabled when Logging.EnableTraceCapture is enabled.");
         }
 
         if (Logging.GlobalContext is null)

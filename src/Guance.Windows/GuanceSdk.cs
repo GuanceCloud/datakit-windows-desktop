@@ -26,10 +26,6 @@ public static class GuanceSdk
 
     /// <summary>Enables the selected automatic UI, HTTP, exception, and launch instrumentation modules.</summary>
     public static void EnableAutomaticInstrumentation(AutomaticInstrumentationOptions? options = null) => Client.EnableAutomaticInstrumentation(options);
-    /// <summary>Starts forwarding <see cref="System.Diagnostics.Trace" /> output to Guance Logging.</summary>
-    public static void EnableAutomaticLogCapture() => Client.EnableAutomaticLogCapture();
-    /// <summary>Stops forwarding <see cref="System.Diagnostics.Trace" /> output.</summary>
-    public static void DisableAutomaticLogCapture() => Client.DisableAutomaticLogCapture();
     /// <summary>Attaches a WinUI 3 window for View and Action instrumentation.</summary>
     public static void AttachWinUIWindow(object window, string? viewName = null) => Client.AttachWinUIWindow(window, viewName);
     /// <summary>Attaches a supported WebView2 control to the native RUM bridge.</summary>

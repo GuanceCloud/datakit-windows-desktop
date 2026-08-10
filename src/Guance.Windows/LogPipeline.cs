@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Guance.Windows.Queue;
 using Guance.Windows.Transport;
@@ -163,10 +162,6 @@ internal sealed class LogPipeline : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
             var result = await transport.SendAsync(batch.Items, cancellationToken).ConfigureAwait(false);
             RecordUploadResult(result);
-            if (config.Debug && result.ErrorMessage is not null)
-            {
-                Debug.WriteLine($"[Guance.RUM.Log] upload status={result.StatusCode} retry={result.RetryLater}: {result.ErrorMessage}");
-            }
 
             if (result.DeleteFromQueue)
             {

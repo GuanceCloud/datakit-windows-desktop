@@ -19,7 +19,6 @@ public sealed class SampleGuanceConfigTests : IDisposable
         "GUANCE_RUM_SERVICE_NAME",
         "GUANCE_RUM_ENV",
         "GUANCE_RUM_VERSION",
-        "GUANCE_RUM_DEBUG",
         "GUANCE_RUM_SAMPLE_RATE",
         "GUANCE_LOG_ENABLED",
         "GUANCE_LOG_SAMPLE_RATE",
@@ -42,8 +41,6 @@ public sealed class SampleGuanceConfigTests : IDisposable
         "GUANCE_RUM_REPLAY_TEXT_AND_INPUT_PRIVACY",
         "GUANCE_RUM_REPLAY_TOUCH_PRIVACY",
         "GUANCE_RUM_REPLAY_IMAGE_PRIVACY",
-        "GUANCE_RUM_DIAGNOSTIC_CONSOLE",
-        "GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS",
         "GUANCE_RUM_WEBVIEW_TEST_URL"
     };
 

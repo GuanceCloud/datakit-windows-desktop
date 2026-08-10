@@ -7,8 +7,6 @@ public sealed class LogConfig
     public bool EnableCustomLog { get; init; }
     /// <summary>Includes the active RUM session, view, and action context on logs.</summary>
     public bool EnableLinkRumData { get; init; }
-    /// <summary>Forwards <see cref="System.Diagnostics.Trace" /> output to Guance Logging.</summary>
-    public bool EnableTraceCapture { get; init; }
     /// <summary>Gets the log sampling rate in the inclusive range 0 through 1.</summary>
     public double SampleRate { get; init; } = 1.0;
     /// <summary>Gets an optional allow-list of accepted log levels.</summary>

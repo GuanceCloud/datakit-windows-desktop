@@ -1,9 +1,6 @@
 using System;
-using System.Diagnostics;
-using System.Runtime.ExceptionServices;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Guance.Windows;
 
@@ -19,7 +16,6 @@ internal static class SampleGuanceConfig
     public static GuanceConfig Load(string defaultRumAppId, string defaultServiceName, string[]? args = null)
     {
         var settings = ResolveLocalSettings(defaultRumAppId, defaultServiceName, args);
-        ConfigureExceptionDiagnostics(settings);
         var resolved = CreateResolvedSettings(settings, defaultRumAppId, defaultServiceName);
         WebViewUrl = resolved.WebViewUrl;
         return resolved.Rum;
@@ -46,9 +42,6 @@ internal static class SampleGuanceConfig
             ServiceName = defaultServiceName,
             Env = "local",
             Version = "1.0.0",
-            Debug = true,
-            DiagnosticConsoleEnabled = true,
-            DiagnosticFirstChanceExceptions = false
         };
 
         ApplyJsonSettings(settings);
@@ -72,8 +65,6 @@ internal static class SampleGuanceConfig
             Env = settings.Env ?? "local",
             Version = settings.Version ?? "1.0.0",
             SampleRate = PercentageToRate(settings.SessionSampleRate ?? 100),
-            Debug = settings.Debug ?? true,
-            DiagnosticListener = settings.DiagnosticConsoleEnabled == true ? LogDiagnostic : null,
             Logging = new LogConfig
             {
                 EnableCustomLog = settings.LoggingEnabled ?? false,
@@ -160,7 +151,6 @@ internal static class SampleGuanceConfig
             ServiceName = Environment.GetEnvironmentVariable("GUANCE_RUM_SERVICE_NAME"),
             Env = Environment.GetEnvironmentVariable("GUANCE_RUM_ENV"),
             Version = Environment.GetEnvironmentVariable("GUANCE_RUM_VERSION"),
-            Debug = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DEBUG")),
             SessionSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_RUM_SAMPLE_RATE")),
             LoggingEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_LOG_ENABLED")),
             LogSampleRate = ParseDouble(Environment.GetEnvironmentVariable("GUANCE_LOG_SAMPLE_RATE")),
@@ -183,8 +173,6 @@ internal static class SampleGuanceConfig
             ReplayTextAndInputPrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_TEXT_AND_INPUT_PRIVACY"),
             ReplayTouchPrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_TOUCH_PRIVACY"),
             ReplayImagePrivacy = Environment.GetEnvironmentVariable("GUANCE_RUM_REPLAY_IMAGE_PRIVACY"),
-            DiagnosticConsoleEnabled = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_DIAGNOSTIC_CONSOLE")),
-            DiagnosticFirstChanceExceptions = ParseBool(Environment.GetEnvironmentVariable("GUANCE_RUM_FIRST_CHANCE_EXCEPTIONS")),
             WebViewUrl = Environment.GetEnvironmentVariable("GUANCE_RUM_WEBVIEW_TEST_URL")
         });
     }
@@ -218,9 +206,6 @@ internal static class SampleGuanceConfig
                 case "--version":
                     commandLine.Version = value;
                     break;
-                case "--debug":
-                    commandLine.Debug = ParseBool(value);
-                    break;
                 case "--session-sample-rate":
                     commandLine.SessionSampleRate = ParseDouble(value);
                     break;
@@ -251,12 +236,6 @@ internal static class SampleGuanceConfig
                 case "--session-replay-on-error-sample-rate":
                     commandLine.SessionReplayOnErrorSampleRate = ParseDouble(value);
                     break;
-                case "--diagnostic-console":
-                    commandLine.DiagnosticConsoleEnabled = ParseBool(value);
-                    break;
-                case "--first-chance-exceptions":
-                    commandLine.DiagnosticFirstChanceExceptions = ParseBool(value);
-                    break;
                 case "--webview-url":
                     commandLine.WebViewUrl = value;
                     break;
@@ -286,7 +265,6 @@ internal static class SampleGuanceConfig
         target.ServiceName = Coalesce(source.ServiceName, target.ServiceName);
         target.Env = Coalesce(source.Env, target.Env);
         target.Version = Coalesce(source.Version, target.Version);
-        target.Debug = source.Debug ?? target.Debug;
         target.SessionSampleRate = source.SessionSampleRate ?? target.SessionSampleRate;
         target.LoggingEnabled = source.LoggingEnabled ?? target.LoggingEnabled;
         target.LogSampleRate = source.LogSampleRate ?? target.LogSampleRate;
@@ -312,66 +290,7 @@ internal static class SampleGuanceConfig
         target.ReplayTextAndInputPrivacy = Coalesce(source.ReplayTextAndInputPrivacy, target.ReplayTextAndInputPrivacy);
         target.ReplayTouchPrivacy = Coalesce(source.ReplayTouchPrivacy, target.ReplayTouchPrivacy);
         target.ReplayImagePrivacy = Coalesce(source.ReplayImagePrivacy, target.ReplayImagePrivacy);
-        target.DiagnosticConsoleEnabled = source.DiagnosticConsoleEnabled ?? target.DiagnosticConsoleEnabled;
-        target.DiagnosticFirstChanceExceptions = source.DiagnosticFirstChanceExceptions ?? target.DiagnosticFirstChanceExceptions;
         target.WebViewUrl = Coalesce(source.WebViewUrl, target.WebViewUrl);
-    }
-
-    private static void ConfigureExceptionDiagnostics(LocalRumSettings settings)
-    {
-        if (settings.DiagnosticConsoleEnabled != true || settings.DiagnosticFirstChanceExceptions != true)
-        {
-            return;
-        }
-
-        AppDomain.CurrentDomain.FirstChanceException -= LogFirstChanceException;
-        AppDomain.CurrentDomain.FirstChanceException += LogFirstChanceException;
-    }
-
-    private static void LogDiagnostic(RumDiagnosticEvent item)
-    {
-        EnsureConsole();
-        var status = item.StatusCode is null ? "" : $" status={item.StatusCode}";
-        var line = $"[{item.Timestamp:HH:mm:ss.fff}] [Guance.RUM] {item.Level} {item.Source}{status}: {item.Message}";
-        Console.WriteLine(line);
-        Debug.WriteLine(line);
-
-        if (item.Exception is not null)
-        {
-            Console.WriteLine(item.Exception);
-            Debug.WriteLine(item.Exception);
-        }
-    }
-
-    private static void LogFirstChanceException(object? sender, FirstChanceExceptionEventArgs args)
-    {
-        var exception = args.Exception;
-        if (exception is not InvalidOperationException)
-        {
-            return;
-        }
-
-        EnsureConsole();
-        var line = $"[{DateTimeOffset.Now:HH:mm:ss.fff}] [FirstChance] {exception.GetType().FullName}: {exception.Message}";
-        Console.WriteLine(line);
-        Console.WriteLine(exception.StackTrace);
-        Debug.WriteLine(line);
-        Debug.WriteLine(exception.StackTrace);
-    }
-
-    private static void EnsureConsole()
-    {
-        if (!OperatingSystem.IsWindows() || Console.IsOutputRedirected)
-        {
-            return;
-        }
-
-        if (AttachConsole(AttachParentProcess) || GetConsoleWindow() != IntPtr.Zero)
-        {
-            return;
-        }
-
-        _ = AllocConsole();
     }
 
     private static string? FindLocalSettingsFile()
@@ -511,22 +430,8 @@ internal static class SampleGuanceConfig
         public string? ReplayTextAndInputPrivacy { get; set; }
         public string? ReplayTouchPrivacy { get; set; }
         public string? ReplayImagePrivacy { get; set; }
-        public bool? Debug { get; set; }
-        public bool? DiagnosticConsoleEnabled { get; set; }
-        public bool? DiagnosticFirstChanceExceptions { get; set; }
         public string? WebViewUrl { get; set; }
     }
-
-    private const int AttachParentProcess = -1;
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AttachConsole(int processId);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AllocConsole();
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetConsoleWindow();
 }
 
 internal sealed record SampleRumSettings(GuanceConfig Rum, string? WebViewUrl);
