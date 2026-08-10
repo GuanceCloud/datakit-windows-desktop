@@ -8,6 +8,10 @@ include(GNUInstallDirs)
 
 option(BUILD_SHARED_LIBS "Build Guance Windows Native as a shared library" ON)
 option(
+    GUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE
+    "Build the optional Electron native bridge executable"
+    OFF)
+option(
     GUANCE_WINDOWS_NATIVE_STAGE_RUNTIME
     "Write local Windows runtime artifacts for managed/Electron packaging"
     OFF)
@@ -84,6 +88,21 @@ endfunction()
 
 set(GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS guance_windows_native)
 
+if(WIN32 AND GUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE)
+    add_executable(guance_windows_electron_bridge src/electron_bridge_host.cpp)
+    target_include_directories(guance_windows_electron_bridge PRIVATE include)
+    target_compile_features(guance_windows_electron_bridge PRIVATE cxx_std_17)
+    target_compile_definitions(guance_windows_electron_bridge PRIVATE
+        WINVER=0x0601
+        _WIN32_WINNT=0x0601)
+    target_link_libraries(guance_windows_electron_bridge PRIVATE guance_windows_native)
+    set_target_properties(guance_windows_electron_bridge PROPERTIES
+        OUTPUT_NAME guance_windows_electron_bridge)
+
+    list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+        guance_windows_electron_bridge)
+endif()
+
 if(BUILD_TESTING)
     add_executable(native_line_protocol_smoke
         tests/native_line_protocol_smoke.cpp
@@ -131,16 +150,6 @@ if(BUILD_TESTING)
         native_batch_queue_smoke)
 
     if(WIN32)
-        add_executable(guance_windows_electron_bridge src/electron_bridge_host.cpp)
-        target_include_directories(guance_windows_electron_bridge PRIVATE include)
-        target_compile_features(guance_windows_electron_bridge PRIVATE cxx_std_17)
-        target_compile_definitions(guance_windows_electron_bridge PRIVATE
-            WINVER=0x0601
-            _WIN32_WINNT=0x0601)
-        target_link_libraries(guance_windows_electron_bridge PRIVATE guance_windows_native)
-        set_target_properties(guance_windows_electron_bridge PROPERTIES
-            OUTPUT_NAME guance_windows_electron_bridge)
-
         add_executable(native_browser_bridge_smoke tests/native_browser_bridge_smoke.cpp)
         target_include_directories(native_browser_bridge_smoke PRIVATE include)
         target_compile_features(native_browser_bridge_smoke PRIVATE cxx_std_17)
@@ -197,7 +206,6 @@ if(BUILD_TESTING)
             winhttp)
 
         list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
-            guance_windows_electron_bridge
             native_browser_bridge_smoke
             native_monitoring_abi_smoke
             native_monitoring_c_abi_smoke
@@ -232,6 +240,10 @@ install(TARGETS guance_windows_native
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+if(TARGET guance_windows_electron_bridge)
+    install(TARGETS guance_windows_electron_bridge
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING

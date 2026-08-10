@@ -4,7 +4,9 @@ param(
 
     [string]$ReleaseTag = "vcpkg_0.1.0-alpha.1",
 
-    [string]$ValidationBaseDirectory = ".build\vcpkg-verify"
+    [string]$ValidationBaseDirectory = ".build\vcpkg-verify",
+
+    [switch]$ElectronBridge
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,13 +60,25 @@ if ($builtinBaseline -cnotmatch "^[0-9a-f]{40}$") {
     throw "A valid microsoft/vcpkg builtin registry baseline could not be resolved."
 }
 
+$verificationDependency = if ($ElectronBridge) {
+@"
+    {
+      "name": "guance-windows-native",
+      "features": [
+        "electron-bridge"
+      ]
+    }
+"@
+} else {
+    '    "guance-windows-native"'
+}
 $verificationManifest = @"
 {
   "name": "guance-windows-native-verification",
   "version-string": "0",
   "builtin-baseline": "$builtinBaseline",
   "dependencies": [
-    "guance-windows-native"
+$verificationDependency
   ]
 }
 "@
@@ -113,6 +127,20 @@ try {
 }
 
 $prefix = Join-Path $installRoot "x64-windows"
+$bridgeDirectory = Join-Path $prefix "tools\guance-windows-native"
+$bridge = Join-Path $bridgeDirectory "guance_windows_electron_bridge.exe"
+$bridgeRuntime = Join-Path $bridgeDirectory "guance_windows_native.dll"
+if ($ElectronBridge) {
+    if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
+        throw "The electron-bridge feature did not install the bridge: $bridge"
+    }
+    if (-not (Test-Path -LiteralPath $bridgeRuntime -PathType Leaf)) {
+        throw "The electron-bridge feature did not install its runtime dependency: $bridgeRuntime"
+    }
+} elseif (Test-Path -LiteralPath $bridge -PathType Leaf) {
+    throw "The default feature set unexpectedly installed the Electron bridge: $bridge"
+}
+
 $consumerSource = Join-Path $repositoryRoot "src\Guance.Windows.Native\tests\package_consumer"
 & $cmake `
     -S $consumerSource `
@@ -135,4 +163,5 @@ try {
     $env:PATH = $savedPath
 }
 
-Write-Output "vcpkg overlay and dynamic consumer validation passed."
+$featureDescription = if ($ElectronBridge) { " with electron-bridge" } else { "" }
+Write-Output "vcpkg overlay$featureDescription and dynamic consumer validation passed."

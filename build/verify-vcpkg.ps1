@@ -5,7 +5,9 @@ param(
 
     [string]$OutputDirectory = ".build\vcpkg-verify",
 
-    [string]$VcpkgExe
+    [string]$VcpkgExe,
+
+    [switch]$ElectronBridge
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +19,9 @@ $arguments = @{
 }
 if (-not [string]::IsNullOrWhiteSpace($VcpkgExe)) {
     $arguments.Vcpkg = $VcpkgExe
+}
+if ($ElectronBridge) {
+    $arguments.ElectronBridge = $true
 }
 
 & (Join-Path $PSScriptRoot "test-vcpkg-overlay.ps1") @arguments

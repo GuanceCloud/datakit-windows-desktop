@@ -6,6 +6,11 @@
   "documentation": "https://github.com/GuanceCloud/datakit-windows-desktop#readme",
   "license": "Apache-2.0",
   "supports": "windows & x64 & !uwp",
+  "features": {
+    "electron-bridge": {
+      "description": "Build and install the native bridge for Electron applications"
+    }
+  },
   "dependencies": [
     {
       "name": "vcpkg-cmake",

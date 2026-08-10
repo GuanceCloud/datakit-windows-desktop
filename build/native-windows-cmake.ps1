@@ -35,6 +35,7 @@ $buildTests = if ($SkipTests -or $TargetArch -cne "x64") { "OFF" } else { "ON" }
     -A $generatorArch `
     "-DBUILD_SHARED_LIBS=ON" `
     "-DBUILD_TESTING=$buildTests" `
+    "-DGUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE=ON" `
     "-DGUANCE_WINDOWS_NATIVE_STAGE_RUNTIME=ON" `
     "-DGUANCE_WINDOWS_NATIVE_RUNTIME_ARCH=$TargetArch"
 if ($LASTEXITCODE -ne 0) {
@@ -56,6 +57,10 @@ if ($buildTests -ceq "ON") {
 $runtime = Join-Path $sourceDirectory "bin\win-$TargetArch\guance_windows_native.dll"
 if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
     throw "Expected native runtime was not staged: $runtime"
+}
+$bridge = Join-Path $sourceDirectory "bin\win-$TargetArch\guance_windows_electron_bridge.exe"
+if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
+    throw "Expected Electron bridge was not staged: $bridge"
 }
 
 Write-Output "Native $TargetArch build validation passed."

@@ -31,7 +31,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: native-win-${{ matrix.arch }}
-          path: src/Guance.Windows.Native/bin/win-${{ matrix.arch }}/guance_windows_native.dll
+          path: |
+            src/Guance.Windows.Native/bin/win-${{ matrix.arch }}/guance_windows_native.dll
+            src/Guance.Windows.Native/bin/win-${{ matrix.arch }}/guance_windows_electron_bridge.exe
 
   managed:
     runs-on: windows-2022
