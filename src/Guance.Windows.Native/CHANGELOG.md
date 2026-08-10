@@ -9,6 +9,19 @@ All notable changes to the `guance-windows-native` vcpkg port are recorded here.
 - vcpkg releases now use an independent `vcpkg_<version>` tag stream.
 - The release validator requires an exact changelog heading before port generation.
 
+## [0.1.0-alpha.3]
+
+### Added
+
+- Native RUM and log data-modifier callbacks for changing existing tags and fields before caching.
+- Optional HTTP request and response header collection with configurable sensitive-header redaction.
+- An opt-in `electron-bridge` vcpkg feature that installs `guance_windows_electron_bridge.exe` and its native runtime dependency.
+
+### Changed
+
+- URL and HTTP-header privacy rules now run consistently after application data modifiers.
+- Native Resource completion can attach request and response headers for SDK-side privacy filtering.
+
 ## [0.1.0-alpha.2]
 
 ### Added
