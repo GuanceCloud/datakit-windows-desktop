@@ -357,7 +357,7 @@ public sealed class GuanceClientDiagnosticsTests
     }
 
     [Fact]
-    public async Task LongTaskAndCrashProperties_AreIncludedAsFields()
+    public async Task LongTaskAndCustomErrorProperties_AreIncludedAsFields()
     {
         var rumQueue = new MemoryRumQueue();
         await using var client = new GuanceClient(
@@ -385,11 +385,10 @@ public sealed class GuanceClientDiagnosticsTests
             "stack",
             "message",
             "InvalidOperationException",
-            "crash",
+            "logger",
             new Dictionary<string, object?>
             {
-                [RumConstants.IsCrash] = true,
-                [RumConstants.CrashSource] = "unit"
+                ["component"] = "unit"
             });
         await client.FlushAsync();
 
@@ -399,8 +398,7 @@ public sealed class GuanceClientDiagnosticsTests
             item.Line.Contains("long_task_delay=250000000i", StringComparison.Ordinal));
         Assert.Contains(rumQueue.Items, item =>
             item.Line.StartsWith("error,", StringComparison.Ordinal) &&
-            item.Line.Contains("is_crash=true", StringComparison.Ordinal) &&
-            item.Line.Contains("crash_source=\"unit\"", StringComparison.Ordinal));
+            item.Line.Contains("component=\"unit\"", StringComparison.Ordinal));
     }
 
     [Fact]

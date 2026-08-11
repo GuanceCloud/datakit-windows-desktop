@@ -61,9 +61,11 @@ public sealed class CrashProcessSmokeTests
 
         var body = await requestTask;
         Assert.Contains("error,", body, StringComparison.Ordinal);
-        Assert.Contains("error_source=crash", body, StringComparison.Ordinal);
-        Assert.Contains("is_crash=true", body, StringComparison.Ordinal);
-        Assert.Contains("crash_source=\"AppDomain.UnhandledException\"", body, StringComparison.Ordinal);
+        Assert.Contains("error_source=logger", body, StringComparison.Ordinal);
+        Assert.Contains("error_type=windows_crash", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("is_crash", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("crash_source", body, StringComparison.Ordinal);
+        Assert.Contains("System.InvalidOperationException", body, StringComparison.Ordinal);
         Assert.Contains("guance crash smoke", body, StringComparison.Ordinal);
     }
 

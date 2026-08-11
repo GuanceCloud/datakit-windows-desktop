@@ -64,19 +64,32 @@ internal sealed class AutomaticInstrumentation : IDisposable
 
     private void OnUnhandledException(object sender, UnhandledExceptionEventArgs args)
     {
-        var properties = new Dictionary<string, object?>
-        {
-            [RumConstants.IsCrash] = args.IsTerminating,
-            [RumConstants.CrashSource] = "AppDomain.UnhandledException"
-        };
-
         if (args.ExceptionObject is Exception exception)
         {
-            client.AddError(exception.ToString(), exception.Message, exception.GetType().Name, "crash", properties);
+            var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
+            var message = string.IsNullOrWhiteSpace(exception.Message)
+                ? exceptionType
+                : $"{exceptionType}: {exception.Message}";
+            client.AddError(
+                exception.ToString(),
+                message,
+                args.IsTerminating ? "windows_crash" : exception.GetType().Name,
+                "logger",
+                properties: null,
+                waitForQueue: args.IsTerminating);
         }
         else
         {
-            client.AddError(args.ExceptionObject?.ToString() ?? string.Empty, "Unhandled non-Exception object", "UnhandledException", "crash", properties);
+            var exceptionText = args.ExceptionObject?.ToString() ?? string.Empty;
+            client.AddError(
+                exceptionText,
+                string.IsNullOrWhiteSpace(exceptionText)
+                    ? "Unhandled non-Exception object"
+                    : $"Unhandled non-Exception object: {exceptionText}",
+                args.IsTerminating ? "windows_crash" : "UnhandledException",
+                "logger",
+                properties: null,
+                waitForQueue: args.IsTerminating);
         }
 
         if (args.IsTerminating)
@@ -91,12 +104,7 @@ internal sealed class AutomaticInstrumentation : IDisposable
             args.Exception.ToString(),
             args.Exception.Message,
             args.Exception.GetType().Name,
-            "logger",
-            new Dictionary<string, object?>
-            {
-                [RumConstants.IsCrash] = false,
-                [RumConstants.CrashSource] = "TaskScheduler.UnobservedTaskException"
-            });
+            "logger");
     }
 
     private void FlushForCrash()

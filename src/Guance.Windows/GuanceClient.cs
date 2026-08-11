@@ -668,7 +668,7 @@ public sealed class GuanceClient : IAsyncDisposable
             AddError(
                 errorStack ?? string.Empty,
                 errorMessage ?? $"[{statusCode}][{privacySafeUrl}]",
-                "network",
+                "network_error",
                 "network",
                 errorProperties);
         }
@@ -682,6 +682,17 @@ public sealed class GuanceClient : IAsyncDisposable
 
     /// <summary>Adds a RUM Error from explicit stack, message, type, and source values.</summary>
     public void AddError(string stack, string message, string errorType, string source = "logger", IReadOnlyDictionary<string, object?>? properties = null)
+    {
+        AddError(stack, message, errorType, source, properties, waitForQueue: false);
+    }
+
+    internal void AddError(
+        string stack,
+        string message,
+        string errorType,
+        string source,
+        IReadOnlyDictionary<string, object?>? properties,
+        bool waitForQueue)
     {
         session.Touch();
         sessionReplay.NotifyError(CreateSessionReplayContext());
@@ -700,7 +711,7 @@ public sealed class GuanceClient : IAsyncDisposable
             .WithField(RumConstants.ErrorStack, stack);
 
         AddErrorResourceTags(rumEvent, properties);
-        Enqueue(rumEvent, waitForQueue: IsCrash(properties));
+        Enqueue(rumEvent, waitForQueue);
         IncrementError(view, action);
     }
 
@@ -1777,21 +1788,6 @@ public sealed class GuanceClient : IAsyncDisposable
         }
 
         return merged;
-    }
-
-    private static bool IsCrash(IReadOnlyDictionary<string, object?>? values)
-    {
-        if (values is null || !values.TryGetValue(RumConstants.IsCrash, out var value) || value is null)
-        {
-            return false;
-        }
-
-        return value switch
-        {
-            bool crash => crash,
-            string text when bool.TryParse(text, out var parsed) => parsed,
-            _ => false
-        };
     }
 
     private static void AddErrorResourceTags(RumEvent rumEvent, IReadOnlyDictionary<string, object?>? values)

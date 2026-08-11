@@ -782,7 +782,7 @@ function registerIpc() {
       return { accepted: false, reason: "Native RUM host is unavailable." };
     }
     return nativeRumHost.crashForAcceptance()
-      ? { accepted: true, recoveryFilter: "error_origin=native_crash_recovery" }
+      ? { accepted: true, recoveryFilter: "error_type=native_crash" }
       : { accepted: false, reason: "Native crash command was rejected." };
   });
 }

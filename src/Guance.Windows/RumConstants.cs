@@ -124,6 +124,4 @@ internal static class RumConstants
     public const string LongTaskThreshold = "long_task_threshold";
     public const string LongTaskCooldown = "long_task_cooldown";
     public const string LongTaskSuppressedCount = "long_task_suppressed_count";
-    public const string IsCrash = "is_crash";
-    public const string CrashSource = "crash_source";
 }

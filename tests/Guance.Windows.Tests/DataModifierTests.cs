@@ -112,6 +112,8 @@ public sealed class DataModifierTests
         Assert.DoesNotContain(lines, item => item.Line.Contains("secret", StringComparison.Ordinal));
         Assert.Contains(lines, item =>
             item.Line.StartsWith("error,", StringComparison.Ordinal) &&
+            item.Line.Contains("error_type=network_error", StringComparison.Ordinal) &&
+            item.Line.Contains("error_source=network", StringComparison.Ordinal) &&
             item.Line.Contains("token=hidden", StringComparison.Ordinal));
     }
 

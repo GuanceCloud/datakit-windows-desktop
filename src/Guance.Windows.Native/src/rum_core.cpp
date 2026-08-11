@@ -1683,10 +1683,9 @@ void RumCore::add_ui_hang_event(const HangEvent& hang, const std::string& stack)
                   << hang.duration_ms << std::endl;
     }
     RumEvent event = base_event("error", unix_time_before(duration_ns));
-    event.tags["error_type"] = "ApplicationNotResponding";
+    event.tags["error_type"] = "anr_error";
     event.tags["error_source"] = "logger";
     event.tags["error_situation"] = "run";
-    event.tags["error_origin"] = "ui_watchdog";
     event.tags["hang_id"] = hang.incident_id;
     if (active_view_) {
         event.tags["view_id"] = active_view_->id;
@@ -1702,7 +1701,8 @@ void RumCore::add_ui_hang_event(const HangEvent& hang, const std::string& stack)
             it->second.error_count++;
         }
     }
-    event.fields["error_message"] = std::string{"UI thread was unresponsive"};
+    event.fields["error_message"] = std::string{"UI thread was unresponsive for "} +
+        std::to_string(hang.duration_ms) + " ms";
     event.fields["error_stack"] = stack;
     event.fields["duration"] = duration_ns;
     event.fields["hang_threshold"] = threshold_ns;
@@ -1716,13 +1716,21 @@ bool RumCore::add_recovered_crash(
     std::lock_guard lock(mutex_);
     RumEvent event = base_event("error", crash.timestamp_ns);
     const bool cpp_terminate = (crash.flags & CrashEnvelopeCppTerminate) != 0;
-    event.tags["error_type"] = cpp_terminate ? "CppTerminate" : "NativeCrash";
+    event.tags["error_type"] = "native_crash";
     event.tags["error_source"] = "logger";
     event.tags["error_situation"] = "startup";
-    event.tags["error_origin"] = "native_crash_recovery";
-    event.fields["error_message"] = cpp_terminate
-        ? std::string{"Previous run ended in std::terminate"}
-        : std::string{"Previous run ended in an unhandled native exception"};
+
+    std::ostringstream message;
+    if (cpp_terminate) {
+        message << "std::terminate was invoked";
+    } else {
+        message << "Unhandled native exception 0x"
+                << std::hex << std::uppercase << crash.exception_code_value;
+        if (crash.exception_address != 0) {
+            message << " at 0x" << crash.exception_address;
+        }
+    }
+    event.fields["error_message"] = message.str();
 
     std::ostringstream stack;
     const auto instruction_pointer = crash.instruction_pointer != 0
@@ -1732,18 +1740,11 @@ bool RumCore::add_recovered_crash(
         stack << "0x" << std::hex << instruction_pointer;
     }
     event.fields["error_stack"] = stack.str();
-    event.fields["crash_previous_run"] = true;
-    event.fields["crash_exception_code"] = static_cast<int64_t>(crash.exception_code_value);
-    event.fields["crash_exception_address"] = static_cast<int64_t>(crash.exception_address);
-    event.fields["crash_process_id"] = static_cast<int64_t>(crash.process_id);
-    event.fields["crash_thread_id"] = static_cast<int64_t>(crash.thread_id);
-    event.fields["crash_timestamp"] = crash.timestamp_ns;
     const bool has_minidump =
         (crash.flags & CrashEnvelopeHasMinidump) != 0 && !minidump_path.empty();
-    event.fields["crash_has_minidump"] = has_minidump;
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native.Monitoring] recovered previous-run crash type="
-                  << (cpp_terminate ? "CppTerminate" : "NativeCrash")
+                  << "native_crash"
                   << " error_stack=" << (stack.str().empty() ? "<empty>" : stack.str())
                   << " minidump=" << (has_minidump ? "true" : "false")
                   << std::endl;
