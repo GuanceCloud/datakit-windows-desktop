@@ -37,8 +37,12 @@ const {
   resolveNativeRumPaths,
 } = require("./native-rum-host.cjs");
 const {
+  connectElectronMonitoring,
   initializeElectronMonitoring,
 } = require("./electron-monitoring.cjs");
+const {
+  connectNativeOwnedRumBridge,
+} = require("./native-owned-rum-bridge.cjs");
 const {
   ElectronApplicationLaunchTracker,
 } = require("./electron-application-launch.cjs");
@@ -46,10 +50,12 @@ const { monitorElectronWindow } = require("./electron-process-monitor.cjs");
 
 const DEV_RENDERER_URL = process.env.ELECTRON_RENDERER_URL;
 const IS_SMOKE = process.env.ELECTRON_SMOKE === "1";
+const MONITORING_MODE = process.env.GUANCE_ELECTRON_MONITORING_MODE === "native-owned"
+  ? "native-owned"
+  : "electron-owned";
 const SAMPLE_ROOT = path.resolve(__dirname, "..", "..");
 const DIST_ROOT = path.join(SAMPLE_ROOT, "dist");
 const ACCEPTANCE_USER_ID = `desktop-${crypto.randomUUID()}`;
-const NATIVE_SESSION_ID = crypto.randomUUID().replaceAll("-", "");
 const SMOKE_TIMEOUT_MS = 15_000;
 const applicationLaunch = new ElectronApplicationLaunchTracker();
 
@@ -271,8 +277,6 @@ function createMonitoringConfiguration() {
         env: environment,
         version,
         sdk_name: "df_windows_rum_sdk",
-        sdk_version: app.getVersion(),
-        session_id: NATIVE_SESSION_ID,
         is_electron: "true",
         is_signin: "true",
         userid: ACCEPTANCE_USER_ID,
@@ -287,7 +291,25 @@ function createMonitoringConfiguration() {
   };
 }
 
-function initializeNativeRumHost() {
+async function initializeNativeRumHost() {
+  if (MONITORING_MODE === "native-owned") {
+    const nativeBridge = await connectNativeOwnedRumBridge();
+    monitoringConfiguration = {
+      runtime: { debug: nativeBridge.nativePolicy.runtime.debug },
+    };
+    electronMonitoring = connectElectronMonitoring({
+      nativeBridge,
+      nativePolicy: nativeBridge.nativePolicy,
+      electron: { defaultPage: { enabled: true }, pages: {} },
+    });
+    nativeRumHost = nativeBridge;
+    applicationLaunch.markSdkInitialized();
+    console.log(
+      "[electron-main][native-owned] connected to the C++ host's existing SDK handle",
+    );
+    return;
+  }
+
   const configuration = createMonitoringConfiguration();
   monitoringConfiguration = configuration;
   if (
@@ -1061,8 +1083,10 @@ function createMainWindow() {
 }
 
 app.whenReady().then(async () => {
-  initializeLocalRumSettings();
-  initializeNativeRumHost();
+  if (MONITORING_MODE === "electron-owned") {
+    initializeLocalRumSettings();
+  }
+  await initializeNativeRumHost();
   installLaunchLifecycle();
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {

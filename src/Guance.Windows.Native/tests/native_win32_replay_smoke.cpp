@@ -344,6 +344,9 @@ int main() {
     assert(contains(request, "name=\"source\""));
     assert(contains(request, "name=\"source\"\r\n\r\nwindows\r\n"));
     assert(contains(request, "name=\"sdk_name\"\r\n\r\ndf_windows_rum_sdk\r\n"));
+    assert(contains(
+        request,
+        std::string("name=\"sdk_version\"\r\n\r\n") + guance_sdk_get_version() + "\r\n"));
     assert(contains(request, "name=\"has_full_snapshot\""));
     assert(contains(request, "true"));
     const auto initial_segment = inflate_stored_zlib(multipart_segment(request));
@@ -360,10 +363,11 @@ int main() {
     assert(contains(interaction_segment, "\"source\":4"));
     assert(contains(interaction_segment, "Native RUM Smoke"));
     assert(contains(requests[2], "POST /v1/write/rum/replay"));
-    assert(contains(requests[2], "name=\"session_id\"\r\n\r\nbrowser-native-session\r\n"));
+    assert(!contains(requests[2], "browser-native-session"));
+    assert(contains(requests[2], "name=\"session_id\"\r\n\r\n"));
     assert(contains(requests[2], "name=\"view_id\"\r\n\r\nbrowser-native-view\r\n"));
     const auto browser_segment = inflate_stored_zlib(multipart_segment(requests[2]));
-    assert(contains(browser_segment, "\"session\":{\"id\":\"browser-native-session\"}"));
+    assert(!contains(browser_segment, "browser-native-session"));
     assert(contains(browser_segment, "\"view\":{\"id\":\"browser-native-view\"}"));
     assert(contains(browser_segment, browser_record));
     assert(contains(requests[3], "POST /v1/write/rum"));

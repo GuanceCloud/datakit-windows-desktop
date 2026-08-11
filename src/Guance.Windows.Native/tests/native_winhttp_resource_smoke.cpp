@@ -143,6 +143,16 @@ bool contains(const std::string& text, const std::string& expected) {
     return text.find(expected) != std::string::npos;
 }
 
+std::string line_tag_value(const std::string& request, const std::string& name) {
+    const auto value_start = request.find(name + "=");
+    if (value_start == std::string::npos) {
+        return {};
+    }
+    const auto start = value_start + name.size() + 1;
+    const auto end = request.find_first_of(", \r\n", start);
+    return request.substr(start, end - start);
+}
+
 std::string header_value(const std::string& request, const std::string& name) {
     std::string lower = request;
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char character) {
@@ -355,6 +365,9 @@ int main() {
     assert(trace_id != "00000000000000000000000000000001");
     assert(header_value(requests[1], "X-B3-Sampled") == "1");
     assert(contains(requests[2], "POST /v1/write/rum"));
+    assert(contains(
+        requests[2],
+        std::string("sdk_version=") + guance_sdk_get_version()));
     assert(contains(requests[2], "resource_status=200"));
     assert(contains(requests[2], "resource_type=http"));
     assert(contains(requests[2], "resource_http_protocol=HTTP/1.1"));
@@ -371,6 +384,13 @@ int main() {
     assert(!contains(requests[2], "/ignored"));
     assert(contains(requests[3], "POST /v1/write/logging"));
     assert(contains(requests[3], "df_rum_windows_log,"));
+    assert(contains(
+        requests[3],
+        std::string("sdk_version=") + guance_sdk_get_version()));
+    const auto rum_session_id = line_tag_value(requests[2], "session_id");
+    const auto log_session_id = line_tag_value(requests[3], "session_id");
+    assert(!rum_session_id.empty());
+    assert(log_session_id == rum_session_id);
     assert(contains(requests[3], "view_name=NativeLogView"));
     assert(contains(requests[3], "action_name=NativeLogAction"));
     assert(contains(requests[3], "message=\"native log message\""));

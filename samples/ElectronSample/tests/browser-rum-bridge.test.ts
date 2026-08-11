@@ -193,7 +193,6 @@ describe("Browser RUM WebView-compatible bridge", () => {
         service: "windows-sample",
         env: "local",
         sdk_name: "df_windows_rum_sdk",
-        session_id: "native-session",
         is_electron: "true",
       },
       fields: {
@@ -215,9 +214,7 @@ describe("Browser RUM WebView-compatible bridge", () => {
 
   it("converts an experimental replay record to the private native command", () => {
     const parsed = parseBridgeEvent(replayEvent());
-    const result = browserBridgeEventToNativeInput(replayEvent(), {
-      tags: { session_id: "native-session" },
-    });
+    const result = browserBridgeEventToNativeInput(replayEvent());
 
     expect(parsed).toMatchObject({
       name: "session_replay",
@@ -227,8 +224,9 @@ describe("Browser RUM WebView-compatible bridge", () => {
     });
     expect(result.measurement).toBe("session_replay");
     expect(result.line).toContain(
-      "@guance-replay\tsession_id=native-session\tview_id=browser-view",
+      "@guance-replay\tview_id=browser-view",
     );
+    expect(result.line).not.toContain("session_id=");
     expect(result.line).toContain("\tfull_snapshot=1\t");
     expect(result.line.endsWith("\n")).toBe(true);
   });
@@ -275,12 +273,12 @@ describe("Browser RUM WebView-compatible bridge", () => {
     });
 
     const result = browserRumEventToLine(event, {
-      tags: { app_id: "win_sample", session_id: "native-session" },
+      tags: { app_id: "win_sample" },
     });
 
     expect(result.line).toContain("trace_id=0123456789abcdef0123456789abcdef");
     expect(result.line).toContain("span_id=0123456789abcdef");
-    expect(result.line).toContain("session_id=native-session");
+    expect(result.line).not.toContain("session_id=");
   });
 });
 
@@ -355,7 +353,6 @@ describe("Electron native host adapter", () => {
         tags: {
           app_id: "win_sample",
           sdk_name: "df_windows_rum_sdk",
-          session_id: "native-session",
         },
         fields: { session_has_replay: false },
       },
@@ -407,8 +404,9 @@ describe("Electron native host adapter", () => {
     expect(write.mock.calls[1][0]).toContain("@guance-log\tstatus=warning\tmessage=");
     expect(write.mock.calls[1][1]).toBe("utf8");
     expect(write.mock.calls[2][0]).toContain(
-      "@guance-replay\tsession_id=native-session\tview_id=browser-view",
+      "@guance-replay\tview_id=browser-view",
     );
+    expect(write.mock.calls[2][0]).not.toContain("session_id=");
     expect(write.mock.calls[2][1]).toBe("utf8");
     expect(write.mock.calls[3]).toEqual([
       "@guance-launch\ttype=cold\tstart_time_ns=100\tduration_ns=60\t" +

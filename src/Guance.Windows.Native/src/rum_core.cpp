@@ -1,5 +1,6 @@
 #include "rum_core.h"
 
+#include "guance_sdk_version.h"
 #include "native_monitoring.h"
 #include "transport.h"
 
@@ -34,6 +35,7 @@ constexpr int64_t kReplaySegmentFlushMilliseconds = 5000;
 constexpr int64_t kReplayCoalesceMilliseconds = 200;
 constexpr const char* kWindowsReplaySource = "windows";
 constexpr const char* kWindowsSdkName = "df_windows_rum_sdk";
+constexpr const char* kWindowsSdkVersion = GUANCE_WINDOWS_NATIVE_SDK_VERSION;
 constexpr const char* kWindowsLogSource = "df_rum_windows_log";
 constexpr std::size_t kMaxBridgeLineBytes = 1024 * 1024;
 constexpr std::size_t kMaxBrowserReplayRecordBytes = 1024 * 1024;
@@ -1000,6 +1002,28 @@ bool RumCore::write_line(const char* line, std::size_t length) {
         return true;
     }
 
+    event.tags["app_id"] = config_.rum_app_id;
+    event.tags["service"] = config_.service_name;
+    event.tags["env"] = config_.env;
+    event.tags["version"] = config_.version;
+    event.tags["session_id"] = session_id_;
+    event.tags["sdk_name"] = kWindowsSdkName;
+    event.tags["sdk_version"] = kWindowsSdkVersion;
+    event.fields["session_sample_rate"] = config_.sample_rate;
+    event.fields["session_on_error_sample_rate"] = config_.session_error_sample_rate;
+    {
+        std::lock_guard lock(mutex_);
+        event.fields["session_has_replay"] = session_replay_sampled_;
+        for (const auto& [key, value] : global_context_) {
+            event.tags[key] = value;
+        }
+        for (const auto& [key, value] : rum_context_) {
+            event.tags[key] = value;
+        }
+        for (const auto& [key, value] : user_tags_) {
+            event.tags[key] = value;
+        }
+    }
     apply_modifiers(event);
     const auto modified_line = format_line_protocol(event);
     const bool persisted = queue_->enqueue(modified_line);
@@ -1048,7 +1072,6 @@ void RumCore::start_view(const char* name) {
             flush_replay_pending_locked();
         } else {
             replay_pending_records_.clear();
-            replay_pending_session_id_.clear();
             replay_pending_view_id_.clear();
             replay_pending_has_full_snapshot_ = false;
             replay_pending_creation_reason_ = "incremental";
@@ -1461,6 +1484,7 @@ bool RumCore::add_log(
     event.tags["env"] = config_.env;
     event.tags["version"] = config_.version;
     event.tags["sdk_name"] = kWindowsSdkName;
+    event.tags["sdk_version"] = kWindowsSdkVersion;
     {
         std::lock_guard state_lock(mutex_);
         for (const auto& [key, value] : global_context_) {
@@ -1843,12 +1867,12 @@ bool RumCore::capture_browser_replay_record(
     std::size_t record_json_length,
     int64_t timestamp_ms,
     bool is_full_snapshot) {
-    if (session_id == nullptr || view_id == nullptr || record_json == nullptr || timestamp_ms <= 0 ||
+    (void)session_id;
+    if (view_id == nullptr || record_json == nullptr || timestamp_ms <= 0 ||
         record_json_length < 2 || record_json_length > kMaxBrowserReplayRecordBytes) {
         return false;
     }
 
-    const std::string browser_session_id(session_id);
     const std::string browser_view_id(view_id);
     const auto invalid_identifier = [](const std::string& value) {
         return value.empty() || value.size() > 128 ||
@@ -1856,7 +1880,7 @@ bool RumCore::capture_browser_replay_record(
                    return std::iscntrl(character) != 0;
                });
     };
-    if (invalid_identifier(browser_session_id) || invalid_identifier(browser_view_id) ||
+    if (invalid_identifier(browser_view_id) ||
         std::find(record_json, record_json + record_json_length, '\0') !=
             record_json + record_json_length) {
         return false;
@@ -1883,7 +1907,6 @@ bool RumCore::capture_browser_replay_record(
         is_full_snapshot ? "full_snapshot" : "incremental",
         timestamp_ms,
         {},
-        browser_session_id,
         browser_view_id);
     return true;
 }
@@ -1975,7 +1998,6 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
     const std::string& creation_reason,
     int64_t start_ms,
     int64_t end_ms,
-    const std::string& session_id_override,
     const std::string& view_id_override) {
     const auto boundary = "guance-rum-replay-" + uuid32();
     const auto view_id = !view_id_override.empty()
@@ -1987,8 +2009,7 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
     }
     const auto index_in_view = replay_index_in_view_++;
     const auto replay_app_id = normalize_replay_id(config_.rum_app_id);
-    const auto segment_session_id = session_id_override.empty() ? session_id_ : session_id_override;
-    const auto replay_session_id = normalize_replay_id(segment_session_id);
+    const auto replay_session_id = normalize_replay_id(session_id_);
     const auto replay_view_id = normalize_replay_id(view_id);
     std::ostringstream segment;
     segment << "{\"application\":{\"id\":\"" << json_escape(replay_app_id)
@@ -2008,13 +2029,13 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
     body += multipart_field(boundary, "index_in_view", std::to_string(index_in_view));
     body += multipart_field(boundary, "source", kWindowsReplaySource);
     body += multipart_field(boundary, "sdk_name", kWindowsSdkName);
-    body += multipart_field(boundary, "sdk_version", config_.version);
+    body += multipart_field(boundary, "sdk_version", kWindowsSdkVersion);
     body += multipart_field(boundary, "start", std::to_string(start_ms));
     body += multipart_field(boundary, "end", std::to_string(end_ms));
     body += multipart_field(boundary, "app_id", config_.rum_app_id);
     body += multipart_field(boundary, "view_id", view_id);
     (void)creation_reason;
-    body += multipart_field(boundary, "session_id", segment_session_id);
+    body += multipart_field(boundary, "session_id", session_id_);
     body += multipart_field(boundary, "env", config_.env);
     body += multipart_field(boundary, "service", config_.service_name);
     body += multipart_field(boundary, "version", config_.version);
@@ -2031,7 +2052,6 @@ void RumCore::add_replay_record(
     const std::string& creation_reason,
     int64_t timestamp_ms,
     std::string coalesce_key,
-    std::string session_id_override,
     std::string view_id_override) {
     if (!session_replay_recording_) {
         return;
@@ -2042,12 +2062,10 @@ void RumCore::add_replay_record(
     }
 
     if (!replay_pending_records_.empty() &&
-        (replay_pending_session_id_ != session_id_override ||
-         replay_pending_view_id_ != view_id_override)) {
+        replay_pending_view_id_ != view_id_override) {
         flush_replay_pending_locked();
     }
     if (replay_pending_records_.empty()) {
-        replay_pending_session_id_ = std::move(session_id_override);
         replay_pending_view_id_ = std::move(view_id_override);
     }
 
@@ -2109,11 +2127,9 @@ void RumCore::flush_replay_pending_locked() {
         replay_pending_creation_reason_,
         replay_pending_start_ms_,
         replay_pending_end_ms_,
-        replay_pending_session_id_,
         replay_pending_view_id_);
 
     replay_pending_records_.clear();
-    replay_pending_session_id_.clear();
     replay_pending_view_id_.clear();
     replay_pending_has_full_snapshot_ = false;
     replay_pending_creation_reason_ = "incremental";
@@ -2152,6 +2168,7 @@ RumEvent RumCore::base_event(const std::string& measurement, int64_t timestamp_n
     event.tags["service"] = config_.service_name;
     event.tags["env"] = config_.env;
     event.tags["sdk_name"] = kWindowsSdkName;
+    event.tags["sdk_version"] = kWindowsSdkVersion;
     event.tags["session_id"] = session_id_;
     event.fields["session_sample_rate"] = config_.sample_rate;
     event.fields["session_on_error_sample_rate"] = config_.session_error_sample_rate;

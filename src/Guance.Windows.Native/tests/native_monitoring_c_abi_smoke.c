@@ -1,8 +1,13 @@
 #include "guance_sdk.h"
 
 #include <assert.h>
+#include <string.h>
 
 int main(void) {
+    assert(guance_sdk_get_version() != NULL);
+    assert(strlen(guance_sdk_get_version()) > 0);
+    assert(guance_sdk_write_electron_bridge_line(NULL, "view value=1i", 13) == 0);
+
     guance_sdk_config sdk;
     guance_sdk_config_init(&sdk);
     assert(sdk.max_cache_bytes == 128LL * 1024 * 1024);

@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <regex>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -80,24 +82,32 @@ int main() {
             ? ",view_referrer=https://ref.example.test/?token\\=secret"
             : "";
         valid = std::string(measurement) +
-            ",app_id=electron-browser-bridge-smoke,browser_numeric_tag=raw,sdk_name=df_windows_rum_sdk" +
+            ",app_id=renderer-app,browser_numeric_tag=raw,env=renderer-env," +
+            "service=renderer-service,version=renderer-app-version,sdk_name=renderer-sdk," +
+            "sdk_version=renderer-sdk-version,session_id=renderer-session" +
             resource_url + view_referrer + " "
-            "is_active=false,time_spent=1i 1722300000000000000\n";
+            "is_active=false,time_spent=1i 1722300000000000000";
         require(
-            guance_sdk_write_line(handle, valid.data(), valid.size()) == 1,
+            guance_sdk_write_electron_bridge_line(handle, valid.data(), valid.size()) == 1,
             "valid Phase 1 Browser RUM line was rejected");
     }
 
     const std::string unsupported =
         "log,app_id=electron-browser-bridge-smoke message=\"not rum\" "
-        "1722300000000000000\n";
+        "1722300000000000000";
     require(
-        guance_sdk_write_line(handle, unsupported.data(), unsupported.size()) == 0,
+        guance_sdk_write_electron_bridge_line(
+            handle,
+            unsupported.data(),
+            unsupported.size()) == 0,
         "unsupported measurement was accepted");
 
-    const std::string multiple_lines = valid + valid;
+    const std::string multiple_lines = valid + "\n" + valid;
     require(
-        guance_sdk_write_line(handle, multiple_lines.data(), multiple_lines.size()) == 0,
+        guance_sdk_write_electron_bridge_line(
+            handle,
+            multiple_lines.data(),
+            multiple_lines.size()) == 0,
         "multiple line payload was accepted");
 
     const std::string browser_full_snapshot =
@@ -182,6 +192,32 @@ int main() {
         require(
             queued_lines.find("browser_numeric_tag=42") != std::string::npos,
             "browser bridge tag modifier did not preserve replacement semantics");
+        require(
+            queued_lines.find("renderer-session") == std::string::npos &&
+                queued_lines.find("renderer-sdk-version") == std::string::npos &&
+                queued_lines.find("sdk_name=renderer-sdk") == std::string::npos &&
+                queued_lines.find("app_id=renderer-app") == std::string::npos &&
+                queued_lines.find("service=renderer-service") == std::string::npos &&
+                queued_lines.find("env=renderer-env") == std::string::npos &&
+                queued_lines.find("version=renderer-app-version") == std::string::npos,
+            "browser bridge retained renderer-owned Native identity");
+        require(
+            queued_lines.find("app_id=electron-browser-bridge-smoke") != std::string::npos,
+            "browser bridge did not use the Native Core application id");
+        require(
+            queued_lines.find(std::string("sdk_version=") + guance_sdk_get_version()) !=
+                std::string::npos,
+            "browser bridge did not use the compiled native SDK version");
+        std::set<std::string> session_ids;
+        const std::regex session_pattern("session_id=([^, \\r\\n]+)");
+        for (std::sregex_iterator it(queued_lines.begin(), queued_lines.end(), session_pattern), end;
+             it != end;
+             ++it) {
+            session_ids.insert((*it)[1].str());
+        }
+        require(
+            session_ids.size() == 1,
+            "browser and native events did not share one Native Core Session");
         require(
             queued_lines.find("token\\=%3Credacted%3E") != std::string::npos &&
                 queued_lines.find("token\\=secret") == std::string::npos,

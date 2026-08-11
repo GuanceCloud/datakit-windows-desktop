@@ -220,14 +220,13 @@ private:
     bool sampled_for(const std::string& measurement) const;
     void capture_session_replay_snapshot();
     std::string build_session_replay_snapshot_record(int64_t timestamp_ms);
-    std::pair<std::string, std::string> build_session_replay_segment(std::string records_json, int records_count, bool has_full_snapshot, const std::string& creation_reason, int64_t start_ms, int64_t end_ms, const std::string& session_id_override, const std::string& view_id_override);
+    std::pair<std::string, std::string> build_session_replay_segment(std::string records_json, int records_count, bool has_full_snapshot, const std::string& creation_reason, int64_t start_ms, int64_t end_ms, const std::string& view_id_override);
     void add_replay_record(
         std::string record_json,
         bool has_full_snapshot,
         const std::string& creation_reason,
         int64_t timestamp_ms,
         std::string coalesce_key = {},
-        std::string session_id_override = {},
         std::string view_id_override = {});
     void flush_replay_pending_locked();
     void enqueue_replay_segment(std::string content_type, std::string body);
@@ -280,7 +279,6 @@ private:
     bool session_replay_recording_ = false;
     int replay_index_in_view_ = 0;
     std::string replay_segment_view_id_;
-    std::string replay_pending_session_id_;
     std::string replay_pending_view_id_;
     bool replay_pending_has_full_snapshot_ = false;
     std::string replay_pending_creation_reason_ = "incremental";

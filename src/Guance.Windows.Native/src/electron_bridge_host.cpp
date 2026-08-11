@@ -751,18 +751,15 @@ ControlCommandResult handle_replay_command(
             return ControlCommandResult::rejected;
         }
     }
-    if (fields.size() != 5) {
+    if (fields.size() != 4) {
         return ControlCommandResult::rejected;
     }
 
-    std::string session_id;
     std::string view_id;
     std::string record_json;
     int64_t timestamp_ms = 0;
     const auto full_snapshot = fields.find("full_snapshot");
-    if (!percent_decode(fields["session_id"], session_id) ||
-        session_id.empty() || session_id.size() > 128 ||
-        !percent_decode(fields["view_id"], view_id) ||
+    if (!percent_decode(fields["view_id"], view_id) ||
         view_id.empty() || view_id.size() > 128 ||
         !parse_int64(fields["timestamp_ms"], timestamp_ms) || timestamp_ms <= 0 ||
         full_snapshot == fields.end() ||
@@ -774,7 +771,7 @@ ControlCommandResult handle_replay_command(
 
     if (guance_rum_capture_browser_replay_record(
             handle,
-            session_id.c_str(),
+            nullptr,
             view_id.c_str(),
             record_json.data(),
             record_json.size(),
@@ -785,7 +782,6 @@ ControlCommandResult handle_replay_command(
     if (debug) {
         std::cout
             << "[Guance.RUM.NativeBridge] Browser replay"
-            << " session_id=" << session_id
             << " view_id=" << view_id
             << " bytes=" << record_json.size()
             << std::endl;
@@ -904,6 +900,9 @@ int main() {
             std::cerr << "[Guance.RUM.NativeBridge] logging configuration failed" << std::endl;
             return 3;
         }
+        if (host.session_replay_enabled) {
+            guance_rum_start_session_replay(handle);
+        }
 
         if (host.debug) {
             guance_sdk_native_monitoring_config monitoring{};
@@ -972,41 +971,11 @@ int main() {
                 std::cerr << "[Guance.RUM.NativeBridge] rejected invalid native crash command" << std::endl;
                 continue;
             }
-            const auto launch_result = handle_launch_command(handle, line, host.debug);
-            if (launch_result == ControlCommandResult::accepted) {
-                continue;
-            }
-            if (launch_result == ControlCommandResult::rejected) {
-                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid launch command" << std::endl;
-                continue;
-            }
-            const auto error_result = handle_error_command(handle, line, host.debug);
-            if (error_result == ControlCommandResult::accepted) {
-                continue;
-            }
-            if (error_result == ControlCommandResult::rejected) {
-                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid error command" << std::endl;
-                continue;
-            }
-            const auto log_result = handle_log_command(handle, line, host.debug);
-            if (log_result == ControlCommandResult::accepted) {
-                continue;
-            }
-            if (log_result == ControlCommandResult::rejected) {
-                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid log command" << std::endl;
-                continue;
-            }
-            const auto replay_result = handle_replay_command(handle, line, host.debug);
-            if (replay_result == ControlCommandResult::accepted) {
-                continue;
-            }
-            if (replay_result == ControlCommandResult::rejected) {
-                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid replay command" << std::endl;
-                continue;
-            }
-            line.push_back('\n');
-            if (guance_sdk_write_line(handle, line.data(), line.size()) != 1) {
-                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid RUM line" << std::endl;
+            if (guance_sdk_write_electron_bridge_line(
+                    handle,
+                    line.data(),
+                    line.size()) != 1) {
+                std::cerr << "[Guance.RUM.NativeBridge] rejected invalid bridge input" << std::endl;
             }
         }
 
@@ -1019,6 +988,9 @@ int main() {
                 handle,
                 previous_diagnostics,
                 has_previous_diagnostics);
+        }
+        if (host.session_replay_enabled) {
+            guance_rum_stop_session_replay(handle);
         }
         guance_sdk_shutdown(handle);
         std::cout << "[Guance.RUM.NativeBridge] stopped" << std::endl;

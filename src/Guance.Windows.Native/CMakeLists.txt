@@ -2,6 +2,22 @@ cmake_minimum_required(VERSION 3.20)
 
 project(GuanceWindowsNative VERSION 0.1.0 LANGUAGES C CXX)
 
+set(
+    GUANCE_WINDOWS_NATIVE_SDK_VERSION
+    "${PROJECT_VERSION}"
+    CACHE STRING
+    "Version reported by the Guance Windows Native SDK")
+if(NOT GUANCE_WINDOWS_NATIVE_SDK_VERSION MATCHES
+   "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(alpha|beta)\\.[1-9][0-9]*)?$")
+    message(FATAL_ERROR
+        "GUANCE_WINDOWS_NATIVE_SDK_VERSION must be a supported release version")
+endif()
+
+configure_file(
+    src/guance_sdk_version.h.in
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/guance_sdk_version.h"
+    @ONLY)
+
 include(CMakePackageConfigHelpers)
 include(CTest)
 include(GNUInstallDirs)
@@ -30,6 +46,7 @@ endif()
 
 add_library(guance_windows_native
     src/data_modifier.cpp
+    src/electron_bridge_protocol.cpp
     src/guance_sdk.cpp
     src/line_protocol.cpp
     src/crash_envelope.cpp
@@ -58,7 +75,8 @@ target_include_directories(guance_windows_native
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
-        src)
+        src
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_definitions(guance_windows_native
     PRIVATE
         $<$<BOOL:${BUILD_SHARED_LIBS}>:GUANCE_WINDOWS_NATIVE_BUILDING_DLL=1>
@@ -99,8 +117,43 @@ if(WIN32 AND GUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE)
     set_target_properties(guance_windows_electron_bridge PROPERTIES
         OUTPUT_NAME guance_windows_electron_bridge)
 
+    add_executable(
+        guance_windows_electron_native_owned_host
+        src/electron_native_owned_host.cpp)
+    target_include_directories(
+        guance_windows_electron_native_owned_host
+        PRIVATE include)
+    target_compile_features(
+        guance_windows_electron_native_owned_host
+        PRIVATE cxx_std_17)
+    target_compile_definitions(
+        guance_windows_electron_native_owned_host
+        PRIVATE WINVER=0x0601 _WIN32_WINNT=0x0601)
+    target_link_libraries(
+        guance_windows_electron_native_owned_host
+        PRIVATE guance_windows_native)
+
+    if(BUILD_TESTING)
+        add_executable(
+            native_electron_owned_host_smoke
+            tests/native_electron_owned_host_smoke.cpp)
+        target_compile_features(
+            native_electron_owned_host_smoke
+            PRIVATE cxx_std_17)
+        guance_enable_assertions(native_electron_owned_host_smoke)
+        add_dependencies(
+            native_electron_owned_host_smoke
+            guance_windows_electron_native_owned_host)
+        add_test(
+            NAME native_electron_owned_host_smoke
+            COMMAND native_electron_owned_host_smoke)
+        list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+            native_electron_owned_host_smoke)
+    endif()
+
     list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
-        guance_windows_electron_bridge)
+        guance_windows_electron_bridge
+        guance_windows_electron_native_owned_host)
 endif()
 
 if(BUILD_TESTING)

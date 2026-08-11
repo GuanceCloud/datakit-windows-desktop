@@ -1,5 +1,6 @@
 #include "rum_core.h"
 
+#include "guance_sdk_version.h"
 #include "native_crash_reporter.h"
 
 #include <memory>
@@ -8,6 +9,10 @@
 using guance::rum::RumCore;
 
 extern "C" {
+
+const char* guance_sdk_get_version(void) {
+    return GUANCE_WINDOWS_NATIVE_SDK_VERSION;
+}
 
 void guance_sdk_config_init(guance_sdk_config* config) {
     if (config == nullptr) {

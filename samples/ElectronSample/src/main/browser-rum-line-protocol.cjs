@@ -283,13 +283,8 @@ function browserBridgeEventToNativeInput(serializedEvent, trustedContext = {}) {
   if (Buffer.byteLength(recordJson, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES) {
     throw new Error("Browser Session Replay record is too large.");
   }
-  const sessionId = trustedContext.tags?.session_id;
-  if (typeof sessionId !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(sessionId)) {
-    throw new Error("Native Session Replay session id is unavailable or invalid.");
-  }
   const command = [
     "@guance-replay",
-    `session_id=${encodeURIComponent(sessionId)}`,
     `view_id=${encodeURIComponent(event.viewId)}`,
     `timestamp_ms=${event.timestamp}`,
     `full_snapshot=${event.fullSnapshot ? 1 : 0}`,

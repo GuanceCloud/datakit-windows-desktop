@@ -380,6 +380,8 @@ typedef void* guance_sdk_handle;
 
 /** Initializes guance_sdk_config with supported defaults before application overrides. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_config_init(guance_sdk_config* config);
+/** Returns the immutable SDK version compiled into the native runtime. */
+GUANCE_WINDOWS_NATIVE_EXPORT const char* guance_sdk_get_version(void);
 /** Creates an SDK instance. Returns NULL when configuration or runtime initialization fails. */
 GUANCE_WINDOWS_NATIVE_EXPORT guance_sdk_handle guance_sdk_init(const guance_sdk_config* config);
 /** Flushes queued telemetry, releases the SDK instance, and invalidates the handle. */
@@ -390,6 +392,15 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_flush(guance_sdk_handle handle);
 GUANCE_WINDOWS_NATIVE_EXPORT int guance_sdk_get_diagnostics(guance_sdk_handle handle, guance_sdk_diagnostics* diagnostics);
 /** Enqueues one complete line-protocol record. Returns non-zero when accepted. */
 GUANCE_WINDOWS_NATIVE_EXPORT int guance_sdk_write_line(guance_sdk_handle handle, const char* line, size_t length);
+/**
+ * Writes one validated Electron Native Bridge message to an existing SDK handle.
+ * The message must not contain a trailing newline. Supported inputs are Browser
+ * RUM line protocol plus the private launch, error, log, and Replay commands.
+ */
+GUANCE_WINDOWS_NATIVE_EXPORT int guance_sdk_write_electron_bridge_line(
+    guance_sdk_handle handle,
+    const char* line,
+    size_t length);
 /** Initializes a versioned native monitoring configuration with supported defaults. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_native_monitoring_config_init(
     guance_sdk_native_monitoring_config* config);
@@ -530,8 +541,9 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_capture_replay_input(guance_sdk_han
 /** Records one native resize for an already registered Replay window. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_capture_replay_resize(guance_sdk_handle handle, uintptr_t hwnd, const char* target, double width, double height);
 /** Experimental bridge entry point for rrweb-compatible records collected by
- * Browser RUM inside Electron/WebView renderers. The record, native session,
- * and view identity are copied before this function returns. */
+ * Browser RUM inside Electron/WebView renderers. session_id is retained for ABI
+ * compatibility but ignored; Native Core always owns the authoritative Session.
+ * The record and view identity are copied before this function returns. */
 GUANCE_WINDOWS_NATIVE_EXPORT int guance_rum_capture_browser_replay_record(
     guance_sdk_handle handle,
     const char* session_id,

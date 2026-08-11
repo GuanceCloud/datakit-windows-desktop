@@ -6,6 +6,8 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
 
+    [string]$SdkVersion,
+
     [switch]$SkipTests
 )
 
@@ -28,16 +30,29 @@ $generatorArch = switch ($TargetArch) {
 }
 $buildTests = if ($SkipTests -or $TargetArch -cne "x64") { "OFF" } else { "ON" }
 
-& $cmake `
-    -S $sourceDirectory `
-    -B $buildDirectory `
-    -G "Visual Studio 17 2022" `
-    -A $generatorArch `
-    "-DBUILD_SHARED_LIBS=ON" `
-    "-DBUILD_TESTING=$buildTests" `
-    "-DGUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE=ON" `
-    "-DGUANCE_WINDOWS_NATIVE_STAGE_RUNTIME=ON" `
+if (-not [string]::IsNullOrWhiteSpace($SdkVersion) -and
+    $SdkVersion -cnotmatch "^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:alpha|beta)\.(?:[1-9][0-9]*))?$") {
+    throw "SdkVersion '$SdkVersion' is not a supported release version."
+}
+
+$configureArguments = @(
+    "-S", $sourceDirectory,
+    "-B", $buildDirectory,
+    "-G", "Visual Studio 17 2022",
+    "-A", $generatorArch,
+    "-DBUILD_SHARED_LIBS=ON",
+    "-DBUILD_TESTING=$buildTests",
+    "-DGUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE=ON",
+    "-DGUANCE_WINDOWS_NATIVE_STAGE_RUNTIME=ON",
     "-DGUANCE_WINDOWS_NATIVE_RUNTIME_ARCH=$TargetArch"
+)
+if (-not [string]::IsNullOrWhiteSpace($SdkVersion)) {
+    $configureArguments += "-DGUANCE_WINDOWS_NATIVE_SDK_VERSION=$SdkVersion"
+} else {
+    $configureArguments += "-UGUANCE_WINDOWS_NATIVE_SDK_VERSION"
+}
+
+& $cmake @configureArguments
 if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed for $TargetArch."
 }

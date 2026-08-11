@@ -24,6 +24,13 @@ jobs:
         shell: pwsh
         run: |
           $args = @("-ExecutionPolicy", "Bypass", "-File", "build\native-windows-cmake.ps1", "-TargetArch", "${{ matrix.arch }}")
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $sdkVersion = & .\build\resolve-release-tag.ps1 `
+              -Tag "${{ github.ref_name }}" `
+              -ExpectedKind nuget `
+              -CheckChangelog
+            $args += @("-SdkVersion", $sdkVersion)
+          }
           if ("${{ matrix.arch }}" -ne "x64") {
             $args += "-SkipTests"
           }

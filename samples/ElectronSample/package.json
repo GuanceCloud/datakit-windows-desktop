@@ -14,6 +14,7 @@
     "build": "tsc --noEmit && vite build",
     "native:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../../build/native-windows-cmake.ps1 -TargetArch x64 -Configuration Release",
     "start": "npm run electron:install && npm run build && electron .",
+    "start:native-owned": "npm run electron:install && npm run build && cross-env GUANCE_ELECTRON_MONITORING_MODE=native-owned electron .",
     "smoke": "npm run electron:install && npm run build && cross-env ELECTRON_SMOKE=1 electron .",
     "package:win": "npm run native:build && node scripts/package-windows.mjs",
     "verify:package:win": "node scripts/verify-windows-package.cjs",
