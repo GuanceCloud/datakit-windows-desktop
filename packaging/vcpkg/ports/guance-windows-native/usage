@@ -1,4 +1,5 @@
-guance-windows-native provides the CMake package GuanceWindowsNative:
+Guance.Windows.Native is distributed by the guance-windows-native port and
+provides the CMake package GuanceWindowsNative:
 
     find_package(GuanceWindowsNative CONFIG REQUIRED)
     target_link_libraries(main PRIVATE Guance::WindowsNative)

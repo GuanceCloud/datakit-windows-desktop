@@ -1145,7 +1145,11 @@ void RumCore::add_action(const char* name, const char* type, int64_t duration_ns
     track_action(action, safe_duration_ns);
 }
 
-void RumCore::add_launch_action(const guance_rum_launch& launch) {
+void RumCore::add_launch_action(
+    const guance_rum_launch& launch,
+    const char* view_id,
+    const char* view_name,
+    const char* view_referrer) {
     std::lock_guard lock(mutex_);
     const auto safe_duration_ns = non_negative_duration(launch.duration_ns);
     const auto is_hot = launch.type == GUANCE_RUM_LAUNCH_HOT;
@@ -1160,7 +1164,12 @@ void RumCore::add_launch_action(const guance_rum_launch& launch) {
             ? launch.start_time_ns
             : unix_time_before(safe_duration_ns),
         monotonic_time_nanoseconds()};
-    if (active_view_) {
+    const auto explicit_view_id = str_or_empty(view_id);
+    if (!explicit_view_id.empty()) {
+        action.view_id = explicit_view_id;
+        action.view_name = str_or_empty(view_name);
+        action.view_referrer = str_or_empty(view_referrer);
+    } else if (active_view_) {
         action.view_id = active_view_->id;
         action.view_name = active_view_->name;
         action.view_referrer = active_view_->referrer;

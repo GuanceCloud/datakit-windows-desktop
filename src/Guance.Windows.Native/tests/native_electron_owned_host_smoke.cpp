@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <regex>
 #include <stdexcept>
 #include <string>
 
@@ -123,14 +124,22 @@ int main() {
     const std::string browser_line =
         "view,app_id=renderer-app,env=renderer-env,service=renderer-service,"
         "version=renderer-version,session_id=renderer-session,sdk_name=renderer-sdk,"
-        "sdk_version=renderer-sdk value=1i 1722300000000000000\n";
+        "sdk_version=renderer-sdk,view_id=native-owned-view value=1i "
+        "1722300000000000000\n";
+    const std::string launch_line =
+        "@guance-launch\ttype=cold\tstart_time_ns=1722300000000000000\t"
+        "duration_ns=300000000\tpre_application_duration_ns=100000000\t"
+        "application_duration_ns=100000000\tfirst_frame_duration_ns=100000000\t"
+        "view_id=native-owned-view\tview_name=Main%20View\t"
+        "view_referrer=file%3A%2F%2F%2Fsplash.html\n";
+    const std::string bridge_input = browser_line + launch_line;
     DWORD written = 0;
     require(WriteFile(
         pipe,
-        browser_line.data(),
-        static_cast<DWORD>(browser_line.size()),
+        bridge_input.data(),
+        static_cast<DWORD>(bridge_input.size()),
         &written,
-        nullptr) != FALSE && written == browser_line.size(),
+        nullptr) != FALSE && written == bridge_input.size(),
         "native-owned bridge write failed");
     FlushFileBuffers(pipe);
     CloseHandle(pipe);
@@ -155,6 +164,12 @@ int main() {
     require(queued.find("renderer-session") == std::string::npos &&
         queued.find("renderer-sdk") == std::string::npos,
         "native-owned SDK handle retained renderer-owned identity");
+    require(std::regex_search(
+        queued,
+        std::regex(
+            "action,[^\\r\\n]*action_type=launch_cold[^\\r\\n]*"
+            "view_id=native-owned-view[^\\r\\n]*view_name=Main\\\\ View")),
+        "native-owned launch did not retain the Browser View identity");
 
     std::error_code cleanup_error;
     std::filesystem::remove_all(cache_path, cleanup_error);

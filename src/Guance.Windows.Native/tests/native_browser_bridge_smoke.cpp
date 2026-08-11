@@ -79,7 +79,8 @@ int main() {
             ? ",resource_url=https://api.example.test/items?token\\=secret"
             : "";
         const std::string view_referrer = std::string(measurement) == "view"
-            ? ",view_referrer=https://ref.example.test/?token\\=secret"
+            ? ",view_id=browser-view-id,view_name=ControlRoom,"
+              "view_referrer=https://ref.example.test/?token\\=secret"
             : "";
         valid = std::string(measurement) +
             ",app_id=renderer-app,browser_numeric_tag=raw,env=renderer-env," +
@@ -140,7 +141,12 @@ int main() {
         100000000,
         100000000,
         100000000};
-    guance_rum_add_launch_action(handle, &cold_launch);
+    guance_rum_add_launch_action_ext(
+        handle,
+        &cold_launch,
+        "browser-view-id",
+        "Control Room",
+        "file:///splash.html");
     const guance_rum_launch hot_launch{
         GUANCE_RUM_LAUNCH_HOT,
         1722300010000000000,
@@ -175,6 +181,13 @@ int main() {
             queued_lines.find("action_type=launch_cold") != std::string::npos &&
                 queued_lines.find("action_name=app\\ cold\\ start") != std::string::npos,
             "cold launch action contract was not persisted");
+        require(
+            std::regex_search(
+                queued_lines,
+                std::regex(
+                    "action,[^\\r\\n]*action_type=launch_cold[^\\r\\n]*"
+                    "view_id=browser-view-id[^\\r\\n]*view_name=Control\\\\ Room")),
+            "cold launch was not associated with the Browser View");
         require(
             queued_lines.find(
                 "app_pre_application_init_time=\"{\\\"start\\\":0,"

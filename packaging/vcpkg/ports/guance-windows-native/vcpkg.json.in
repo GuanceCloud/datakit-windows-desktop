@@ -1,7 +1,7 @@
 {
   "name": "guance-windows-native",
   "version-semver": "@VERSION@",
-  "description": "Guance Windows native observability SDK for RUM, distributed tracing, and logging",
+  "description": "Guance.Windows.Native observability SDK for RUM, distributed tracing, and logging",
   "homepage": "https://github.com/GuanceCloud/datakit-windows-desktop",
   "documentation": "https://github.com/GuanceCloud/datakit-windows-desktop#readme",
   "license": "Apache-2.0",

@@ -1,7 +1,10 @@
 "use strict";
 
+const { browserRumViewContext } = require("./browser-rum-line-protocol.cjs");
+
 const MONITORING_DISABLED_ARGUMENT = "--guance-monitoring-disabled";
 const REPLAY_ARGUMENT_PREFIX = "--guance-rum-replay=";
+const COLD_LAUNCH_VIEW_WAIT_MS = 1000;
 const SUPPORTED_PRIVACY_LEVELS = new Set(["allow", "mask-user-input", "mask"]);
 
 function booleanOverride(value, fallback) {
@@ -120,6 +123,10 @@ class ElectronMonitoringIntegration {
     this.electron = electron || {};
     this.ownsNativeBridge = ownsNativeBridge;
     this.renderers = new Map();
+    this.mainRenderer = undefined;
+    this.mainView = undefined;
+    this.pendingColdLaunch = undefined;
+    this.pendingColdLaunchTimer = undefined;
   }
 
   pagePolicy(pageId) {
@@ -173,12 +180,21 @@ class ElectronMonitoringIntegration {
       return policy;
     }
     this.renderers.set(webContents, { pageId, rendererLabel, policy });
-    webContents.once?.("destroyed", () => this.renderers.delete(webContents));
+    if (pageId === "main") {
+      this.mainRenderer = webContents;
+      this.mainView = undefined;
+    }
+    webContents.once?.("destroyed", () => this.unregisterWebContents(webContents));
     return policy;
   }
 
   unregisterWebContents(webContents) {
     this.renderers.delete(webContents);
+    if (this.mainRenderer === webContents) {
+      this.flushPendingColdLaunch();
+      this.mainRenderer = undefined;
+      this.mainView = undefined;
+    }
   }
 
   trustedRenderer(event) {
@@ -194,7 +210,33 @@ class ElectronMonitoringIntegration {
     if (!registration || !bridgeEventAllowed(registration.policy, serializedEvent)) {
       return false;
     }
-    return this.nativeBridge.send(serializedEvent, registration.rendererLabel);
+    let view;
+    if (registration.pageId === "main") {
+      try {
+        view = browserRumViewContext(serializedEvent);
+      } catch {
+        return false;
+      }
+    }
+    const accepted = this.nativeBridge.send(serializedEvent, registration.rendererLabel);
+    if (accepted && view) {
+      this.mainView = view;
+      this.flushPendingColdLaunch();
+    }
+    return accepted;
+  }
+
+  flushPendingColdLaunch() {
+    if (!this.pendingColdLaunch) {
+      return false;
+    }
+    if (this.pendingColdLaunchTimer) {
+      clearTimeout(this.pendingColdLaunchTimer);
+      this.pendingColdLaunchTimer = undefined;
+    }
+    const launch = this.pendingColdLaunch;
+    this.pendingColdLaunch = undefined;
+    return this.nativeBridge.sendLaunch?.({ ...launch, view: this.mainView }) ?? false;
   }
 
   sendProcessFailure(failure) {
@@ -202,11 +244,33 @@ class ElectronMonitoringIntegration {
   }
 
   sendLaunch(launch) {
-    return this.nativeBridge.sendLaunch?.(launch) ?? false;
+    if (typeof this.nativeBridge.sendLaunch !== "function") {
+      return false;
+    }
+    if (
+      launch?.type === "cold" &&
+      this.mainRenderer &&
+      !this.mainView
+    ) {
+      if (this.pendingColdLaunch) {
+        return false;
+      }
+      this.pendingColdLaunch = launch;
+      this.pendingColdLaunchTimer = setTimeout(
+        () => this.flushPendingColdLaunch(),
+        COLD_LAUNCH_VIEW_WAIT_MS,
+      );
+      this.pendingColdLaunchTimer.unref?.();
+      return true;
+    }
+    return this.nativeBridge.sendLaunch?.({ ...launch, view: this.mainView }) ?? false;
   }
 
   shutdown() {
+    this.flushPendingColdLaunch();
     this.renderers.clear();
+    this.mainRenderer = undefined;
+    this.mainView = undefined;
     if (this.ownsNativeBridge) {
       return this.nativeBridge.shutdown?.() || Promise.resolve();
     }
@@ -244,6 +308,7 @@ function connectElectronMonitoring({ nativeBridge, nativePolicy, electron }) {
 }
 
 module.exports = {
+  COLD_LAUNCH_VIEW_WAIT_MS,
   MONITORING_DISABLED_ARGUMENT,
   REPLAY_ARGUMENT_PREFIX,
   ElectronMonitoringIntegration,

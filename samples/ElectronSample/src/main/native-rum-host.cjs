@@ -3,7 +3,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { browserBridgeEventToNativeInput } = require("./browser-rum-line-protocol.cjs");
+const {
+  browserBridgeEventToNativeInput,
+  serializeLaunchViewFields,
+} = require("./browser-rum-line-protocol.cjs");
 
 const NATIVE_HOST_FILE = "guance_windows_electron_bridge.exe";
 const NATIVE_CORE_FILE = "guance_windows_native.dll";
@@ -220,6 +223,7 @@ class NativeRumHost {
     preApplicationDurationNanoseconds = 0,
     applicationDurationNanoseconds = 0,
     firstFrameDurationNanoseconds = 0,
+    view,
   }) {
     if (!this.child?.stdin?.writable) {
       this.rejected += 1;
@@ -248,6 +252,7 @@ class NativeRumHost {
         `pre_application_duration_ns=${values[2]}`,
         `application_duration_ns=${values[3]}`,
         `first_frame_duration_ns=${values[4]}`,
+        ...serializeLaunchViewFields(view),
       ];
       this.child.stdin.write(`@guance-launch\t${fields.join("\t")}\n`, "utf8");
       this.accepted += 1;

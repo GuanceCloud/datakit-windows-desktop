@@ -1,0 +1,24 @@
+{
+  "datakitUrl": null,
+  "datawayUrl": "https://openway.guance.com",
+  "clientToken": "<client-token>",
+  "rumAppId": "<rum-application-id>",
+  "serviceName": "electron-app",
+  "env": "production",
+  "version": "1.0.0",
+  "debug": false,
+  "rumEnabled": true,
+  "sessionSampleRate": 100,
+  "loggingEnabled": true,
+  "logSampleRate": 100,
+  "traceEnabled": true,
+  "traceSampleRate": 100,
+  "traceType": "ddtrace",
+  "allowedTracingUrls": [
+    "https://api.example.com"
+  ],
+  "sessionReplayEnabled": true,
+  "sessionReplaySampleRate": 100,
+  "sessionReplayOnErrorSampleRate": 0,
+  "replayPrivacyLevel": "mask"
+}

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
 const {
+  COLD_LAUNCH_VIEW_WAIT_MS,
   connectElectronMonitoring,
   initializeElectronMonitoring,
 } = require("../src/main/electron-monitoring.cjs");
@@ -151,5 +152,85 @@ describe("Electron monitoring ownership modes", () => {
 
     expect(integration.pagePolicy("main").trace.enabled).toBe(true);
     expect(integration.pagePolicy("diagnostics").trace.enabled).toBe(false);
+  });
+
+  it("associates launches with the accepted main Renderer View", () => {
+    const nativeBridge = {
+      send: vi.fn(() => true),
+      sendLaunch: vi.fn(() => true),
+    };
+    const integration = connectElectronMonitoring({
+      nativeBridge,
+      nativePolicy: nativePolicy(),
+      electron: { defaultPage: { enabled: true } },
+    });
+    const main = webContents();
+    integration.registerWebContents(main, "main", "main-renderer");
+    const view = JSON.stringify({
+      name: "rum",
+      data: {
+        measurement: "view",
+        tags: {
+          view_id: "main-view-id",
+          view_name: "Control Room",
+          view_referrer: "file:///splash.html",
+        },
+        fields: { is_active: true },
+        time: 1_722_300_000_000,
+      },
+    });
+
+    expect(integration.sendLaunch({
+      type: "cold",
+      startTimeNanoseconds: 100n,
+      durationNanoseconds: 60n,
+    })).toBe(true);
+    expect(nativeBridge.sendLaunch).not.toHaveBeenCalled();
+    expect(integration.send(
+      { sender: main, senderFrame: main.mainFrame },
+      view,
+    )).toBe(true);
+    expect(nativeBridge.sendLaunch).toHaveBeenCalledWith({
+      type: "cold",
+      startTimeNanoseconds: 100n,
+      durationNanoseconds: 60n,
+      view: {
+        id: "main-view-id",
+        name: "Control Room",
+        referrer: "file:///splash.html",
+      },
+    });
+  });
+
+  it("falls back to an unassociated cold launch when the main View does not arrive", () => {
+    vi.useFakeTimers();
+    try {
+      const nativeBridge = {
+        send: vi.fn(() => true),
+        sendLaunch: vi.fn(() => true),
+      };
+      const integration = connectElectronMonitoring({
+        nativeBridge,
+        nativePolicy: nativePolicy(),
+        electron: { defaultPage: { enabled: true } },
+      });
+      integration.registerWebContents(webContents(), "main", "main-renderer");
+
+      expect(integration.sendLaunch({
+        type: "cold",
+        startTimeNanoseconds: 100n,
+        durationNanoseconds: 60n,
+      })).toBe(true);
+      vi.advanceTimersByTime(COLD_LAUNCH_VIEW_WAIT_MS);
+
+      expect(nativeBridge.sendLaunch).toHaveBeenCalledWith({
+        type: "cold",
+        startTimeNanoseconds: 100n,
+        durationNanoseconds: 60n,
+        view: undefined,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -372,6 +372,11 @@ describe("Electron native host adapter", () => {
       preApplicationDurationNanoseconds: 20n,
       applicationDurationNanoseconds: 20n,
       firstFrameDurationNanoseconds: 20n,
+      view: {
+        id: "browser-view",
+        name: "Control Room",
+        referrer: "file:///splash.html",
+      },
     })).toBe(true);
     expect(nativeHost.sendProcessFailure({
       type: "ElectronRendererProcessGone",
@@ -411,7 +416,8 @@ describe("Electron native host adapter", () => {
     expect(write.mock.calls[3]).toEqual([
       "@guance-launch\ttype=cold\tstart_time_ns=100\tduration_ns=60\t" +
         "pre_application_duration_ns=20\tapplication_duration_ns=20\t" +
-        "first_frame_duration_ns=20\n",
+        "first_frame_duration_ns=20\tview_id=browser-view\t" +
+        "view_name=Control%20Room\tview_referrer=file%3A%2F%2F%2Fsplash.html\n",
       "utf8",
     ]);
     expect(write.mock.calls[4]).toEqual([

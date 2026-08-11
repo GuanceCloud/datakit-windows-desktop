@@ -488,6 +488,13 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_add_action(guance_sdk_handle handle
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_add_launch_action(
     guance_sdk_handle handle,
     const guance_rum_launch* launch);
+/** Adds a measured launch Action associated with an existing Browser View. All strings are copied. */
+GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_add_launch_action_ext(
+    guance_sdk_handle handle,
+    const guance_rum_launch* launch,
+    const char* view_id,
+    const char* view_name,
+    const char* view_referrer);
 /** Starts an automatically completed RUM Action with 100 ms frequency protection and a five-second maximum duration. The returned identifier is empty when rejected. */
 GUANCE_WINDOWS_NATIVE_EXPORT const char* guance_rum_start_action(guance_sdk_handle handle, const char* name, const char* type);
 /** Starts a RUM Action and optionally requires an explicit stop when need_wait is non-zero. All Actions are limited to five seconds. */

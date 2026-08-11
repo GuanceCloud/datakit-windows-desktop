@@ -501,6 +501,26 @@ void guance_rum_stop_resource_ext(
     }
 }
 
+void guance_rum_add_launch_action_ext(
+    guance_sdk_handle handle,
+    const guance_rum_launch* launch,
+    const char* view_id,
+    const char* view_name,
+    const char* view_referrer) {
+    if (handle == nullptr || launch == nullptr) {
+        return;
+    }
+    try {
+        static_cast<RumCore*>(handle)->add_launch_action(
+            *launch,
+            view_id,
+            view_name,
+            view_referrer);
+    } catch (...) {
+        // Public C ABI calls must not propagate C++ exceptions.
+    }
+}
+
 void guance_rum_stop_resource_ext_with_headers(
     guance_sdk_handle handle,
     const char* resource_id,

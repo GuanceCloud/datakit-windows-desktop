@@ -116,6 +116,36 @@ bool valid_log_property_key(const std::string& value) {
            });
 }
 
+bool valid_launch_view_value(
+    const std::string& value,
+    std::size_t maximum_size,
+    bool allow_empty) {
+    return (allow_empty || !value.empty()) && value.size() <= maximum_size &&
+           std::all_of(value.begin(), value.end(), [](unsigned char character) {
+               return character >= 0x20 && character != 0x7f;
+           });
+}
+
+bool parse_launch_view(
+    const std::unordered_map<std::string, std::string>& fields,
+    std::string& view_id,
+    std::string& view_name,
+    std::string& view_referrer) {
+    if (fields.size() == 6) return true;
+    if (fields.size() != 9) return false;
+
+    const auto id = fields.find("view_id");
+    const auto name = fields.find("view_name");
+    const auto referrer = fields.find("view_referrer");
+    return id != fields.end() && name != fields.end() && referrer != fields.end() &&
+           percent_decode(id->second, view_id) &&
+           percent_decode(name->second, view_name) &&
+           percent_decode(referrer->second, view_referrer) &&
+           valid_launch_view_value(view_id, 128, false) &&
+           valid_launch_view_value(view_name, 4096, true) &&
+           valid_launch_view_value(view_referrer, 4096, true);
+}
+
 CommandResult handle_launch_command(
     guance_sdk_handle handle,
     const std::string& line) {
@@ -134,7 +164,12 @@ CommandResult handle_launch_command(
             return CommandResult::rejected;
         }
     }
-    if (fields.size() != 6) return CommandResult::rejected;
+    std::string view_id;
+    std::string view_name;
+    std::string view_referrer;
+    if (!parse_launch_view(fields, view_id, view_name, view_referrer)) {
+        return CommandResult::rejected;
+    }
 
     const auto type = fields.find("type");
     if (type == fields.end() || (type->second != "cold" && type->second != "hot")) {
@@ -149,7 +184,16 @@ CommandResult handle_launch_command(
         !parse_int64(fields["first_frame_duration_ns"], launch.first_frame_duration_ns)) {
         return CommandResult::rejected;
     }
-    guance_rum_add_launch_action(handle, &launch);
+    if (view_id.empty()) {
+        guance_rum_add_launch_action(handle, &launch);
+    } else {
+        guance_rum_add_launch_action_ext(
+            handle,
+            &launch,
+            view_id.c_str(),
+            view_name.c_str(),
+            view_referrer.c_str());
+    }
     return CommandResult::accepted;
 }
 

@@ -106,8 +106,17 @@ describe("C++ native-owned Electron bridge", () => {
       type: "cold",
       startTimeNanoseconds: 100n,
       durationNanoseconds: 60n,
+      view: {
+        id: "browser-view",
+        name: "Control Room",
+        referrer: "file:///splash.html",
+      },
     })).toBe(true);
     expect(socket.writes[1]).toContain("@guance-launch\ttype=cold");
+    expect(socket.writes[1]).toContain(
+      "\tview_id=browser-view\tview_name=Control%20Room\t" +
+      "view_referrer=file%3A%2F%2F%2Fsplash.html\n",
+    );
 
     await bridge.disconnect();
     expect(socket.writable).toBe(false);

@@ -1,7 +1,10 @@
 "use strict";
 
 const net = require("node:net");
-const { browserBridgeEventToNativeInput } = require("./browser-rum-line-protocol.cjs");
+const {
+  browserBridgeEventToNativeInput,
+  serializeLaunchViewFields,
+} = require("./browser-rum-line-protocol.cjs");
 
 const DEFAULT_PIPE_NAME = "guance-rum-electron-native-owned";
 const MAX_CAPABILITIES_BYTES = 16 * 1024;
@@ -144,6 +147,7 @@ class NativeOwnedRumBridge {
     preApplicationDurationNanoseconds = 0,
     applicationDurationNanoseconds = 0,
     firstFrameDurationNanoseconds = 0,
+    view,
   }) {
     try {
       if (!this.nativePolicy.rum.enabled || (type !== "cold" && type !== "hot")) {
@@ -164,6 +168,7 @@ class NativeOwnedRumBridge {
         `pre_application_duration_ns=${values[2]}`,
         `application_duration_ns=${values[3]}`,
         `first_frame_duration_ns=${values[4]}`,
+        ...serializeLaunchViewFields(view),
       ].join("\t") + "\n", `launch_${type}`);
     } catch (error) {
       this.rejected += 1;

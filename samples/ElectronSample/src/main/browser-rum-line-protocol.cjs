@@ -12,6 +12,7 @@ const SUPPORTED_MEASUREMENTS = new Set([
   "long_task",
 ]);
 const SAFE_PROPERTY_KEY = /^[A-Za-z0-9_.-]{1,128}$/;
+const SAFE_VIEW_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 const RESERVED_PROPERTY_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const RESERVED_LOG_KEYS = new Set(["message", "status"]);
 
@@ -180,6 +181,64 @@ function parseBridgeEvent(serializedEvent) {
   return { name: "rum", record };
 }
 
+function browserRumViewContext(serializedEvent) {
+  const event = parseBridgeEvent(serializedEvent);
+  if (event.name !== "rum" || event.record.measurement !== "view") {
+    return undefined;
+  }
+
+  const viewId = event.record.tags.view_id;
+  const viewName = event.record.tags.view_name ?? "";
+  const viewReferrer = event.record.tags.view_referrer ?? "";
+  if (typeof viewId !== "string" || !SAFE_VIEW_ID.test(viewId)) {
+    throw new Error("Browser RUM view id is invalid.");
+  }
+  for (const [label, value] of [
+    ["name", viewName],
+    ["referrer", viewReferrer],
+  ]) {
+    if (
+      typeof value !== "string" ||
+      Buffer.byteLength(value, "utf8") > 4096 ||
+      /[\0\r\n\t]/.test(value)
+    ) {
+      throw new Error(`Browser RUM view ${label} is invalid or too large.`);
+    }
+  }
+  return { id: viewId, name: viewName, referrer: viewReferrer };
+}
+
+function serializeLaunchViewFields(view) {
+  if (view === undefined) {
+    return [];
+  }
+  if (
+    !view ||
+    typeof view !== "object" ||
+    Array.isArray(view) ||
+    typeof view.id !== "string" ||
+    !SAFE_VIEW_ID.test(view.id)
+  ) {
+    throw new Error("launch view id is invalid.");
+  }
+  const name = view.name ?? "";
+  const referrer = view.referrer ?? "";
+  for (const [label, value] of [["name", name], ["referrer", referrer]]) {
+    if (
+      typeof value !== "string" ||
+      Buffer.byteLength(value, "utf8") > 4096 ||
+      /[\0\r\n\t]/.test(value)
+    ) {
+      throw new Error(`launch view ${label} is invalid or too large.`);
+    }
+  }
+  return [
+    `view_id=${encodeURIComponent(view.id)}`,
+    `view_name=${encodeURIComponent(name)}`,
+    `view_referrer=${encodeURIComponent(referrer)}`,
+  ];
+}
+
 function serializeLogProperty(value) {
   if (value === undefined) {
     return undefined;
@@ -300,7 +359,9 @@ function browserBridgeEventToNativeInput(serializedEvent, trustedContext = {}) {
 module.exports = {
   MAX_BRIDGE_PAYLOAD_BYTES,
   browserBridgeEventToNativeInput,
+  browserRumViewContext,
   browserRumEventToLine,
   parseBridgeEvent,
   parseBridgePayload,
+  serializeLaunchViewFields,
 };

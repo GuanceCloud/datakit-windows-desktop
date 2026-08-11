@@ -1,6 +1,7 @@
-# Guance Windows Native Changelog
+# Guance.Windows.Native Changelog
 
-All notable changes to the `guance-windows-native` vcpkg port are recorded here.
+All notable changes to `Guance.Windows.Native`, distributed through the
+`guance-windows-native` vcpkg port, are recorded here.
 
 ## [Unreleased]
 
@@ -14,11 +15,17 @@ All notable changes to the `guance-windows-native` vcpkg port are recorded here.
 ### Added
 
 - An extended native Action API for actions that require explicit completion.
+- `guance_sdk_get_version()` for reading the release version compiled into the native runtime.
+- `guance_sdk_write_electron_bridge_line(...)` for routing validated Browser RUM, launch, error, log, and Replay bridge messages into an application-owned SDK handle.
+- `guance_rum_add_launch_action_ext(...)` for associating a measured launch Action with an existing Browser View.
 
 ### Changed
 
 - Action tracking now applies frequency protection, view-change completion, and a five-second maximum duration consistently with the managed SDK.
 - Native crash and application-not-responding events now use the shared RUM error taxonomy and field layout.
+- Native RUM, Log, and Session Replay payloads now report the compiled SDK release through `sdk_version`.
+- Electron bridge ingestion now keeps Native Core authoritative for Session identity instead of accepting a Browser-provided Session override.
+- Electron cold-launch Actions now associate with the first main Browser View when it becomes available, with a bounded fallback when no View arrives.
 
 ## [0.1.0-alpha.3]
 

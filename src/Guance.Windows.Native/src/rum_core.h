@@ -115,7 +115,11 @@ public:
     void start_view(const char* name);
     void stop_view();
     void add_action(const char* name, const char* type, int64_t duration_ns);
-    void add_launch_action(const guance_rum_launch& launch);
+    void add_launch_action(
+        const guance_rum_launch& launch,
+        const char* view_id = nullptr,
+        const char* view_name = nullptr,
+        const char* view_referrer = nullptr);
     std::string start_action(const char* name, const char* type, bool need_wait = false);
     void stop_action(const char* action_id);
     std::string start_resource(const char* url, const char* method);
