@@ -324,7 +324,7 @@ int main() {
                1) == 1);
     guance_sdk_flush(handle);
 
-    const char* action_id = guance_rum_start_action(handle, "Native Action", "click");
+    const char* action_id = guance_rum_start_action_ext(handle, "Native Action", "click", 1);
     assert(action_id != nullptr && action_id[0] != '\0');
     const char* resource_id = guance_rum_start_resource(handle, "https://example.com/api/42", "GET");
     assert(resource_id != nullptr && resource_id[0] != '\0');

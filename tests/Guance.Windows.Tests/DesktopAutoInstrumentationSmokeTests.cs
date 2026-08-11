@@ -68,6 +68,8 @@ public sealed class DesktopAutoInstrumentationSmokeTests
             Assert.Contains(initialReplayBodies, body => body.Contains("\"type\":10", StringComparison.Ordinal));
 
             button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, button));
+            Thread.Sleep(120);
+            PumpWpfDispatcher();
             keyboardButton.RaiseEvent(new System.Windows.Input.KeyEventArgs(
                 System.Windows.Input.Keyboard.PrimaryDevice,
                 PresentationSource.FromVisual(keyboardButton),
@@ -450,12 +452,16 @@ public sealed class DesktopAutoInstrumentationSmokeTests
                     PostMessage(button.Handle, 0x0100, (nint)WinForms.Keys.Tab, 0);
                     PostMessage(button.Handle, 0x0101, (nint)WinForms.Keys.Tab, 0);
                     WinForms.Application.DoEvents();
+                    await Task.Delay(120);
                     button.PerformClick();
+                    await Task.Delay(120);
                     keyboardButton.RaiseKeyDown(WinForms.Keys.Space);
                     keyboardButton.PerformClick();
                     keyboardButton.RaiseKeyUp(WinForms.Keys.Space);
+                    await Task.Delay(120);
                     textBox.Focus();
                     textBox.Text = "secret-value";
+                    await Task.Delay(120);
                     readOnlyTextBox.Text = "programmatic log update";
                     form.Width = 420;
                     form.Height = 300;

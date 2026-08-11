@@ -28,8 +28,10 @@ public sealed class AutomaticActionInstrumentationTests
         button.RaiseKeyDown();
         button.RaiseClick();
         button.RaiseKeyUp();
+        await Task.Delay(120);
         button.RaisePointerPressed();
         button.RaiseClick();
+        client.StopView();
 
         var lines = (await rumQueue.PeekAsync(20, CancellationToken.None))
             .Select(item => item.Line)

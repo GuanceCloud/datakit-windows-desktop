@@ -288,10 +288,9 @@ internal static class WinUIReflectionInstrumentation
             return;
         }
         var name = ElementName(element);
-        client.AddAction(
+        client.StartAction(
             name,
-            KeyboardInputActive ? RumConstants.ActionTypeKey : RumConstants.ActionTypeClick,
-            TimeSpan.Zero);
+            KeyboardInputActive ? RumConstants.ActionTypeKey : RumConstants.ActionTypeClick);
         if (replayAsInput)
         {
             client.CaptureSessionReplayInput(name);

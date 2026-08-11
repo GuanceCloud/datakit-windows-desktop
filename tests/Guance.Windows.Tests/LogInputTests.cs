@@ -33,7 +33,7 @@ public sealed class LogInputTests
 
         client.SetUser("user-1", "Ada", "ada@example.test");
         client.StartView("Checkout");
-        using var action = client.StartAction("Pay", "click");
+        using var action = client.StartAction("Pay", "click", needWait: true);
 
         client.AddLog(
             "payment failed",
@@ -107,7 +107,7 @@ public sealed class LogInputTests
         });
         client.SetUser("user-1");
         client.StartView("Private view");
-        using var action = client.StartAction("Private action", "click");
+        using var action = client.StartAction("Private action", "click", needWait: true);
 
         client.AddLog("standalone", LogStatus.Info);
         await client.FlushAsync();

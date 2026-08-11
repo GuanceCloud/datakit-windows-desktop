@@ -297,7 +297,7 @@ public sealed class MainForm : Form
         await RunSampleAsync("Scoped action", async () =>
         {
             var actionName = TextOrDefault(actionNameBox, "SampleAction");
-            using (GuanceSdk.StartAction(actionName, "click", SampleProperties("scoped_action")))
+            using (GuanceSdk.StartAction(actionName, "click", needWait: true, properties: SampleProperties("scoped_action")))
             {
                 await Task.Delay(250);
             }
@@ -320,7 +320,7 @@ public sealed class MainForm : Form
     {
         await RunSampleAsync("Automatic HTTP success", async () =>
         {
-            using (GuanceSdk.StartAction("Auto HTTP success", "click", SampleProperties("auto_http_success")))
+            using (GuanceSdk.StartAction("Auto HTTP success", "click", needWait: true, properties: SampleProperties("auto_http_success")))
             using (var response = await httpClient.GetAsync(GetResourceUrl()))
             {
                 AppendLog($"HTTP success status={(int)response.StatusCode}");
@@ -332,7 +332,7 @@ public sealed class MainForm : Form
     {
         await RunSampleAsync("Automatic HTTP failure", async () =>
         {
-            using (GuanceSdk.StartAction("Auto HTTP failure", "click", SampleProperties("auto_http_failure")))
+            using (GuanceSdk.StartAction("Auto HTTP failure", "click", needWait: true, properties: SampleProperties("auto_http_failure")))
             using (var response = await httpClient.GetAsync("https://example.com/not-found"))
             {
                 AppendLog($"HTTP failure sample status={(int)response.StatusCode}");

@@ -525,10 +525,11 @@ ControlCommandResult handle_native_scenario_command(
             "Native acceptance masked input");
     }
 
-    const std::string action_id = guance_rum_start_action(
+    const std::string action_id = guance_rum_start_action_ext(
         handle,
         "Complete native acceptance scenario",
-        "click");
+        "click",
+        1);
     if (action_id.empty()) {
         guance_rum_stop_view(handle);
         return ControlCommandResult::rejected;

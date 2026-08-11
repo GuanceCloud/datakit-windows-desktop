@@ -15,10 +15,15 @@ public sealed class RumActionScope : IDisposable
     /// <summary>Gets the unique identifier of the active action.</summary>
     public string ActionId { get; }
 
-    /// <summary>Stops the action the first time the scope is disposed.</summary>
+    /// <summary>Gets whether this call was accepted as the current Action.</summary>
+    public bool IsAccepted => ActionId.Length != 0;
+
+    internal static RumActionScope Rejected(GuanceClient client) => new(client, string.Empty);
+
+    /// <summary>Stops a need-wait Action the first time the scope is disposed. Normal Actions ignore disposal.</summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref disposed, 1) == 0)
+        if (ActionId.Length != 0 && Interlocked.Exchange(ref disposed, 1) == 0)
         {
             client.StopAction(ActionId);
         }

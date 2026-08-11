@@ -39,6 +39,8 @@ constexpr std::size_t kMaxBridgeLineBytes = 1024 * 1024;
 constexpr std::size_t kMaxBrowserReplayRecordBytes = 1024 * 1024;
 constexpr std::size_t kMaxLogContentBytes = 30 * 1024;
 constexpr int64_t kReplayEnvelopeAllowanceBytes = 64LL * 1024;
+constexpr int64_t kActionFrequentProtectionNanoseconds = 100'000'000;
+constexpr int64_t kActionMaxDurationNanoseconds = 5'000'000'000;
 
 std::optional<std::string> bridge_measurement(const char* line, std::size_t length) {
     if (line == nullptr ||
@@ -794,9 +796,18 @@ RumCore::RumCore(Config config)
     upload_byte_tokens_ = static_cast<double>(config_.upload_burst_bytes);
     upload_request_tokens_ = std::max(1.0, config_.max_upload_requests_per_second);
     native_monitoring_ = std::make_unique<NativeMonitoring>(*this);
+    action_timeout_thread_ = std::thread([this] { action_timeout_loop(); });
 }
 
 RumCore::~RumCore() {
+    {
+        std::lock_guard lock(mutex_);
+        action_timeout_stopping_ = true;
+    }
+    action_timeout_cv_.notify_all();
+    if (action_timeout_thread_.joinable()) {
+        action_timeout_thread_.join();
+    }
     disable_native_monitoring();
 }
 
@@ -904,6 +915,11 @@ void RumCore::flush() {
 
 void RumCore::shutdown() {
     disable_native_monitoring();
+    {
+        std::lock_guard lock(mutex_);
+        close_current_action_locked(monotonic_time_nanoseconds());
+    }
+    action_timeout_cv_.notify_all();
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native] shutdown stopping active view" << std::endl;
     }
@@ -1024,8 +1040,10 @@ void RumCore::add_rum_context(const char* key, const char* value) {
 
 void RumCore::start_view(const char* name) {
     std::optional<View> previous;
+    bool action_closed = false;
     {
         std::lock_guard lock(mutex_);
+        action_closed = close_current_action_locked(monotonic_time_nanoseconds());
         if (active_view_) {
             flush_replay_pending_locked();
         } else {
@@ -1045,6 +1063,9 @@ void RumCore::start_view(const char* name) {
             capture_session_replay_snapshot();
         }
     }
+    if (action_closed) {
+        action_timeout_cv_.notify_all();
+    }
     if (previous) {
         RumEvent event = base_event("view", previous->started_ns);
         event.tags["view_id"] = previous->id;
@@ -1062,11 +1083,16 @@ void RumCore::start_view(const char* name) {
 
 void RumCore::stop_view() {
     std::optional<View> view;
+    bool action_closed = false;
     {
         std::lock_guard lock(mutex_);
+        action_closed = close_current_action_locked(monotonic_time_nanoseconds());
         flush_replay_pending_locked();
         view = active_view_;
         active_view_.reset();
+    }
+    if (action_closed) {
+        action_timeout_cv_.notify_all();
     }
     if (!view) {
         return;
@@ -1143,9 +1169,15 @@ void RumCore::add_launch_action(const guance_rum_launch& launch) {
     track_action(action, safe_duration_ns);
 }
 
-std::string RumCore::start_action(const char* name, const char* type) {
+std::string RumCore::start_action(const char* name, const char* type, bool need_wait) {
     std::lock_guard lock(mutex_);
-    Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
+    const auto now_monotonic_ns = monotonic_time_nanoseconds();
+    close_current_action_if_needed_locked(now_monotonic_ns, true);
+    if (current_action_locked()) {
+        return {};
+    }
+
+    Action action{uuid32(), str_or_empty(name), str_or_empty(type), {}, {}, {}, unix_time_nanoseconds(), now_monotonic_ns, need_wait};
     if (active_view_) {
         action.view_id = active_view_->id;
         action.view_name = active_view_->name;
@@ -1153,6 +1185,7 @@ std::string RumCore::start_action(const char* name, const char* type) {
     }
     const auto id = action.id;
     active_actions_[id] = std::move(action);
+    action_timeout_cv_.notify_all();
     return id;
 }
 
@@ -1164,9 +1197,77 @@ void RumCore::stop_action(const char* action_id) {
         if (it == active_actions_.end()) {
             return;
         }
+        if (!it->second.need_wait) {
+            return;
+        }
         action = it->second;
         active_actions_.erase(it);
         track_action(action, elapsed_since(action.started_monotonic_ns));
+    }
+    action_timeout_cv_.notify_all();
+}
+
+bool RumCore::close_current_action_if_needed_locked(
+    int64_t now_monotonic_ns,
+    bool allow_normal_timeout) {
+    const auto current = current_action_locked();
+    if (!current) {
+        return false;
+    }
+
+    const auto elapsed = now_monotonic_ns <= current->started_monotonic_ns
+        ? 0
+        : now_monotonic_ns - current->started_monotonic_ns;
+    const bool max_timeout = elapsed >= kActionMaxDurationNanoseconds;
+    const bool normal_timeout = allow_normal_timeout &&
+        !current->need_wait &&
+        elapsed >= kActionFrequentProtectionNanoseconds;
+    if (!max_timeout && !normal_timeout) {
+        return false;
+    }
+
+    return close_current_action_locked(now_monotonic_ns);
+}
+
+bool RumCore::close_current_action_locked(int64_t now_monotonic_ns) {
+    const auto current = current_action_locked();
+    if (!current) {
+        return false;
+    }
+
+    const auto it = active_actions_.find(current->id);
+    if (it == active_actions_.end()) {
+        return false;
+    }
+    const auto action = it->second;
+    active_actions_.erase(it);
+    const auto elapsed = now_monotonic_ns <= action.started_monotonic_ns
+        ? 0
+        : now_monotonic_ns - action.started_monotonic_ns;
+    track_action(action, elapsed);
+    return true;
+}
+
+void RumCore::action_timeout_loop() {
+    std::unique_lock lock(mutex_);
+    while (!action_timeout_stopping_) {
+        const auto current = current_action_locked();
+        if (!current) {
+            action_timeout_cv_.wait(lock, [this] {
+                return action_timeout_stopping_ || !active_actions_.empty();
+            });
+            continue;
+        }
+
+        const auto elapsed = elapsed_since(current->started_monotonic_ns);
+        if (elapsed >= kActionMaxDurationNanoseconds) {
+            close_current_action_if_needed_locked(monotonic_time_nanoseconds(), false);
+            continue;
+        }
+
+        action_timeout_cv_.wait_for(
+            lock,
+            std::chrono::nanoseconds(kActionMaxDurationNanoseconds - elapsed));
     }
 }
 
@@ -1447,6 +1548,7 @@ void RumCore::stop_resource_ext(const char* resource_id, int status_code, int64_
                 action->second.resource_count++;
             }
         }
+        close_current_action_if_needed_locked(monotonic_time_nanoseconds(), true);
     }
 
     RumEvent event = base_event("resource", resource.started_ns);
@@ -1502,6 +1604,7 @@ void RumCore::add_error(const char* stack, const char* message, const char* erro
     event.fields["error_message"] = str_or_empty(message);
     event.fields["error_stack"] = str_or_empty(stack);
     enqueue(std::move(event));
+    close_current_action_if_needed_locked(monotonic_time_nanoseconds(), true);
     if (!session_replay_sampled_ && config_.session_replay_enabled && session_replay_error_sampled_) {
         flush_replay_pending_locked();
         session_replay_sampled_ = true;
@@ -1535,6 +1638,7 @@ void RumCore::add_long_task(int64_t duration_ns, const char* stack) {
     event.fields["duration"] = safe_duration_ns;
     event.fields["long_task_stack"] = str_or_empty(stack);
     enqueue(std::move(event));
+    close_current_action_if_needed_locked(monotonic_time_nanoseconds(), true);
 }
 
 void RumCore::add_ui_hang_event(const HangEvent& hang, const std::string& stack) {
@@ -1569,6 +1673,7 @@ void RumCore::add_ui_hang_event(const HangEvent& hang, const std::string& stack)
         event.fields["long_task_stack"] = stack;
         event.fields["long_task_threshold"] = threshold_ns;
         enqueue(std::move(event));
+        close_current_action_if_needed_locked(monotonic_time_nanoseconds(), true);
         return;
     }
 
@@ -1602,6 +1707,7 @@ void RumCore::add_ui_hang_event(const HangEvent& hang, const std::string& stack)
     event.fields["duration"] = duration_ns;
     event.fields["hang_threshold"] = threshold_ns;
     enqueue(std::move(event));
+    close_current_action_if_needed_locked(monotonic_time_nanoseconds(), true);
 }
 
 bool RumCore::add_recovered_crash(

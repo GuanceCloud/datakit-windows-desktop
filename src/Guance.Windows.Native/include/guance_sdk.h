@@ -477,9 +477,11 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_add_action(guance_sdk_handle handle
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_add_launch_action(
     guance_sdk_handle handle,
     const guance_rum_launch* launch);
-/** Starts a scoped RUM Action. The returned identifier remains SDK-owned and must be copied if retained. */
+/** Starts an automatically completed RUM Action with 100 ms frequency protection and a five-second maximum duration. The returned identifier is empty when rejected. */
 GUANCE_WINDOWS_NATIVE_EXPORT const char* guance_rum_start_action(guance_sdk_handle handle, const char* name, const char* type);
-/** Stops a scoped RUM Action previously returned by guance_rum_start_action. */
+/** Starts a RUM Action and optionally requires an explicit stop when need_wait is non-zero. All Actions are limited to five seconds. */
+GUANCE_WINDOWS_NATIVE_EXPORT const char* guance_rum_start_action_ext(guance_sdk_handle handle, const char* name, const char* type, int need_wait);
+/** Stops an Action started with need_wait enabled. Other Actions ignore this call. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_rum_stop_action(guance_sdk_handle handle, const char* action_id);
 /** Starts a manually collected Resource. The returned identifier remains SDK-owned. */
 GUANCE_WINDOWS_NATIVE_EXPORT const char* guance_rum_start_resource(guance_sdk_handle handle, const char* url, const char* method);

@@ -53,9 +53,11 @@ public sealed class GuanceClient : IAsyncDisposable
     private readonly ApplicationLaunchTracker applicationLaunch;
     private readonly ConcurrentDictionary<string, ActiveResource> resources = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ActiveAction> actions = new(StringComparer.Ordinal);
+    private readonly ActionTrackingTiming actionTiming;
     private readonly Dictionary<string, object?> globalContext = new(StringComparer.Ordinal);
     private readonly Dictionary<string, object?> rumGlobalContext = new(StringComparer.Ordinal);
     private readonly object stateGate = new();
+    private readonly object actionGate = new();
     private readonly object rumQueueWriteGate = new();
     private readonly HashSet<Task> pendingRumQueueWrites = new();
     private readonly RetryBackoff rumRetryBackoff;
@@ -66,6 +68,7 @@ public sealed class GuanceClient : IAsyncDisposable
     private long lastReplayPendingFlushAt;
     private AutomaticInstrumentation? automaticInstrumentation;
     private ActiveView? activeView;
+    private ActiveAction? activeAction;
     private UserInfo? userInfo;
     private long rumEventsEnqueued;
     private long rumEventsDroppedBySampling;
@@ -103,7 +106,11 @@ public sealed class GuanceClient : IAsyncDisposable
     {
     }
 
-    internal GuanceClient(GuanceConfig config, IRumQueue queue, IDatawayTransport transport)
+    internal GuanceClient(
+        GuanceConfig config,
+        IRumQueue queue,
+        IDatawayTransport transport,
+        ActionTrackingTiming? actionTiming = null)
         : this(
             config,
             queue,
@@ -112,7 +119,8 @@ public sealed class GuanceClient : IAsyncDisposable
             new SessionReplayTransport(config),
             null,
             config.Logging.EnableCustomLog ? new BatchFileLogQueue(config) : new DisabledLogQueue(),
-            new LogTransport(config))
+            new LogTransport(config),
+            actionTiming)
     {
     }
 
@@ -124,7 +132,8 @@ public sealed class GuanceClient : IAsyncDisposable
         ISessionReplayTransport sessionReplayTransport,
         IApplicationLaunchClock? applicationLaunchClock = null,
         ILogQueue? logQueue = null,
-        ILogTransport? logTransport = null)
+        ILogTransport? logTransport = null,
+        ActionTrackingTiming? actionTiming = null)
     {
         config.Validate();
         this.config = config;
@@ -132,6 +141,7 @@ public sealed class GuanceClient : IAsyncDisposable
         this.transport = transport;
         this.sessionReplayQueue = sessionReplayQueue;
         this.sessionReplayTransport = sessionReplayTransport;
+        this.actionTiming = (actionTiming ?? ActionTrackingTiming.Default).Validate();
         sampling = new SamplingController(config);
         session = new SessionManager(sampling);
         platformInfo = RumPlatformInfo.Capture();
@@ -354,6 +364,7 @@ public sealed class GuanceClient : IAsyncDisposable
     public void StartView(string name, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
+        CompleteActiveAction();
         ActiveView? viewToClose;
         lock (stateGate)
         {
@@ -379,6 +390,7 @@ public sealed class GuanceClient : IAsyncDisposable
     /// <summary>Stops the active RUM View.</summary>
     public void StopView(IReadOnlyDictionary<string, object?>? properties = null)
     {
+        CompleteActiveAction();
         ActiveView? viewToClose;
         lock (stateGate)
         {
@@ -393,12 +405,59 @@ public sealed class GuanceClient : IAsyncDisposable
         }
     }
 
-    /// <summary>Starts a scoped RUM Action that stops when the returned scope is disposed.</summary>
+    /// <summary>Starts an automatically completed RUM Action with 100 ms frequency protection and a five-second maximum duration.</summary>
     public RumActionScope StartAction(string name, string type, IReadOnlyDictionary<string, object?>? properties = null)
+        => StartAction(name, type, needWait: false, properties);
+
+    /// <summary>Starts a RUM Action, optionally requiring an explicit stop. All Actions are limited to five seconds.</summary>
+    public RumActionScope StartAction(string name, string type, bool needWait, IReadOnlyDictionary<string, object?>? properties = null)
     {
         session.Touch();
-        var action = new ActiveAction(Guid.NewGuid().ToString("N"), name, type, SnapshotView(), Clock.UnixTimeNanoseconds(), Stopwatch.StartNew(), properties);
-        actions[action.Id] = action;
+        ActiveAction? actionToClose = null;
+        ActiveAction? action;
+
+        lock (actionGate)
+        {
+            if (activeAction is not null)
+            {
+                var elapsed = activeAction.Duration.Elapsed;
+                var canReplace = elapsed >= actionTiming.MaxDuration ||
+                                 (!activeAction.NeedWait && elapsed >= actionTiming.FrequentProtection);
+                if (!canReplace)
+                {
+                    return RumActionScope.Rejected(this);
+                }
+
+                actionToClose = RemoveActiveActionLocked(activeAction.Id);
+            }
+
+            action = new ActiveAction(
+                Guid.NewGuid().ToString("N"),
+                name,
+                type,
+                SnapshotView(),
+                Clock.UnixTimeNanoseconds(),
+                Stopwatch.StartNew(),
+                needWait,
+                properties);
+            actions[action.Id] = action;
+            activeAction = action;
+            action.TimeoutTimer = new System.Threading.Timer(
+                static state =>
+                {
+                    var timeout = (ActionTimeoutState)state!;
+                    timeout.Client.CompleteAction(timeout.ActionId, requireNeedWait: false);
+                },
+                new ActionTimeoutState(this, action.Id),
+                actionTiming.MaxDuration,
+                Timeout.InfiniteTimeSpan);
+        }
+
+        if (actionToClose is not null)
+        {
+            TrackAction(actionToClose, Clock.DurationNanoseconds(actionToClose.Duration));
+        }
+
         return new RumActionScope(this, action.Id);
     }
 
@@ -407,15 +466,75 @@ public sealed class GuanceClient : IAsyncDisposable
     {
         session.Touch();
         var durationNanoseconds = Clock.DurationNanoseconds(duration);
-        var action = new ActiveAction(Guid.NewGuid().ToString("N"), name, type, SnapshotView(), Clock.UnixTimeNanosecondsBefore(duration), Stopwatch.StartNew(), properties);
+        var action = new ActiveAction(Guid.NewGuid().ToString("N"), name, type, SnapshotView(), Clock.UnixTimeNanosecondsBefore(duration), Stopwatch.StartNew(), false, properties);
         TrackAction(action, durationNanoseconds);
     }
 
-    internal void StopAction(string actionId)
+    /// <summary>Stops an active Action that was started with <c>needWait: true</c>.</summary>
+    public void StopAction(string actionId)
+        => CompleteAction(actionId, requireNeedWait: true);
+
+    private void CompleteAction(string actionId, bool requireNeedWait)
     {
-        if (actions.TryRemove(actionId, out var action))
+        ActiveAction? action;
+        lock (actionGate)
+        {
+            if (activeAction?.Id != actionId || (requireNeedWait && !activeAction.NeedWait))
+            {
+                return;
+            }
+
+            action = RemoveActiveActionLocked(actionId);
+        }
+
+        if (action is not null)
         {
             TrackAction(action, Clock.DurationNanoseconds(action.Duration));
+        }
+    }
+
+    private ActiveAction? RemoveActiveActionLocked(string actionId)
+    {
+        if (activeAction?.Id != actionId || !actions.TryRemove(actionId, out var action))
+        {
+            return null;
+        }
+
+        activeAction = null;
+        action.TimeoutTimer?.Dispose();
+        action.TimeoutTimer = null;
+        return action;
+    }
+
+    private void CloseNormalActionAfterActivity()
+    {
+        string? actionId = null;
+        lock (actionGate)
+        {
+            if (activeAction is { NeedWait: false } action &&
+                action.Duration.Elapsed >= actionTiming.FrequentProtection)
+            {
+                actionId = action.Id;
+            }
+        }
+
+        if (actionId is not null)
+        {
+            CompleteAction(actionId, requireNeedWait: false);
+        }
+    }
+
+    private void CompleteActiveAction()
+    {
+        string? actionId;
+        lock (actionGate)
+        {
+            actionId = activeAction?.Id;
+        }
+
+        if (actionId is not null)
+        {
+            CompleteAction(actionId, requireNeedWait: false);
         }
     }
 
@@ -655,6 +774,7 @@ public sealed class GuanceClient : IAsyncDisposable
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         webViewInstrumentation.Dispose();
+        CompleteActiveAction();
         StopView();
         // Shutdown is deliberately bounded. Remaining ready batches stay durable
         // for the next process instead of delaying application exit while the
@@ -1418,6 +1538,7 @@ public sealed class GuanceClient : IAsyncDisposable
             SnapshotView(),
             launch.StartTimeNanoseconds,
             Stopwatch.StartNew(),
+            false,
             launch.Properties);
         TrackAction(action, launch.DurationNanoseconds);
     }
@@ -1438,8 +1559,10 @@ public sealed class GuanceClient : IAsyncDisposable
 
     private ActiveActionSnapshot? SnapshotAction()
     {
-        var action = actions.Values.OrderByDescending(item => item.StartTime).FirstOrDefault();
-        return action is null ? null : new ActiveActionSnapshot(action.Id, action.Name);
+        lock (actionGate)
+        {
+            return activeAction is null ? null : new ActiveActionSnapshot(activeAction.Id, activeAction.Name);
+        }
     }
 
     private SessionReplayContext CreateSessionReplayContext()
@@ -1491,6 +1614,8 @@ public sealed class GuanceClient : IAsyncDisposable
         {
             activeAction.ResourceCount++;
         }
+
+        CloseNormalActionAfterActivity();
     }
 
     private void IncrementError(ActiveViewSnapshot? view, ActiveActionSnapshot? action)
@@ -1507,6 +1632,8 @@ public sealed class GuanceClient : IAsyncDisposable
         {
             activeAction.ErrorCount++;
         }
+
+        CloseNormalActionAfterActivity();
     }
 
     private void IncrementLongTask(ActiveViewSnapshot? view, ActiveActionSnapshot? action)
@@ -1523,6 +1650,8 @@ public sealed class GuanceClient : IAsyncDisposable
         {
             activeAction.LongTaskCount++;
         }
+
+        CloseNormalActionAfterActivity();
     }
 
     private static void AddTags(RumEvent rumEvent, IReadOnlyDictionary<string, object?> values)
@@ -1719,15 +1848,18 @@ public sealed class GuanceClient : IAsyncDisposable
 
     private sealed record ActiveViewSnapshot(string Id, string Name, string? Referrer);
 
-    private sealed record ActiveAction(string Id, string Name, string Type, ActiveViewSnapshot? View, long StartTime, Stopwatch Duration, IReadOnlyDictionary<string, object?>? InitialProperties)
+    private sealed record ActiveAction(string Id, string Name, string Type, ActiveViewSnapshot? View, long StartTime, Stopwatch Duration, bool NeedWait, IReadOnlyDictionary<string, object?>? InitialProperties)
     {
         public int ResourceCount;
         public int ErrorCount;
         public int LongTaskCount;
+        public System.Threading.Timer? TimeoutTimer;
         public Dictionary<string, object?> Properties { get; } = InitialProperties is null
             ? new Dictionary<string, object?>(StringComparer.Ordinal)
             : new Dictionary<string, object?>(InitialProperties, StringComparer.Ordinal);
     }
+
+    private sealed record ActionTimeoutState(GuanceClient Client, string ActionId);
 
     private sealed record ActiveActionSnapshot(string Id, string Name);
 

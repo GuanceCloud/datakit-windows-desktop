@@ -163,7 +163,7 @@ internal static partial class WindowsDesktopInstrumentation
                 }
                 var element = sender as FrameworkElement;
                 var name = WpfElementName(sender);
-                active.AddAction(name, WpfActionType(), TimeSpan.Zero);
+                active.StartAction(name, WpfActionType());
                 var ownerWindow = element is null ? app.MainWindow : Window.GetWindow(element) ?? app.MainWindow;
                 if (ownerWindow is not null && element is not null)
                 {
@@ -273,7 +273,7 @@ internal static partial class WindowsDesktopInstrumentation
                 {
                     if (TryGetActiveClient(out var active))
                     {
-                        active.AddAction(shortcutName, RumConstants.ActionTypeKey, TimeSpan.Zero);
+                        active.StartAction(shortcutName, RumConstants.ActionTypeKey);
                         active.CaptureSessionReplayInteraction("shortcut", shortcutName);
                         QueueWpfReplaySnapshot(sender);
                     }
@@ -291,7 +291,7 @@ internal static partial class WindowsDesktopInstrumentation
                     var commandName = WpfCommandActionName(sender, args.Command);
                     if (TryGetActiveClient(out var active))
                     {
-                        active.AddAction(commandName, WpfActionType(), TimeSpan.Zero);
+                        active.StartAction(commandName, WpfActionType());
                         active.CaptureSessionReplayInteraction("command", commandName);
                         QueueWpfReplaySnapshot(sender);
                     }
@@ -399,7 +399,7 @@ internal static partial class WindowsDesktopInstrumentation
             return;
         }
         var name = WpfElementName(sender);
-        client.AddAction(name, WpfActionType(), TimeSpan.Zero);
+        client.StartAction(name, WpfActionType());
         if (replayAsInput)
         {
             client.CaptureSessionReplayInput(name);
@@ -761,7 +761,7 @@ internal static partial class WindowsDesktopInstrumentation
             return;
         }
         var name = ControlName(control);
-        client.AddAction(name, WinFormsActionType(), TimeSpan.Zero);
+        client.StartAction(name, WinFormsActionType());
         var point = control.FindForm()?.PointToClient(WinForms.Control.MousePosition) ?? System.Drawing.Point.Empty;
         client.CaptureSessionReplayClick(control, name, point.X, point.Y);
     }
@@ -773,7 +773,7 @@ internal static partial class WindowsDesktopInstrumentation
             return;
         }
         var name = ControlName(control);
-        client.AddAction(name, WinFormsActionType(), TimeSpan.Zero);
+        client.StartAction(name, WinFormsActionType());
         client.CaptureSessionReplayInput(name);
     }
 
@@ -790,7 +790,7 @@ internal static partial class WindowsDesktopInstrumentation
         {
             return;
         }
-        client.AddAction(name, WinFormsActionType(), TimeSpan.Zero);
+        client.StartAction(name, WinFormsActionType());
         client.CaptureSessionReplayInteraction(replayInteractionType, name);
     }
 
@@ -809,7 +809,7 @@ internal static partial class WindowsDesktopInstrumentation
         }
 
         var name = $"{ControlName(control)}.{args.Modifiers}+{args.KeyCode}";
-        client.AddAction(name, RumConstants.ActionTypeKey, TimeSpan.Zero);
+        client.StartAction(name, RumConstants.ActionTypeKey);
         client.CaptureSessionReplayInteraction("shortcut", name);
     }
 

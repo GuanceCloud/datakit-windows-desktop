@@ -333,12 +333,11 @@ internal sealed class WebViewInstrumentationManager : IDisposable
                     break;
                 case "action":
                     context["action_source"] = "webview";
-                    client.AddAction(
+                    client.StartAction(
                         message.Name!,
                         string.Equals(message.ActionType, RumConstants.ActionTypeKey, StringComparison.Ordinal)
                             ? RumConstants.ActionTypeKey
                             : RumConstants.ActionTypeClick,
-                        TimeSpan.FromMilliseconds(message.DurationMilliseconds),
                         context);
                     break;
                 case "error":

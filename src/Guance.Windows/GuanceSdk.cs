@@ -56,8 +56,12 @@ public static class GuanceSdk
     public static void StartView(string name, IReadOnlyDictionary<string, object?>? properties = null) => Client.StartView(name, properties);
     /// <summary>Stops the active RUM View.</summary>
     public static void StopView(IReadOnlyDictionary<string, object?>? properties = null) => Client.StopView(properties);
-    /// <summary>Starts a scoped RUM Action that stops when the returned scope is disposed.</summary>
+    /// <summary>Starts an automatically completed RUM Action with 100 ms frequency protection and a five-second maximum duration.</summary>
     public static RumActionScope StartAction(string name, string type, IReadOnlyDictionary<string, object?>? properties = null) => Client.StartAction(name, type, properties);
+    /// <summary>Starts a RUM Action, optionally requiring an explicit stop. All Actions are limited to five seconds.</summary>
+    public static RumActionScope StartAction(string name, string type, bool needWait, IReadOnlyDictionary<string, object?>? properties = null) => Client.StartAction(name, type, needWait, properties);
+    /// <summary>Stops an active Action that was started with <c>needWait: true</c>.</summary>
+    public static void StopAction(string actionId) => Client.StopAction(actionId);
     /// <summary>Adds a completed RUM Action with a known duration.</summary>
     public static void AddAction(string name, string type, TimeSpan duration, IReadOnlyDictionary<string, object?>? properties = null) => Client.AddAction(name, type, duration, properties);
     /// <summary>Starts a manually tracked RUM Resource and returns its identifier.</summary>

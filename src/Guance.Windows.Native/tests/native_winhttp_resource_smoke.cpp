@@ -337,7 +337,7 @@ int main() {
     WinHttpCloseHandle(session);
 
     guance_rum_start_view(handle, "NativeLogView");
-    const auto action_id = guance_rum_start_action(handle, "NativeLogAction", "click");
+    const auto action_id = guance_rum_start_action_ext(handle, "NativeLogAction", "click", 1);
     guance_log_property log_properties[] = {{"operation", "save"}};
     assert(guance_log_add(handle, "native log message", "warning", log_properties, 1) == 1);
     guance_rum_stop_action(handle, action_id);

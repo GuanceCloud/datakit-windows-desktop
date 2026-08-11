@@ -58,7 +58,7 @@ int main(void) {
     guance_sdk_add_global_context(sdk, "sample", "native-console");
     guance_rum_start_view(sdk, "NativeConsole/Main");
 
-    const char* action_id = guance_rum_start_action(sdk, "RunSample", "command");
+    const char* action_id = guance_rum_start_action_ext(sdk, "RunSample", "command", 1);
     const guance_log_property properties[] = {
         {"component", "NativeConsoleSample"}
     };

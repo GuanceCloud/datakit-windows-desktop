@@ -44,6 +44,7 @@ public sealed class WebViewInstrumentationTests
             actionType = "submit",
             durationMs = 12.5
         });
+        await Task.Delay(120);
         webView.Core.PostBridgeMessage(pageUrl, new
         {
             channel = "guance-rum-webview",
@@ -146,6 +147,7 @@ public sealed class WebViewInstrumentationTests
         await using var client = CreateClient(rumQueue);
         var webView = new FakeWebView2();
 
+        client.StartView("Native host");
         client.AttachWebView(webView);
         client.AttachWebView(webView);
         var script = await webView.Core.WaitForInjectedScriptAsync();
@@ -194,6 +196,7 @@ public sealed class WebViewInstrumentationTests
             name = "After reattach",
             actionType = "click"
         });
+        client.StopView();
 
         var lines = await rumQueue.PeekAsync(20, CancellationToken.None);
         Assert.DoesNotContain(lines, item => item.Line.Contains("After\\ detach", StringComparison.Ordinal));

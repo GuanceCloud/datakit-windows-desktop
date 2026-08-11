@@ -168,6 +168,13 @@ if(BUILD_TESTING)
         target_link_libraries(native_monitoring_c_abi_smoke PRIVATE guance_windows_native)
         add_test(NAME native_monitoring_c_abi_smoke COMMAND native_monitoring_c_abi_smoke)
 
+        add_executable(native_action_lifecycle_smoke tests/native_action_lifecycle_smoke.cpp)
+        target_include_directories(native_action_lifecycle_smoke PRIVATE include)
+        target_compile_features(native_action_lifecycle_smoke PRIVATE cxx_std_17)
+        guance_enable_assertions(native_action_lifecycle_smoke)
+        target_link_libraries(native_action_lifecycle_smoke PRIVATE guance_windows_native)
+        add_test(NAME native_action_lifecycle_smoke COMMAND native_action_lifecycle_smoke)
+
         add_executable(native_ui_hang_smoke tests/native_ui_hang_smoke.cpp)
         target_include_directories(native_ui_hang_smoke PRIVATE include)
         target_compile_features(native_ui_hang_smoke PRIVATE cxx_std_17)
@@ -209,6 +216,7 @@ if(BUILD_TESTING)
             native_browser_bridge_smoke
             native_monitoring_abi_smoke
             native_monitoring_c_abi_smoke
+            native_action_lifecycle_smoke
             native_ui_hang_smoke
             native_crash_recovery_smoke
             native_win32_replay_smoke

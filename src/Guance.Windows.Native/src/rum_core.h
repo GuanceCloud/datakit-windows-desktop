@@ -12,11 +12,13 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -114,7 +116,7 @@ public:
     void stop_view();
     void add_action(const char* name, const char* type, int64_t duration_ns);
     void add_launch_action(const guance_rum_launch& launch);
-    std::string start_action(const char* name, const char* type);
+    std::string start_action(const char* name, const char* type, bool need_wait = false);
     void stop_action(const char* action_id);
     std::string start_resource(const char* url, const char* method);
     std::string start_auto_resource(const char* url, const char* method);
@@ -193,6 +195,7 @@ private:
         std::string view_referrer;
         int64_t started_ns = 0;
         int64_t started_monotonic_ns = 0;
+        bool need_wait = false;
         int resource_count = 0;
         int error_count = 0;
         int long_task_count = 0;
@@ -230,6 +233,9 @@ private:
     void enqueue_replay_segment(std::string content_type, std::string body);
     void track_action(const Action& action, int64_t duration_ns);
     std::optional<Action> current_action_locked() const;
+    bool close_current_action_locked(int64_t now_monotonic_ns);
+    bool close_current_action_if_needed_locked(int64_t now_monotonic_ns, bool allow_normal_timeout);
+    void action_timeout_loop();
     void record_rum_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     void record_replay_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     void record_log_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
@@ -261,6 +267,9 @@ private:
     std::unordered_map<uintptr_t, guance_rum_session_replay_touch_privacy> replay_touch_privacy_;
     std::unordered_map<uintptr_t, bool> replay_hidden_;
     mutable std::mutex mutex_;
+    std::condition_variable action_timeout_cv_;
+    std::thread action_timeout_thread_;
+    bool action_timeout_stopping_ = false;
     mutable std::mutex log_mutex_;
     mutable std::shared_mutex data_modifier_mutex_;
     mutable std::mutex upload_mutex_;

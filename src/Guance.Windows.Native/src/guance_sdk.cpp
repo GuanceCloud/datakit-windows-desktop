@@ -416,7 +416,17 @@ const char* guance_rum_start_action(guance_sdk_handle handle, const char* name, 
         last_id.clear();
         return last_id.c_str();
     }
-    last_id = static_cast<RumCore*>(handle)->start_action(name, type);
+    last_id = static_cast<RumCore*>(handle)->start_action(name, type, false);
+    return last_id.c_str();
+}
+
+const char* guance_rum_start_action_ext(guance_sdk_handle handle, const char* name, const char* type, int need_wait) {
+    thread_local std::string last_id;
+    if (handle == nullptr) {
+        last_id.clear();
+        return last_id.c_str();
+    }
+    last_id = static_cast<RumCore*>(handle)->start_action(name, type, need_wait != 0);
     return last_id.c_str();
 }
 
