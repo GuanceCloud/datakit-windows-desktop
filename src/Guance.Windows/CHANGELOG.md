@@ -9,6 +9,20 @@ All notable changes to the managed `Guance.Windows` NuGet package are recorded h
 - NuGet releases now use an independent `nuget_<version>` tag stream.
 - The release validator requires an exact changelog heading before packaging.
 
+## [0.1.0-alpha.3]
+
+### Added
+
+- RUM, log, and resource data-modifier callbacks for changing existing tags and fields before caching.
+- Optional HTTP request and response header collection with configurable sensitive-header redaction.
+- SDK diagnostic reporting for local configuration and runtime troubleshooting.
+
+### Changed
+
+- Action tracking now applies frequency protection, explicit `needWait` completion, view-change completion, and a five-second maximum duration consistently across managed and native APIs.
+- Windows crash, application-not-responding, and network failures now use the shared RUM error taxonomy and field layout.
+- Privacy rules now run consistently after application data modifiers.
+
 ## [0.1.0-alpha.2]
 
 ### Added

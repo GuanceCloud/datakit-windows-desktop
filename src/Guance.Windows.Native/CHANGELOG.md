@@ -9,6 +9,17 @@ All notable changes to the `guance-windows-native` vcpkg port are recorded here.
 - vcpkg releases now use an independent `vcpkg_<version>` tag stream.
 - The release validator requires an exact changelog heading before port generation.
 
+## [0.1.0-alpha.4]
+
+### Added
+
+- An extended native Action API for actions that require explicit completion.
+
+### Changed
+
+- Action tracking now applies frequency protection, view-change completion, and a five-second maximum duration consistently with the managed SDK.
+- Native crash and application-not-responding events now use the shared RUM error taxonomy and field layout.
+
 ## [0.1.0-alpha.3]
 
 ### Added
