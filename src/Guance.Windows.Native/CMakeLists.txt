@@ -47,6 +47,7 @@ endif()
 add_library(guance_windows_native
     src/data_modifier.cpp
     src/electron_bridge_protocol.cpp
+    src/electron_bridge_server.cpp
     src/guance_sdk.cpp
     src/line_protocol.cpp
     src/crash_envelope.cpp
@@ -203,6 +204,23 @@ if(BUILD_TESTING)
         native_batch_queue_smoke)
 
     if(WIN32)
+        add_executable(
+            native_electron_bridge_server_smoke
+            tests/native_electron_bridge_server_smoke.cpp)
+        target_include_directories(
+            native_electron_bridge_server_smoke
+            PRIVATE include)
+        target_compile_features(
+            native_electron_bridge_server_smoke
+            PRIVATE cxx_std_17)
+        guance_enable_assertions(native_electron_bridge_server_smoke)
+        target_link_libraries(
+            native_electron_bridge_server_smoke
+            PRIVATE guance_windows_native)
+        add_test(
+            NAME native_electron_bridge_server_smoke
+            COMMAND native_electron_bridge_server_smoke)
+
         add_executable(native_browser_bridge_smoke tests/native_browser_bridge_smoke.cpp)
         target_include_directories(native_browser_bridge_smoke PRIVATE include)
         target_compile_features(native_browser_bridge_smoke PRIVATE cxx_std_17)
@@ -266,6 +284,7 @@ if(BUILD_TESTING)
             winhttp)
 
         list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+            native_electron_bridge_server_smoke
             native_browser_bridge_smoke
             native_monitoring_abi_smoke
             native_monitoring_c_abi_smoke

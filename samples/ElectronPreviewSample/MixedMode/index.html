@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guance Electron Mixed Mode Preview</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; display: grid; min-height: 100vh; place-items: center; }
+      main { width: min(32rem, calc(100% - 3rem)); }
+      button { padding: 0.65rem 1rem; cursor: pointer; }
+      #status[data-state="ready"] { color: #2a9d5b; }
+      #status[data-state="error"] { color: #d9534f; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Guance Electron Mixed Mode Preview</h1>
+      <p id="status">Initializing RUM…</p>
+      <button id="preview-action" type="button">Send preview action</button>
+    </main>
+    <script src="./node_modules/@cloudcare/browser-rum/bundle/dataflux-rum.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

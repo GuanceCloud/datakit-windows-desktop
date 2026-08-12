@@ -6,11 +6,17 @@ param(
 
     [string]$ValidationBaseDirectory = ".build\vcpkg-verify",
 
+    [switch]$ElectronAdapter,
+
     [switch]$ElectronBridge
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if ($ElectronAdapter -and $ElectronBridge) {
+    throw "Select either ElectronAdapter or ElectronBridge, not both."
+}
 
 . (Join-Path $PSScriptRoot "common-tools.ps1")
 Repair-ProcessPath
@@ -60,12 +66,19 @@ if ($builtinBaseline -cnotmatch "^[0-9a-f]{40}$") {
     throw "A valid microsoft/vcpkg builtin registry baseline could not be resolved."
 }
 
-$verificationDependency = if ($ElectronBridge) {
+$electronFeature = if ($ElectronBridge) {
+    "electron-bridge"
+} elseif ($ElectronAdapter) {
+    "electron-adapter"
+} else {
+    ""
+}
+$verificationDependency = if (-not [string]::IsNullOrEmpty($electronFeature)) {
 @"
     {
       "name": "guance-windows-native",
       "features": [
-        "electron-bridge"
+        "$electronFeature"
       ]
     }
 "@
@@ -109,6 +122,7 @@ try {
     New-Item -ItemType Directory -Force -Path $env:X_VCPKG_REGISTRIES_CACHE | Out-Null
     New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
     & $Vcpkg install `
+        "--binarysource=clear" `
         "--x-manifest-root=$validationRoot" `
         "--triplet=x64-windows" `
         "--overlay-ports=$overlayRoot" `
@@ -130,6 +144,32 @@ $prefix = Join-Path $installRoot "x64-windows"
 $bridgeDirectory = Join-Path $prefix "tools\guance-windows-native"
 $bridge = Join-Path $bridgeDirectory "guance_windows_electron_bridge.exe"
 $bridgeRuntime = Join-Path $bridgeDirectory "guance_windows_native.dll"
+$adapterDirectory = Join-Path $bridgeDirectory "electron"
+$adapterFiles = @(
+    "package.json",
+    "main\index.cjs",
+    "preload\standalone.cjs",
+    "preload\install.cjs",
+    "internal\constants.cjs",
+    "internal\rum-line-protocol.cjs",
+    "internal\native-owned-bridge.cjs"
+)
+$expectsAdapter = $ElectronAdapter -or $ElectronBridge
+if ($expectsAdapter) {
+    foreach ($adapterFile in $adapterFiles) {
+        $adapterPath = Join-Path $adapterDirectory $adapterFile
+        if (-not (Test-Path -LiteralPath $adapterPath -PathType Leaf)) {
+            throw "The $electronFeature feature did not install adapter file: $adapterPath"
+        }
+    }
+} elseif (Test-Path -LiteralPath $adapterDirectory) {
+    throw "The native-only package unexpectedly installed the Electron adapter."
+}
+
+$installedExecutables = @(
+    Get-ChildItem -LiteralPath $bridgeDirectory -Filter *.exe -File -Recurse `
+        -ErrorAction SilentlyContinue
+)
 if ($ElectronBridge) {
     if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
         throw "The electron-bridge feature did not install the bridge: $bridge"
@@ -137,8 +177,20 @@ if ($ElectronBridge) {
     if (-not (Test-Path -LiteralPath $bridgeRuntime -PathType Leaf)) {
         throw "The electron-bridge feature did not install its runtime dependency: $bridgeRuntime"
     }
-} elseif (Test-Path -LiteralPath $bridge -PathType Leaf) {
-    throw "The default feature set unexpectedly installed the Electron bridge: $bridge"
+    if ($installedExecutables.Count -ne 1 -or
+        $installedExecutables[0].Name -cne "guance_windows_electron_bridge.exe") {
+        throw "The electron-bridge feature must install exactly one production EXE."
+    }
+} elseif ($installedExecutables.Count -ne 0) {
+    $unexpectedPackage = if ([string]::IsNullOrEmpty($electronFeature)) {
+        "native-only"
+    } else {
+        $electronFeature
+    }
+    throw "The $unexpectedPackage package unexpectedly installed an EXE."
+}
+if (Test-Path -LiteralPath (Join-Path $bridgeDirectory "guance_windows_electron_native_owned_host.exe")) {
+    throw "The internal native-owned host fixture was installed."
 }
 
 $consumerSource = Join-Path $repositoryRoot "src\Guance.Windows.Native\tests\package_consumer"
@@ -163,5 +215,9 @@ try {
     $env:PATH = $savedPath
 }
 
-$featureDescription = if ($ElectronBridge) { " with electron-bridge" } else { "" }
+$featureDescription = if ([string]::IsNullOrEmpty($electronFeature)) {
+    ""
+} else {
+    " with $electronFeature"
+}
 Write-Output "vcpkg overlay$featureDescription and dynamic consumer validation passed."

@@ -375,8 +375,35 @@ typedef enum guance_rum_session_replay_touch_privacy {
     GUANCE_RUM_REPLAY_TOUCH_HIDE = 1 /**< Suppress pointer and touch details. */
 } guance_rum_session_replay_touch_privacy;
 
+/** Version written to guance_electron_bridge_server_options::version. */
+#define GUANCE_ELECTRON_BRIDGE_SERVER_OPTIONS_VERSION 1u
+
+/** @brief Configures an in-process Electron Bridge Server for an existing SDK Handle.
+ *
+ * The server copies every option during start. It borrows the SDK Handle, which
+ * must remain valid until the server is stopped. Capability fields describe
+ * the application-owned SDK configuration returned to the Electron adapter.
+ */
+typedef struct guance_electron_bridge_server_options {
+    uint32_t struct_size; /**< Size of this structure in bytes. */
+    uint32_t version; /**< GUANCE_ELECTRON_BRIDGE_SERVER_OPTIONS_VERSION. */
+    const char* pipe_name; /**< Local named-pipe identifier without the Windows path prefix. */
+    uint32_t max_message_bytes; /**< Maximum private protocol line size accepted from Electron. */
+    int logging_enabled; /**< Non-zero when Browser Log forwarding is configured. */
+    int session_replay_enabled; /**< Non-zero when Browser Replay forwarding is configured. */
+    const char* replay_privacy_level; /**< allow, mask-user-input, or mask. */
+    int trace_enabled; /**< Non-zero when Browser trace propagation is configured. */
+    double trace_sample_rate; /**< Trace sampling rate from 0.0 through 1.0. */
+    const char* trace_type; /**< Browser trace propagation type returned in the handshake. */
+    const char* trace_allowed_urls; /**< Browser trace destination policy returned in the handshake. */
+    int debug; /**< Non-zero to emit Bridge Server diagnostic output. */
+} guance_electron_bridge_server_options;
+
 /** @brief Opaque handle returned by guance_sdk_init. */
 typedef void* guance_sdk_handle;
+
+/** @brief Opaque token returned by guance_electron_bridge_server_start. */
+typedef void* guance_electron_bridge_server_handle;
 
 /** Initializes guance_sdk_config with supported defaults before application overrides. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_config_init(guance_sdk_config* config);
@@ -401,6 +428,26 @@ GUANCE_WINDOWS_NATIVE_EXPORT int guance_sdk_write_electron_bridge_line(
     guance_sdk_handle handle,
     const char* line,
     size_t length);
+/** Initializes versioned Electron Bridge Server options with RUM-only defaults. */
+GUANCE_WINDOWS_NATIVE_EXPORT void guance_electron_bridge_server_options_init(
+    guance_electron_bridge_server_options* options);
+/**
+ * Starts a local named-pipe server that borrows an existing SDK Handle.
+ * Returns NULL when validation, pipe creation, or worker startup fails.
+ * Distinct pipe names may be started concurrently. Concurrent or repeated
+ * attempts for the same pipe name allow exactly one owner; other calls fail.
+ */
+GUANCE_WINDOWS_NATIVE_EXPORT guance_electron_bridge_server_handle
+guance_electron_bridge_server_start(
+    guance_sdk_handle sdk,
+    const guance_electron_bridge_server_options* options);
+/**
+ * Stops a Bridge Server and waits for its worker to finish. Concurrent and
+ * repeated calls with the same token are safe. The SDK Handle remains owned
+ * by the application and may be shut down after this function returns.
+ */
+GUANCE_WINDOWS_NATIVE_EXPORT void guance_electron_bridge_server_stop(
+    guance_electron_bridge_server_handle bridge);
 /** Initializes a versioned native monitoring configuration with supported defaults. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_native_monitoring_config_init(
     guance_sdk_native_monitoring_config* config);

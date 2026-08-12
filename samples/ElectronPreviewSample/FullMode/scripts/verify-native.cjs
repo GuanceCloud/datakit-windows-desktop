@@ -1,0 +1,67 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const { EventEmitter } = require("node:events");
+
+const sampleRoot = path.resolve(__dirname, "..");
+const nativeDirectory = path.join(
+  sampleRoot,
+  "vcpkg_installed",
+  "x64-windows",
+  "tools",
+  "guance-windows-native",
+);
+const adapterPath = path.join(nativeDirectory, "electron", "main", "index.cjs");
+
+async function main() {
+  assert.ok(fs.existsSync(adapterPath), `Missing installed Electron adapter: ${adapterPath}`);
+  const { startFullMode } = require(adapterPath);
+  const ipcMain = new EventEmitter();
+  let nativeOutput = "";
+  const bridge = await startFullMode({
+    ipcMain,
+    nativeDirectory,
+    nativeSettings: {
+      applicationId: "electron-full-native-smoke",
+      datakitUrl: "http://127.0.0.1:9",
+      service: "electron-full-native-smoke",
+      environment: "test",
+      version: "0.1.0",
+      cachePath: path.join(sampleRoot, "vcpkg_installed", "verify-native-cache"),
+      sampleRate: 1,
+      debug: true,
+      httpTimeoutMs: 100,
+    },
+    onNativeOutput(_stream, chunk) {
+      nativeOutput += chunk;
+    },
+  });
+  const webContents = { mainFrame: {}, isDestroyed: () => false };
+  bridge.attachWindow(webContents);
+  ipcMain.emit(
+    "guance:electron-rum:browser-event:v1",
+    { sender: webContents, senderFrame: webContents.mainFrame },
+    JSON.stringify({
+      name: "rum",
+      data: {
+        measurement: "view",
+        time: Date.now(),
+        tags: { view_name: "electron.full.native-smoke" },
+        fields: { view_loading_time: 1 },
+      },
+    }),
+  );
+  await bridge.stop();
+  assert.doesNotMatch(nativeOutput, /rejected invalid bridge input/);
+  assert.match(nativeOutput, /@guance-capabilities\tprotocol=1\trum=1/);
+  assert.match(nativeOutput, /\[Guance\.RUM\.NativeBridge\] ready/);
+  assert.match(nativeOutput, /\benqueued=1\b/);
+  console.log("PASS Full Mode native path: public adapter -> Bridge EXE -> owned SDK.");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -1,0 +1,3 @@
+node_modules/
+vcpkg_installed/
+native-host/build/

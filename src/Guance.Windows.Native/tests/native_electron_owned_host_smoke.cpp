@@ -47,6 +47,10 @@ int main() {
         std::chrono::steady_clock::now().time_since_epoch().count());
     const auto pipe_name = L"guance-native-owned-smoke-" + suffix;
     const auto pipe_path = L"\\\\.\\pipe\\" + pipe_name;
+    const auto stop_event_name = L"Local\\guance-native-owned-stop-" + suffix;
+    HANDLE stop_event = CreateEventW(
+        nullptr, TRUE, FALSE, stop_event_name.c_str());
+    require(stop_event != nullptr, "failed to create native-owned stop event");
     const auto cache_path = std::filesystem::temp_directory_path() /
         (L"guance-native-owned-smoke-" + suffix);
     const auto host_path = executable_directory() /
@@ -54,7 +58,7 @@ int main() {
     require(std::filesystem::exists(host_path), "native-owned host executable is missing");
 
     set_environment(L"GUANCE_RUM_NATIVE_OWNED_PIPE_NAME", pipe_name);
-    set_environment(L"GUANCE_RUM_NATIVE_OWNED_EXIT_ON_DISCONNECT", L"1");
+    set_environment(L"GUANCE_RUM_NATIVE_OWNED_STOP_EVENT", stop_event_name);
     set_environment(L"GUANCE_RUM_NATIVE_DATAKIT_URL", L"http://127.0.0.1:9");
     set_environment(L"GUANCE_RUM_NATIVE_APP_ID", L"native-owned-app");
     set_environment(L"GUANCE_RUM_NATIVE_SERVICE", L"native-owned-service");
@@ -143,6 +147,7 @@ int main() {
         "native-owned bridge write failed");
     FlushFileBuffers(pipe);
     CloseHandle(pipe);
+    SetEvent(stop_event);
 
     const DWORD wait = WaitForSingleObject(process.hProcess, 15'000);
     if (wait != WAIT_OBJECT_0) {
@@ -152,6 +157,7 @@ int main() {
     DWORD exit_code = 0;
     GetExitCodeProcess(process.hProcess, &exit_code);
     CloseHandle(process.hProcess);
+    CloseHandle(stop_event);
     require(wait == WAIT_OBJECT_0 && exit_code == 0, "native-owned host did not stop cleanly");
 
     const auto queued = read_queue(cache_path);

@@ -76,6 +76,22 @@ void guance_rum_resource_collection_config_init(
     config->redacted_header_name_count = guance::rum::default_redacted_header_name_count();
 }
 
+void guance_electron_bridge_server_options_init(
+    guance_electron_bridge_server_options* options) {
+    if (options == nullptr) {
+        return;
+    }
+    *options = guance_electron_bridge_server_options{};
+    options->struct_size = sizeof(guance_electron_bridge_server_options);
+    options->version = GUANCE_ELECTRON_BRIDGE_SERVER_OPTIONS_VERSION;
+    options->pipe_name = "guance-rum-electron-native-owned";
+    options->max_message_bytes = 2u * 1024u * 1024u;
+    options->replay_privacy_level = "mask";
+    options->trace_sample_rate = 1.0;
+    options->trace_type = "w3c_traceparent";
+    options->trace_allowed_urls = "";
+}
+
 void guance_data_modifier_config_init(guance_data_modifier_config* config) {
     if (config == nullptr) {
         return;

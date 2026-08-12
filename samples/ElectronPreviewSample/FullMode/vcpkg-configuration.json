@@ -1,0 +1,17 @@
+{
+  "default-registry": {
+    "kind": "git",
+    "repository": "https://github.com/microsoft/vcpkg",
+    "baseline": "dc8d75cfc3281b8e2a4ed8ee4163c891190df932"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/GuanceCloud/gc-vcpkg-registry.git",
+      "baseline": "1d27200247ea4f4c6af18550c3568a3549018f7b",
+      "packages": [
+        "guance-windows-native"
+      ]
+    }
+  ]
+}

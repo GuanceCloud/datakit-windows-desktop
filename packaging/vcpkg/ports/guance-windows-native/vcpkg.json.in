@@ -7,8 +7,20 @@
   "license": "Apache-2.0",
   "supports": "windows & x64 & !uwp",
   "features": {
+    "electron-adapter": {
+      "description": "Install the SDK-owned Electron JavaScript adapter"
+    },
     "electron-bridge": {
-      "description": "Build and install the native bridge for Electron applications"
+      "description": "Install the Electron adapter and native Bridge EXE for Full Mode",
+      "dependencies": [
+        {
+          "name": "guance-windows-native",
+          "default-features": false,
+          "features": [
+            "electron-adapter"
+          ]
+        }
+      ]
     }
   },
   "dependencies": [

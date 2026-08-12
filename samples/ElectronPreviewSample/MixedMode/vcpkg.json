@@ -1,0 +1,13 @@
+{
+  "name": "guance-windows-electron-mixed-preview",
+  "version-string": "0.1.0",
+  "dependencies": [
+    {
+      "name": "guance-windows-native",
+      "version>=": "0.1.0-alpha.4",
+      "features": [
+        "electron-adapter"
+      ]
+    }
+  ]
+}

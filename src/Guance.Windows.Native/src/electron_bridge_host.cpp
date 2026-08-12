@@ -963,6 +963,19 @@ int main() {
         }
 
         std::cout
+            << "@guance-capabilities"
+            << "\tprotocol=1"
+            << "\trum=1"
+            << "\tlog=0"
+            << "\treplay=0"
+            << "\treplay_privacy=mask"
+            << "\ttrace=0"
+            << "\ttrace_sample_rate=0"
+            << "\ttrace_type=w3c_traceparent"
+            << "\ttrace_allowed_urls="
+            << "\tdebug=" << (host.debug ? 1 : 0)
+            << std::endl;
+        std::cout
             << "[Guance.RUM.NativeBridge] ready"
             << " transport=" << (host.dataway_url.empty() ? "datakit" : "dataway")
             << " app_id=" << host.app_id

@@ -1,17 +1,26 @@
-Guance.Windows.Native is distributed by the guance-windows-native port and
-provides the CMake package GuanceWindowsNative:
+Guance.Windows.Native provides the CMake package GuanceWindowsNative:
 
     find_package(GuanceWindowsNative CONFIG REQUIRED)
     target_link_libraries(main PRIVATE Guance::WindowsNative)
 
-Install the optional Electron native bridge with:
+Mixed Mode reuses an SDK Handle owned by the application. Install the adapter:
+
+    vcpkg install "guance-windows-native[electron-adapter]:x64-windows"
+
+Include guance_sdk.h, start guance_electron_bridge_server_start() with the
+existing guance_sdk_handle, and load these public Electron entry points:
+
+    tools/guance-windows-native/electron/main/index.cjs
+    tools/guance-windows-native/electron/preload/standalone.cjs
+    tools/guance-windows-native/electron/preload/install.cjs
+
+Full Mode lets the Guance Bridge EXE own SDK initialization and shutdown:
 
     vcpkg install "guance-windows-native[electron-bridge]:x64-windows"
 
-The bridge executable and its runtime dependencies are installed under:
+The feature includes electron-adapter and installs the EXE plus its adjacent
+runtime under tools/guance-windows-native. Use startFullMode() from the public
+Main Process entry point; do not launch private protocol modules directly.
 
-    tools/guance-windows-native
-
-The initial port supports the dynamic x64-windows triplet. Session Replay is
-experimental, opt-in, and disabled by default at runtime. The port has no
-default SQLite dependency.
+The port supports dynamic x64-windows. Session Replay is experimental, opt-in,
+and disabled by default at runtime. The port has no default SQLite dependency.

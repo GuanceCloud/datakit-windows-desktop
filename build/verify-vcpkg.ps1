@@ -7,6 +7,8 @@ param(
 
     [string]$VcpkgExe,
 
+    [switch]$ElectronAdapter,
+
     [switch]$ElectronBridge
 )
 
@@ -22,6 +24,9 @@ if (-not [string]::IsNullOrWhiteSpace($VcpkgExe)) {
 }
 if ($ElectronBridge) {
     $arguments.ElectronBridge = $true
+}
+if ($ElectronAdapter) {
+    $arguments.ElectronAdapter = $true
 }
 
 & (Join-Path $PSScriptRoot "test-vcpkg-overlay.ps1") @arguments

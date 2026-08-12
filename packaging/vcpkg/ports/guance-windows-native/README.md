@@ -17,5 +17,8 @@ Jenkins must:
 The preparation script rejects unsupported tags and verifies the native
 changelog before rendering. The port is dynamic x64-windows only. Session
 Replay is experimental and runtime opt-in. SQLite is not a default dependency.
-The optional `electron-bridge` feature installs the Electron bridge and its
-runtime dependencies under `tools/guance-windows-native`.
+The optional `electron-adapter` feature installs the SDK-owned Electron
+JavaScript adapter under `tools/guance-windows-native/electron` for Mixed Mode.
+The `electron-bridge` feature includes that adapter and additionally installs
+the Full Mode Bridge EXE and its adjacent runtime dependency under
+`tools/guance-windows-native`.
