@@ -10,6 +10,7 @@ const {
 } = require("./constants.cjs");
 
 const RETRYABLE_PIPE_ERRORS = new Set(["ENOENT", "ECONNREFUSED", "EBUSY"]);
+const REPLAY_PRIVACY_LEVELS = new Set(["allow", "mask-user-input", "mask"]);
 
 function resolvePipePath(pipeName = process.env.GUANCE_RUM_NATIVE_OWNED_PIPE_NAME) {
   const normalized = pipeName || DEFAULT_PIPE_NAME;
@@ -44,12 +45,16 @@ function parseCapabilities(line) {
   if (fields.get("protocol") !== "1" || fields.get("rum") !== "1") {
     throw new Error("Native Bridge Server does not support RUM bridge protocol 1.");
   }
+  const replayPrivacy = fields.get("replay_privacy") || "mask";
+  if (!REPLAY_PRIVACY_LEVELS.has(replayPrivacy)) {
+    throw new Error("Native Bridge Replay privacy capability is invalid.");
+  }
   return Object.freeze({
     rum: true,
     log: parseBooleanCapability(fields, "log"),
     replay: parseBooleanCapability(fields, "replay"),
     trace: parseBooleanCapability(fields, "trace"),
-    replayPrivacy: fields.get("replay_privacy") || "mask",
+    replayPrivacy,
     traceSampleRate: Number(fields.get("trace_sample_rate") || 0),
     traceType: fields.get("trace_type") || "w3c_traceparent",
   });
@@ -158,6 +163,9 @@ async function connectNativeOwnedBridge({
           );
           if (payload.measurement === "log" && !capabilities.log) {
             throw new Error("Native Bridge Server did not enable Browser Log collection.");
+          }
+          if (payload.measurement === "session_replay" && !capabilities.replay) {
+            throw new Error("Native Bridge Server did not enable Browser Session Replay.");
           }
           try {
             if (!socket.write(payload.line, "utf8")) backpressured = true;

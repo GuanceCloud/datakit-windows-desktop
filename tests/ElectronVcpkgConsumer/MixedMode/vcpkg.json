@@ -1,0 +1,12 @@
+{
+  "name": "guance-windows-electron-mixed-consumer-test",
+  "version-string": "0",
+  "dependencies": [
+    {
+      "name": "guance-windows-native",
+      "features": [
+        "electron-adapter"
+      ]
+    }
+  ]
+}

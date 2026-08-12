@@ -5,15 +5,18 @@ const { EventEmitter, once } = require("node:events");
 const net = require("node:net");
 const test = require("node:test");
 const { connectMixedMode, startFullMode } = require("../main/index.cjs");
-const { BRIDGE_CHANNEL } = require("../internal/constants.cjs");
+const {
+  BRIDGE_CHANNEL,
+  BRIDGE_CONFIGURATION_CHANNEL,
+} = require("../internal/constants.cjs");
 
 const VALID_HANDSHAKE = [
   "@guance-capabilities",
   "protocol=1",
   "rum=1",
   "log=1",
-  "replay=0",
-  "replay_privacy=mask",
+  "replay=1",
+  "replay_privacy=mask-user-input",
   "trace=0",
   "trace_sample_rate=100",
   "trace_type=w3c_traceparent",
@@ -67,6 +70,14 @@ function logEvent() {
   });
 }
 
+function replayEvent() {
+  return JSON.stringify({
+    name: "session_replay",
+    view: { id: "mixed-view" },
+    data: { type: 2, timestamp: 1_700_000_000_123, data: { href: "file:///" } },
+  });
+}
+
 test("Mixed Mode retries, validates the handshake, and uses the versioned IPC channel", async () => {
   const name = pipeName("retry");
   const server = net.createServer();
@@ -77,7 +88,7 @@ test("Mixed Mode retries, validates the handshake, and uses the versioned IPC ch
       socket.setEncoding("utf8");
       socket.on("data", (chunk) => {
         received += chunk;
-        if (received.split("\n").filter(Boolean).length >= 2) resolve();
+        if (received.split("\n").filter(Boolean).length >= 3) resolve();
       });
     });
   });
@@ -97,6 +108,24 @@ test("Mixed Mode retries, validates the handshake, and uses the versioned IPC ch
   const bridge = await bridgePromise;
   const webContents = { mainFrame: {}, isDestroyed: () => false };
   bridge.attachWindow(webContents);
+  const untrustedConfigurationEvent = {
+    sender: { mainFrame: {} },
+    senderFrame: {},
+  };
+  ipcMain.emit(BRIDGE_CONFIGURATION_CHANNEL, untrustedConfigurationEvent);
+  assert.deepEqual(untrustedConfigurationEvent.returnValue, {
+    replayEnabled: false,
+    replayPrivacy: "mask",
+  });
+  const configurationEvent = {
+    sender: webContents,
+    senderFrame: webContents.mainFrame,
+  };
+  ipcMain.emit(BRIDGE_CONFIGURATION_CHANNEL, configurationEvent);
+  assert.deepEqual(configurationEvent.returnValue, {
+    replayEnabled: true,
+    replayPrivacy: "mask-user-input",
+  });
 
   ipcMain.emit(
     "rum:browser-event",
@@ -119,12 +148,18 @@ test("Mixed Mode retries, validates the handshake, and uses the versioned IPC ch
     { sender: webContents, senderFrame: webContents.mainFrame },
     logEvent(),
   );
+  ipcMain.emit(
+    BRIDGE_CHANNEL,
+    { sender: webContents, senderFrame: webContents.mainFrame },
+    replayEvent(),
+  );
   await receivedEvents;
 
   assert.match(received, /^action,/);
   assert.match(received, /is_electron=true/);
   assert.match(received, /duration=42i/);
   assert.match(received, /\n@guance-log\tstatus=warning\tmessage=/);
+  assert.match(received, /\n@guance-replay\tview_id=mixed-view\t/);
   assert.equal(adapterErrors.length, 1);
   assert.match(adapterErrors[0].message, /not valid JSON/);
   await bridge.stop();
@@ -164,6 +199,53 @@ test("Mixed Mode rejects Browser Logs when the Native capability is disabled", a
   assert.equal(received, "");
   assert.equal(adapterErrors.length, 1);
   assert.match(adapterErrors[0].message, /did not enable Browser Log collection/);
+  await bridge.stop();
+  await close(server);
+});
+
+test("Mixed Mode hides and rejects Browser Replay when Native Replay is disabled", async () => {
+  const name = pipeName("replay-disabled");
+  const server = net.createServer();
+  let received = "";
+  server.on("connection", (socket) => {
+    socket.write(VALID_HANDSHAKE
+      .replace("\treplay=1\t", "\treplay=0\t")
+      .replace("\treplay_privacy=mask-user-input\t", "\treplay_privacy=mask\t"));
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => { received += chunk; });
+  });
+  await listen(server, pipePath(name));
+
+  const ipcMain = new EventEmitter();
+  const adapterErrors = [];
+  const bridge = await connectMixedMode({
+    ipcMain,
+    pipeName: name,
+    timeoutMs: 1_000,
+    retryDelayMs: 20,
+    onError: (error) => adapterErrors.push(error),
+  });
+  const webContents = { mainFrame: {}, isDestroyed: () => false };
+  bridge.attachWindow(webContents);
+  const configurationEvent = {
+    sender: webContents,
+    senderFrame: webContents.mainFrame,
+  };
+  ipcMain.emit(BRIDGE_CONFIGURATION_CHANNEL, configurationEvent);
+  ipcMain.emit(
+    BRIDGE_CHANNEL,
+    { sender: webContents, senderFrame: webContents.mainFrame },
+    replayEvent(),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(configurationEvent.returnValue, {
+    replayEnabled: false,
+    replayPrivacy: "mask",
+  });
+  assert.equal(received, "");
+  assert.equal(adapterErrors.length, 1);
+  assert.match(adapterErrors[0].message, /did not enable Browser Session Replay/);
   await bridge.stop();
   await close(server);
 });

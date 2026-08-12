@@ -35,6 +35,19 @@ function logEvent(overrides = {}) {
   });
 }
 
+function replayEvent(overrides = {}) {
+  return JSON.stringify({
+    name: "session_replay",
+    view: { id: "browser-view" },
+    data: {
+      type: 2,
+      timestamp: 1_700_000_000_123,
+      data: { node: { type: 0, childNodes: [] } },
+      ...overrides,
+    },
+  });
+}
+
 test("converts Browser RUM JSON with trusted Native field overrides", () => {
   const line = browserRumEventToLine(rumEvent(), {
     app_id: "trusted-app-id",
@@ -70,6 +83,16 @@ test("converts Browser Logs to the private Native log command", () => {
   assert.match(result.line, /\n$/);
 });
 
+test("converts Browser Session Replay to the private Native Replay command", () => {
+  const result = browserBridgeEventToNativeInput(replayEvent());
+
+  assert.equal(result.measurement, "session_replay");
+  assert.match(result.line, /^@guance-replay\tview_id=browser-view\t/);
+  assert.match(result.line, /\ttimestamp_ms=1700000000123\t/);
+  assert.match(result.line, /\tfull_snapshot=1\t/);
+  assert.match(result.line, /\trecord=[A-Za-z0-9+/]+=*\n$/);
+});
+
 test("rejects invalid event types, records, timestamps, and message sizes", () => {
   assert.throws(
     () => browserRumEventToLine(logEvent()),
@@ -86,6 +109,10 @@ test("rejects invalid event types, records, timestamps, and message sizes", () =
   assert.throws(
     () => browserBridgeEventToNativeInput(logEvent({ status: "not valid" })),
     /Log status is invalid/,
+  );
+  assert.throws(
+    () => browserBridgeEventToNativeInput(replayEvent({ type: -1 })),
+    /record type is invalid/,
   );
   assert.throws(
     () => browserRumEventToLine(rumEvent({ measurement: "custom" })),

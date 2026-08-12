@@ -118,6 +118,30 @@ function parseBridgeEvent(serializedEvent) {
     }
     return { name: "log", record };
   }
+  if (event.name === "session_replay") {
+    const record = event.data;
+    assertRecordObject(record, "Browser Session Replay record");
+    assertRecordObject(event.view, "Browser Session Replay view");
+    if (
+      typeof event.view.id !== "string" ||
+      !/^[A-Za-z0-9_.-]{1,128}$/.test(event.view.id)
+    ) {
+      throw new Error("Browser Session Replay view id is invalid.");
+    }
+    if (!Number.isSafeInteger(record.type) || record.type < 0) {
+      throw new Error("Browser Session Replay record type is invalid.");
+    }
+    if (!Number.isSafeInteger(record.timestamp) || record.timestamp <= 0) {
+      throw new Error("Browser Session Replay timestamp must be a positive millisecond integer.");
+    }
+    return {
+      name: "session_replay",
+      record,
+      viewId: event.view.id,
+      timestamp: record.timestamp,
+      fullSnapshot: record.type === 2,
+    };
+  }
   if (event.name !== "rum") {
     throw new Error("Browser bridge event type is not supported by this adapter.");
   }
@@ -223,6 +247,22 @@ function browserBridgeEventToNativeInput(serializedEvent, trustedTags = {}) {
   const event = parseBridgeEvent(serializedEvent);
   if (event.name === "log") {
     return { measurement: "log", line: browserLogEventToCommand(event) };
+  }
+  if (event.name === "session_replay") {
+    const recordJson = JSON.stringify(event.record);
+    if (Buffer.byteLength(recordJson, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES) {
+      throw new Error("Browser Session Replay record is too large.");
+    }
+    return {
+      measurement: "session_replay",
+      line: [
+        "@guance-replay",
+        `view_id=${encodeURIComponent(event.viewId)}`,
+        `timestamp_ms=${event.timestamp}`,
+        `full_snapshot=${event.fullSnapshot ? 1 : 0}`,
+        `record=${Buffer.from(recordJson, "utf8").toString("base64")}`,
+      ].join("\t") + "\n",
+    };
   }
   return {
     measurement: event.record.measurement,

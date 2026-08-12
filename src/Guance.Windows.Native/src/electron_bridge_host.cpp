@@ -144,6 +144,7 @@ struct HostConfiguration {
     bool session_replay_enabled = false;
     double session_replay_sample_rate = 1.0;
     double session_replay_on_error_sample_rate = 0.0;
+    std::string session_replay_privacy = "mask";
     bool debug = false;
     int http_timeout_ms = 10000;
     int64_t max_cache_bytes = 128LL * 1024 * 1024;
@@ -182,6 +183,12 @@ HostConfiguration load_configuration() {
     config.session_replay_on_error_sample_rate = read_rate_environment(
         L"GUANCE_RUM_NATIVE_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE",
         0.0);
+    const auto replay_privacy = read_environment(
+        L"GUANCE_RUM_NATIVE_REPLAY_PRIVACY_LEVEL");
+    if (replay_privacy == "allow" || replay_privacy == "mask-user-input" ||
+        replay_privacy == "mask") {
+        config.session_replay_privacy = replay_privacy;
+    }
     config.debug = read_boolean_environment(L"GUANCE_RUM_NATIVE_DEBUG");
     config.http_timeout_ms =
         read_integer_environment(L"GUANCE_RUM_NATIVE_HTTP_TIMEOUT_MS", 10000);
@@ -966,9 +973,9 @@ int main() {
             << "@guance-capabilities"
             << "\tprotocol=1"
             << "\trum=1"
-            << "\tlog=0"
-            << "\treplay=0"
-            << "\treplay_privacy=mask"
+            << "\tlog=" << (host.logging_enabled ? 1 : 0)
+            << "\treplay=" << (host.session_replay_enabled ? 1 : 0)
+            << "\treplay_privacy=" << host.session_replay_privacy
             << "\ttrace=0"
             << "\ttrace_sample_rate=0"
             << "\ttrace_type=w3c_traceparent"

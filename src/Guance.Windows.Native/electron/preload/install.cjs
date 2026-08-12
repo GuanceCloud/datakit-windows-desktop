@@ -2,13 +2,33 @@
 
 const {
   BRIDGE_CHANNEL,
+  BRIDGE_CONFIGURATION_CHANNEL,
   MAX_BRIDGE_PAYLOAD_BYTES,
 } = require("../internal/constants.cjs");
+
+const REPLAY_PRIVACY_LEVELS = new Set(["allow", "mask-user-input", "mask"]);
+
+function readBridgeConfiguration(ipcRenderer) {
+  let configuration;
+  try {
+    configuration = ipcRenderer.sendSync(BRIDGE_CONFIGURATION_CHANNEL);
+  } catch {
+    return { replayEnabled: false, replayPrivacy: "mask" };
+  }
+  const replayEnabled = configuration?.replayEnabled === true;
+  return {
+    replayEnabled,
+    replayPrivacy: replayEnabled && REPLAY_PRIVACY_LEVELS.has(configuration?.replayPrivacy)
+      ? configuration.replayPrivacy
+      : "mask",
+  };
+}
 
 function installElectronRumPreload(electron = require("electron")) {
   const { contextBridge, ipcRenderer } = electron || {};
   if (typeof contextBridge?.exposeInMainWorld !== "function" ||
-      typeof ipcRenderer?.send !== "function") {
+      typeof ipcRenderer?.send !== "function" ||
+      typeof ipcRenderer?.sendSync !== "function") {
     throw new Error("Electron contextBridge and ipcRenderer are required.");
   }
 
@@ -25,8 +45,10 @@ function installElectronRumPreload(electron = require("electron")) {
   }
 
   const bridge = Object.freeze({
-    getCapabilities: () => JSON.stringify([]),
-    getPrivacyLevel: () => "mask",
+    getCapabilities: () => JSON.stringify(
+      readBridgeConfiguration(ipcRenderer).replayEnabled ? ["records"] : [],
+    ),
+    getPrivacyLevel: () => readBridgeConfiguration(ipcRenderer).replayPrivacy,
     getAllowedWebViewHosts: () => null,
     sendEvent: (serializedEvent) => {
       if (typeof serializedEvent === "string" &&

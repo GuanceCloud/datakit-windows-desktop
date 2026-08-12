@@ -10,7 +10,10 @@ const {
   connectNativeOwnedBridge,
   parseCapabilities,
 } = require("../internal/native-owned-bridge.cjs");
-const { BRIDGE_CHANNEL } = require("../internal/constants.cjs");
+const {
+  BRIDGE_CHANNEL,
+  BRIDGE_CONFIGURATION_CHANNEL,
+} = require("../internal/constants.cjs");
 
 const ipcOwners = new WeakMap();
 
@@ -58,7 +61,12 @@ function reportError(onError, error) {
   }
 }
 
-function registerTrustedIpc(ipcMain, send, onError) {
+function registerTrustedIpc(ipcMain, {
+  send,
+  replayEnabled,
+  replayPrivacy,
+  onError,
+}) {
   requireObject(ipcMain, "ipcMain");
   if (typeof ipcMain.on !== "function" || typeof ipcMain.removeListener !== "function") {
     throw new Error("ipcMain must provide on() and removeListener().");
@@ -68,22 +76,32 @@ function registerTrustedIpc(ipcMain, send, onError) {
   }
 
   const allowedWebContents = new Set();
-  const handler = (event, serializedEvent) => {
+  const isTrustedMainFrame = (event) => {
     const sender = event?.sender;
-    if (!allowedWebContents.has(sender) ||
-        (typeof sender?.isDestroyed === "function" && sender.isDestroyed()) ||
-        event.senderFrame !== sender?.mainFrame) {
-      return;
-    }
+    return allowedWebContents.has(sender) &&
+      !(typeof sender?.isDestroyed === "function" && sender.isDestroyed()) &&
+      event.senderFrame === sender?.mainFrame;
+  };
+  const handler = (event, serializedEvent) => {
+    if (!isTrustedMainFrame(event)) return;
     try {
       send(serializedEvent);
     } catch (error) {
       reportError(onError, error);
     }
   };
-  const owner = { handler };
+  const configurationHandler = (event) => {
+    event.returnValue = isTrustedMainFrame(event)
+      ? {
+          replayEnabled,
+          replayPrivacy: replayEnabled ? replayPrivacy : "mask",
+        }
+      : { replayEnabled: false, replayPrivacy: "mask" };
+  };
+  const owner = { configurationHandler, handler };
   ipcOwners.set(ipcMain, owner);
   ipcMain.on(BRIDGE_CHANNEL, handler);
+  ipcMain.on(BRIDGE_CONFIGURATION_CHANNEL, configurationHandler);
 
   return {
     attachWindow(windowOrWebContents) {
@@ -97,6 +115,7 @@ function registerTrustedIpc(ipcMain, send, onError) {
     dispose() {
       allowedWebContents.clear();
       ipcMain.removeListener(BRIDGE_CHANNEL, handler);
+      ipcMain.removeListener(BRIDGE_CONFIGURATION_CHANNEL, configurationHandler);
       if (ipcOwners.get(ipcMain) === owner) ipcOwners.delete(ipcMain);
     },
   };
@@ -297,8 +316,9 @@ async function startFullMode({
     env: { ...process.env, ...nativeEnvironment },
   });
 
+  let nativeCapabilities;
   try {
-    await waitForNativeReady(child, readyLimit, onNativeOutput);
+    nativeCapabilities = await waitForNativeReady(child, readyLimit, onNativeOutput);
   } catch (error) {
     await stopChild(child, stopLimit);
     throw error;
@@ -328,20 +348,28 @@ async function startFullMode({
   };
   let ipc;
   try {
-    ipc = registerTrustedIpc(ipcMain, (serializedEvent) => {
-      if (transportFailure || !child.stdin?.writable) {
-        throw new Error("The Guance Electron Bridge EXE is not writable.");
-      }
-      if (backpressured) {
-        throw new Error("The Guance Electron Bridge EXE is applying backpressure.");
-      }
-      const payload = browserBridgeEventToNativeInput(serializedEvent, trustedTags);
-      if (payload.measurement === "log" && !normalized.loggingEnabled) {
-        throw new Error("Browser Log collection is not enabled in the native settings.");
-      }
-      const accepted = child.stdin.write(payload.line, "utf8");
-      if (!accepted) backpressured = true;
-    }, onError);
+    ipc = registerTrustedIpc(ipcMain, {
+      replayEnabled: nativeCapabilities.replay,
+      replayPrivacy: nativeCapabilities.replayPrivacy,
+      onError,
+      send(serializedEvent) {
+        if (transportFailure || !child.stdin?.writable) {
+          throw new Error("The Guance Electron Bridge EXE is not writable.");
+        }
+        if (backpressured) {
+          throw new Error("The Guance Electron Bridge EXE is applying backpressure.");
+        }
+        const payload = browserBridgeEventToNativeInput(serializedEvent, trustedTags);
+        if (payload.measurement === "log" && !normalized.loggingEnabled) {
+          throw new Error("Browser Log collection is not enabled in the native settings.");
+        }
+        if (payload.measurement === "session_replay" && !nativeCapabilities.replay) {
+          throw new Error("Browser Session Replay is not enabled in the native settings.");
+        }
+        const accepted = child.stdin.write(payload.line, "utf8");
+        if (!accepted) backpressured = true;
+      },
+    });
   } catch (error) {
     await stopChild(child, stopLimit);
     throw error;
@@ -350,6 +378,7 @@ async function startFullMode({
   let stopped;
   return Object.freeze({
     mode: "full",
+    capabilities: nativeCapabilities,
     attachWindow: ipc.attachWindow,
     stop() {
       if (!stopped) {
@@ -377,11 +406,16 @@ async function connectMixedMode({
   });
   let ipc;
   try {
-    ipc = registerTrustedIpc(ipcMain, (serializedEvent) => {
-      if (!nativeBridge.send(serializedEvent)) {
-        throw new Error("The application-owned Native Bridge Server is not writable.");
-      }
-    }, onError);
+    ipc = registerTrustedIpc(ipcMain, {
+      replayEnabled: nativeBridge.capabilities.replay,
+      replayPrivacy: nativeBridge.capabilities.replayPrivacy,
+      onError,
+      send(serializedEvent) {
+        if (!nativeBridge.send(serializedEvent)) {
+          throw new Error("The application-owned Native Bridge Server is not writable.");
+        }
+      },
+    });
   } catch (error) {
     await nativeBridge.disconnect();
     throw error;

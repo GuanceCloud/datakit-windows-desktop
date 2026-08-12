@@ -23,4 +23,8 @@ runtime under tools/guance-windows-native. Use startFullMode() from the public
 Main Process entry point; do not launch private protocol modules directly.
 
 The port supports dynamic x64-windows. Session Replay is experimental, opt-in,
-and disabled by default at runtime. The port has no default SQLite dependency.
+and disabled by default at runtime. The Electron adapter exposes Browser RUM's
+records capability only when Full Mode nativeSettings.replayEnabled or Mixed
+Mode guance_electron_bridge_server_options.session_replay_enabled is enabled;
+otherwise it rejects Browser session_replay input. The port has no default
+SQLite dependency.

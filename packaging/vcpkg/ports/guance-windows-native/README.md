@@ -21,4 +21,6 @@ The optional `electron-adapter` feature installs the SDK-owned Electron
 JavaScript adapter under `tools/guance-windows-native/electron` for Mixed Mode.
 The `electron-bridge` feature includes that adapter and additionally installs
 the Full Mode Bridge EXE and its adjacent runtime dependency under
-`tools/guance-windows-native`.
+`tools/guance-windows-native`. The adapter exposes Browser RUM's `records`
+capability and accepts Browser Replay envelopes only when the authoritative
+Native Bridge configuration enables Replay.
