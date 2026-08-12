@@ -65,7 +65,19 @@ jobs:
           name: native-win-x86
           path: src/Guance.Windows.Native/bin/win-x86
       - run: dotnet restore Guance.Windows.sln
-      - run: dotnet test tests/Guance.Windows.Tests/Guance.Windows.Tests.csproj -c Release
+      - name: Run managed tests
+        shell: pwsh
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          $testArgs = @(
+            "test",
+            "tests/Guance.Windows.Tests/Guance.Windows.Tests.csproj",
+            "-c", "Release")
+          if ($env:REF_TYPE -eq "tag") {
+            $testArgs += @("--filter", "Execution!=DesktopUiRuntime")
+          }
+          dotnet @testArgs
       - run: dotnet build src/Guance.Windows/Guance.Windows.csproj -c Release -f net6.0
       - run: dotnet build src/Guance.Windows/Guance.Windows.csproj -c Release -f net6.0-windows10.0.17763.0
       - name: Resolve release version

@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Guance.Windows.Tests;
 
+[Trait("Execution", "DesktopUiRuntime")]
 public sealed class AutomaticActionInstrumentationTests
 {
     [Fact]

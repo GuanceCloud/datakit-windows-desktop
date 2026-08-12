@@ -24,6 +24,7 @@ using Xunit;
 namespace Guance.Windows.Tests;
 
 [Collection(WpfUiTestCollection.Name)]
+[Trait("Execution", "DesktopUiRuntime")]
 public sealed class DesktopAutoInstrumentationSmokeTests
 {
     [Fact]

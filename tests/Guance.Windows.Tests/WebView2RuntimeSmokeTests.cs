@@ -18,6 +18,7 @@ using Xunit;
 namespace Guance.Windows.Tests;
 
 [Collection(WpfUiTestCollection.Name)]
+[Trait("Execution", "DesktopUiRuntime")]
 public sealed class WebView2RuntimeSmokeTests
 {
     private const string TestUrlEnvironmentVariable = "GUANCE_RUM_WEBVIEW_TEST_URL";
