@@ -9,6 +9,12 @@ All notable changes to the managed `Guance.Windows` NuGet package are recorded h
 - NuGet releases now use an independent `nuget_<version>` tag stream.
 - The release validator requires an exact changelog heading before packaging.
 
+## [0.1.0-alpha.4]
+
+### Changed
+
+- No SDK runtime behavior changes. NuGet release validation now excludes environment-dependent desktop UI runtime smoke tests from package gating while keeping them in branch and pull-request CI.
+
 ## [0.1.0-alpha.3]
 
 ### Added
