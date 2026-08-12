@@ -3,12 +3,18 @@
 All notable changes to `Guance.Windows.Native`, distributed through the
 `guance-windows-native` vcpkg port, are recorded here.
 
-## [Unreleased]
+## [0.1.0-alpha.5]
+
+### Added
+
+- An opt-in `electron-adapter` vcpkg feature that installs the SDK-owned Electron Main Process and Preload entry points for Mixed Mode applications.
+- An in-process Electron Bridge Server C API for forwarding Browser telemetry through an application-owned SDK handle.
+- Browser Log and Browser Session Replay forwarding through the Electron adapter for both Full Mode and Mixed Mode.
 
 ### Changed
 
-- vcpkg releases now use an independent `vcpkg_<version>` tag stream.
-- The release validator requires an exact changelog heading before port generation.
+- The `electron-bridge` vcpkg feature now includes the Electron adapter alongside the Full Mode Bridge executable.
+- Electron Session Replay now follows the authoritative Native Bridge enablement and privacy capabilities, and rejects Replay input when Native Replay is disabled.
 
 ## [0.1.0-alpha.4]
 
