@@ -11,7 +11,7 @@ const VALID_HANDSHAKE = [
   "@guance-capabilities",
   "protocol=1",
   "rum=1",
-  "log=0",
+  "log=1",
   "replay=0",
   "replay_privacy=mask",
   "trace=0",
@@ -56,17 +56,28 @@ function rumEvent() {
   });
 }
 
+function logEvent() {
+  return JSON.stringify({
+    name: "log",
+    data: {
+      message: "Mixed Mode Browser Log",
+      status: "warn",
+      service: "electron-adapter-test",
+    },
+  });
+}
+
 test("Mixed Mode retries, validates the handshake, and uses the versioned IPC channel", async () => {
   const name = pipeName("retry");
   const server = net.createServer();
   let received = "";
-  const receivedLine = new Promise((resolve) => {
+  const receivedEvents = new Promise((resolve) => {
     server.on("connection", (socket) => {
       socket.write(VALID_HANDSHAKE);
       socket.setEncoding("utf8");
       socket.on("data", (chunk) => {
         received += chunk;
-        if (received.includes("\n")) resolve();
+        if (received.split("\n").filter(Boolean).length >= 2) resolve();
       });
     });
   });
@@ -103,13 +114,56 @@ test("Mixed Mode retries, validates the handshake, and uses the versioned IPC ch
     { sender: webContents, senderFrame: webContents.mainFrame },
     rumEvent(),
   );
-  await receivedLine;
+  ipcMain.emit(
+    BRIDGE_CHANNEL,
+    { sender: webContents, senderFrame: webContents.mainFrame },
+    logEvent(),
+  );
+  await receivedEvents;
 
   assert.match(received, /^action,/);
   assert.match(received, /is_electron=true/);
   assert.match(received, /duration=42i/);
+  assert.match(received, /\n@guance-log\tstatus=warning\tmessage=/);
   assert.equal(adapterErrors.length, 1);
   assert.match(adapterErrors[0].message, /not valid JSON/);
+  await bridge.stop();
+  await close(server);
+});
+
+test("Mixed Mode rejects Browser Logs when the Native capability is disabled", async () => {
+  const name = pipeName("log-disabled");
+  const server = net.createServer();
+  let received = "";
+  server.on("connection", (socket) => {
+    socket.write(VALID_HANDSHAKE.replace("\tlog=1\t", "\tlog=0\t"));
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => { received += chunk; });
+  });
+  await listen(server, pipePath(name));
+
+  const ipcMain = new EventEmitter();
+  const adapterErrors = [];
+  const bridge = await connectMixedMode({
+    ipcMain,
+    pipeName: name,
+    timeoutMs: 1_000,
+    retryDelayMs: 20,
+    onError: (error) => adapterErrors.push(error),
+  });
+  const webContents = { mainFrame: {}, isDestroyed: () => false };
+  bridge.attachWindow(webContents);
+
+  ipcMain.emit(
+    BRIDGE_CHANNEL,
+    { sender: webContents, senderFrame: webContents.mainFrame },
+    logEvent(),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(received, "");
+  assert.equal(adapterErrors.length, 1);
+  assert.match(adapterErrors[0].message, /did not enable Browser Log collection/);
   await bridge.stop();
   await close(server);
 });

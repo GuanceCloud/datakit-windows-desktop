@@ -1,7 +1,9 @@
 "use strict";
 
 const net = require("node:net");
-const { browserRumEventToLine } = require("./rum-line-protocol.cjs");
+const {
+  browserBridgeEventToNativeInput,
+} = require("./rum-line-protocol.cjs");
 const {
   DEFAULT_PIPE_NAME,
   MAX_CAPABILITIES_BYTES,
@@ -150,9 +152,15 @@ async function connectNativeOwnedBridge({
           if (transportFailure || backpressured || !socket.writable || socket.destroyed) {
             return false;
           }
-          const line = browserRumEventToLine(serializedEvent, { is_electron: "true" });
+          const payload = browserBridgeEventToNativeInput(
+            serializedEvent,
+            { is_electron: "true" },
+          );
+          if (payload.measurement === "log" && !capabilities.log) {
+            throw new Error("Native Bridge Server did not enable Browser Log collection.");
+          }
           try {
-            if (!socket.write(line, "utf8")) backpressured = true;
+            if (!socket.write(payload.line, "utf8")) backpressured = true;
             return true;
           } catch (error) {
             failTransport(error);

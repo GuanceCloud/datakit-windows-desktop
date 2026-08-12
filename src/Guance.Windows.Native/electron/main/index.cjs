@@ -3,7 +3,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { browserRumEventToLine } = require("../internal/rum-line-protocol.cjs");
+const {
+  browserBridgeEventToNativeInput,
+} = require("../internal/rum-line-protocol.cjs");
 const {
   connectNativeOwnedBridge,
   parseCapabilities,
@@ -333,10 +335,11 @@ async function startFullMode({
       if (backpressured) {
         throw new Error("The Guance Electron Bridge EXE is applying backpressure.");
       }
-      const accepted = child.stdin.write(
-        browserRumEventToLine(serializedEvent, trustedTags),
-        "utf8",
-      );
+      const payload = browserBridgeEventToNativeInput(serializedEvent, trustedTags);
+      if (payload.measurement === "log" && !normalized.loggingEnabled) {
+        throw new Error("Browser Log collection is not enabled in the native settings.");
+      }
+      const accepted = child.stdin.write(payload.line, "utf8");
       if (!accepted) backpressured = true;
     }, onError);
   } catch (error) {

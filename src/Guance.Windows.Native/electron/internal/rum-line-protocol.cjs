@@ -3,6 +3,8 @@
 const { MAX_BRIDGE_PAYLOAD_BYTES } = require("./constants.cjs");
 
 const MAX_PROPERTIES_PER_SECTION = 256;
+const MAX_LOG_MESSAGE_BYTES = 256 * 1024;
+const MAX_LOG_PROPERTY_BYTES = 64 * 1024;
 const SUPPORTED_MEASUREMENTS = new Set([
   "view",
   "action",
@@ -12,6 +14,7 @@ const SUPPORTED_MEASUREMENTS = new Set([
 ]);
 const SAFE_PROPERTY_KEY = /^[A-Za-z0-9_.-]{1,128}$/;
 const RESERVED_PROPERTY_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const RESERVED_LOG_KEYS = new Set(["message", "status"]);
 
 function assertRecordObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -81,7 +84,7 @@ function collectProperties(properties, serializeValue) {
   return output;
 }
 
-function parseRumEvent(serializedEvent) {
+function parseBridgeEvent(serializedEvent) {
   if (
     typeof serializedEvent !== "string" ||
     Buffer.byteLength(serializedEvent, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES
@@ -95,9 +98,28 @@ function parseRumEvent(serializedEvent) {
   } catch {
     throw new Error("Browser RUM bridge payload is not valid JSON.");
   }
-  assertRecordObject(event, "Browser RUM bridge event");
+  assertRecordObject(event, "Browser bridge event");
+  if (event.name === "log") {
+    const record = event.data;
+    assertRecordObject(record, "Browser Log record");
+    if (
+      typeof record.message !== "string" ||
+      record.message.length === 0 ||
+      record.message.includes("\0") ||
+      Buffer.byteLength(record.message, "utf8") > MAX_LOG_MESSAGE_BYTES
+    ) {
+      throw new Error("Browser Log message is invalid or too large.");
+    }
+    if (
+      typeof record.status !== "string" ||
+      !/^[A-Za-z0-9_.-]{1,64}$/.test(record.status)
+    ) {
+      throw new Error("Browser Log status is invalid.");
+    }
+    return { name: "log", record };
+  }
   if (event.name !== "rum") {
-    throw new Error("Only Browser RUM events are supported by this adapter.");
+    throw new Error("Browser bridge event type is not supported by this adapter.");
   }
 
   const record = event.data;
@@ -110,11 +132,10 @@ function parseRumEvent(serializedEvent) {
   }
   assertRecordObject(record.tags, "Browser RUM tags");
   assertRecordObject(record.fields, "Browser RUM fields");
-  return record;
+  return { name: "rum", record };
 }
 
-function browserRumEventToLine(serializedEvent, trustedTags = {}) {
-  const record = parseRumEvent(serializedEvent);
+function browserRumRecordToLine(record, trustedTags) {
   const tags = new Map(collectProperties(record.tags, serializeTagValue));
   for (const [key, value] of collectProperties(trustedTags, serializeTagValue)) {
     tags.set(key, value);
@@ -138,6 +159,79 @@ function browserRumEventToLine(serializedEvent, trustedTags = {}) {
   return `${record.measurement}${tagSection} ${fieldSection} ${timestampNanoseconds}\n`;
 }
 
+function browserRumEventToLine(serializedEvent, trustedTags = {}) {
+  const event = parseBridgeEvent(serializedEvent);
+  if (event.name !== "rum") {
+    throw new Error("Browser bridge event is not a RUM line-protocol record.");
+  }
+  return browserRumRecordToLine(event.record, trustedTags);
+}
+
+function serializeLogProperty(value) {
+  if (value === undefined) return undefined;
+  if (typeof value === "number" && !Number.isFinite(value)) return undefined;
+  const serialized = typeof value === "string"
+    ? value
+    : typeof value === "object"
+      ? serializeStructuredValue(value)
+      : String(value);
+  if (
+    serialized === undefined ||
+    serialized.includes("\0") ||
+    Buffer.byteLength(serialized, "utf8") > MAX_LOG_PROPERTY_BYTES
+  ) {
+    return undefined;
+  }
+  return serialized;
+}
+
+function browserLogEventToCommand(event) {
+  const status = event.record.status.toLowerCase() === "warn"
+    ? "warning"
+    : event.record.status.toLowerCase();
+  const parts = [
+    "@guance-log",
+    `status=${status}`,
+    `message=${Buffer.from(event.record.message, "utf8").toString("base64")}`,
+  ];
+
+  let inspected = 0;
+  for (const [key, value] of Object.entries(event.record)) {
+    inspected += 1;
+    if (inspected > MAX_PROPERTIES_PER_SECTION) break;
+    if (
+      RESERVED_LOG_KEYS.has(key) ||
+      RESERVED_PROPERTY_KEYS.has(key) ||
+      !SAFE_PROPERTY_KEY.test(key)
+    ) {
+      continue;
+    }
+    const serialized = serializeLogProperty(value);
+    if (serialized === undefined) continue;
+    parts.push(`property-key=${Buffer.from(key, "utf8").toString("base64")}`);
+    parts.push(`property-value=${Buffer.from(serialized, "utf8").toString("base64")}`);
+  }
+
+  const line = `${parts.join("\t")}\n`;
+  if (Buffer.byteLength(line, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES) {
+    throw new Error("Browser Log native command is too large.");
+  }
+  return line;
+}
+
+function browserBridgeEventToNativeInput(serializedEvent, trustedTags = {}) {
+  const event = parseBridgeEvent(serializedEvent);
+  if (event.name === "log") {
+    return { measurement: "log", line: browserLogEventToCommand(event) };
+  }
+  return {
+    measurement: event.record.measurement,
+    line: browserRumRecordToLine(event.record, trustedTags),
+  };
+}
+
 module.exports = {
+  browserBridgeEventToNativeInput,
   browserRumEventToLine,
+  parseBridgeEvent,
 };
