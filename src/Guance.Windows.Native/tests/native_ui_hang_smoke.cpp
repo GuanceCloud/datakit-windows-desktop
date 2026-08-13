@@ -95,6 +95,7 @@ int main() {
 
     guance_sdk_config core_config{};
     guance_sdk_config_init(&core_config);
+    core_config.enable_app_launch_tracking = 0;
     const auto datakit_url = environment_value(
         "GUANCE_RUM_NATIVE_ACCEPTANCE_DATAKIT_URL");
     const auto acceptance_app_id = environment_value(

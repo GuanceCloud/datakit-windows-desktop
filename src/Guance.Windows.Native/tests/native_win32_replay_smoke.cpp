@@ -279,6 +279,7 @@ int main() {
 
     guance_sdk_config config{};
     guance_sdk_config_init(&config);
+    config.enable_app_launch_tracking = 0;
     config.dataway_url = datakit_url.c_str();
     config.client_token = "token value+plus";
     config.rum_app_id = "native-rum-smoke";

@@ -64,7 +64,9 @@ async function main() {
 
   const ipcMain = new EventEmitter();
   const bridge = await connectMixedMode({ ipcMain, pipeName });
-  const webContents = { mainFrame: {}, isDestroyed: () => false };
+  const webContents = new EventEmitter();
+  webContents.mainFrame = {};
+  webContents.isDestroyed = () => false;
   bridge.attachWindow(webContents);
   assert.equal(bridge.capabilities.replay, true);
   assert.equal(bridge.capabilities.replayPrivacy, "mask-user-input");
@@ -85,11 +87,16 @@ async function main() {
       data: {
         measurement: "view",
         time: Date.now(),
-        tags: { view_name: "electron.mixed.native-smoke" },
+        tags: {
+          view_id: "electron-mixed-launch",
+          view_name: "electron.mixed.native-smoke",
+          view_referrer: "file:///mixed-splash.html",
+        },
         fields: { view_loading_time: 1 },
       },
     }),
   );
+  webContents.emit("did-finish-load");
   ipcMain.emit(
     "guance:electron-rum:browser-event:v1",
     { sender: webContents, senderFrame: webContents.mainFrame },
@@ -105,7 +112,7 @@ async function main() {
   assert.equal(signal, null, stderr);
   assert.equal(code, 0, stderr);
   assert.doesNotMatch(stderr, /rejected invalid bridge input/);
-  assert.match(stdout, /rum_events_enqueued=1/);
+  assert.match(stdout, /rum_events_enqueued=2/);
   console.log("PASS Mixed Mode native path: public adapter -> existing SDK Handle.");
 }
 

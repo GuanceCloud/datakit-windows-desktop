@@ -7,6 +7,7 @@ const {
 const {
   DEFAULT_PIPE_NAME,
   MAX_CAPABILITIES_BYTES,
+  MAX_BRIDGE_PAYLOAD_BYTES,
 } = require("./constants.cjs");
 
 const RETRYABLE_PIPE_ERRORS = new Set(["ENOENT", "ECONNREFUSED", "EBUSY"]);
@@ -148,6 +149,18 @@ async function connectNativeOwnedBridge({
         "The application-owned Native Bridge Server disconnected unexpectedly.",
       )));
       socket.on("drain", () => { backpressured = false; });
+      const writeNativeInput = (line) => {
+        if (transportFailure || backpressured || !socket.writable || socket.destroyed) {
+          return false;
+        }
+        try {
+          if (!socket.write(line, "utf8")) backpressured = true;
+          return true;
+        } catch (error) {
+          failTransport(error);
+          return false;
+        }
+      };
       return {
         capabilities,
         writable: () => Boolean(
@@ -167,13 +180,17 @@ async function connectNativeOwnedBridge({
           if (payload.measurement === "session_replay" && !capabilities.replay) {
             throw new Error("Native Bridge Server did not enable Browser Session Replay.");
           }
-          try {
-            if (!socket.write(payload.line, "utf8")) backpressured = true;
-            return true;
-          } catch (error) {
-            failTransport(error);
-            return false;
+          return writeNativeInput(payload.line);
+        },
+        sendNativeInput: (line) => {
+          if (typeof line !== "string" ||
+              !line.startsWith("@guance-launch\t") ||
+              !line.endsWith("\n") ||
+              /[\r\n\0]/u.test(line.slice(0, -1)) ||
+              Buffer.byteLength(line, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES) {
+            throw new Error("Native Bridge launch input is invalid or too large.");
           }
+          return writeNativeInput(line);
         },
         disconnect: () => {
           if (disconnected) return disconnected;

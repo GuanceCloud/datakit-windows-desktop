@@ -40,6 +40,7 @@ void guance_sdk_config_init(guance_sdk_config* config) {
     config->session_replay_segment_bytes_limit = 1024 * 1024;
     config->compress_intake_requests = 1;
     config->flush_interval_ms = 15000;
+    config->enable_app_launch_tracking = 1;
 }
 
 void guance_sdk_native_monitoring_config_init(

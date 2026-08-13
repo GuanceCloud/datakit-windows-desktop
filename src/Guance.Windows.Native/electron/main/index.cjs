@@ -5,7 +5,12 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const {
   browserBridgeEventToNativeInput,
+  browserRumViewContext,
+  electronLaunchToNativeInput,
 } = require("../internal/rum-line-protocol.cjs");
+const {
+  ElectronApplicationLaunchTracker,
+} = require("../internal/application-launch.cjs");
 const {
   connectNativeOwnedBridge,
   parseCapabilities,
@@ -53,6 +58,14 @@ function integer(value, fallback, minimum, maximum, label) {
   return normalized;
 }
 
+function boolean(value, fallback, label) {
+  const normalized = value ?? fallback;
+  if (typeof normalized !== "boolean") {
+    throw new Error(`${label} must be a boolean.`);
+  }
+  return normalized;
+}
+
 function reportError(onError, error) {
   if (typeof onError === "function") {
     onError(error);
@@ -63,6 +76,7 @@ function reportError(onError, error) {
 
 function registerTrustedIpc(ipcMain, {
   send,
+  launchTracker,
   replayEnabled,
   replayPrivacy,
   onError,
@@ -88,6 +102,15 @@ function registerTrustedIpc(ipcMain, {
       send(serializedEvent);
     } catch (error) {
       reportError(onError, error);
+      return;
+    }
+    if (launchTracker) {
+      try {
+        const view = browserRumViewContext(serializedEvent);
+        if (view) launchTracker.observeTrustedView(event.sender, view);
+      } catch (error) {
+        reportError(onError, error);
+      }
     }
   };
   const configurationHandler = (event) => {
@@ -109,10 +132,24 @@ function registerTrustedIpc(ipcMain, {
       if (!webContents || typeof webContents !== "object" || !webContents.mainFrame) {
         throw new Error("attachWindow requires an Electron BrowserWindow or WebContents.");
       }
+      if (allowedWebContents.has(webContents)) {
+        throw new Error("The Electron BrowserWindow or WebContents is already attached.");
+      }
       allowedWebContents.add(webContents);
-      return () => allowedWebContents.delete(webContents);
+      let detachLaunch;
+      try {
+        detachLaunch = launchTracker?.attachWindow(windowOrWebContents);
+      } catch (error) {
+        allowedWebContents.delete(webContents);
+        throw error;
+      }
+      return () => {
+        allowedWebContents.delete(webContents);
+        detachLaunch?.();
+      };
     },
     dispose() {
+      launchTracker?.dispose();
       allowedWebContents.clear();
       ipcMain.removeListener(BRIDGE_CHANNEL, handler);
       ipcMain.removeListener(BRIDGE_CONFIGURATION_CHANNEL, configurationHandler);
@@ -295,6 +332,7 @@ async function startFullMode({
   nativeSettings,
   readyTimeoutMs = 10_000,
   stopTimeoutMs = 3_000,
+  enableAppLaunch = true,
   onError,
   onNativeOutput,
 } = {}) {
@@ -309,6 +347,7 @@ async function startFullMode({
   const { normalized, nativeEnvironment } = mapNativeSettings(nativeSettings);
   const readyLimit = integer(readyTimeoutMs, 10_000, 1, 60_000, "readyTimeoutMs");
   const stopLimit = integer(stopTimeoutMs, 3_000, 1, 30_000, "stopTimeoutMs");
+  const appLaunchEnabled = boolean(enableAppLaunch, true, "enableAppLaunch");
   const child = spawn(bridgePath, [], {
     cwd: directory,
     windowsHide: true,
@@ -338,6 +377,24 @@ async function startFullMode({
   )));
   child.stdin.on("error", failTransport);
   child.stdin.on("drain", () => { backpressured = false; });
+  const sendNativeInput = (line) => {
+    if (transportFailure || !child.stdin?.writable) {
+      throw new Error("The Guance Electron Bridge EXE is not writable.");
+    }
+    if (backpressured) {
+      throw new Error("The Guance Electron Bridge EXE is applying backpressure.");
+    }
+    const accepted = child.stdin.write(line, "utf8");
+    if (!accepted) backpressured = true;
+  };
+  const launchTracker = appLaunchEnabled
+    ? new ElectronApplicationLaunchTracker({
+        onError: (error) => reportError(onError, error),
+        sendLaunch: (launch, view) => sendNativeInput(
+          electronLaunchToNativeInput(launch, view),
+        ),
+      })
+    : undefined;
   const trustedTags = {
     app_id: normalized.applicationId,
     service: normalized.service,
@@ -351,14 +408,9 @@ async function startFullMode({
     ipc = registerTrustedIpc(ipcMain, {
       replayEnabled: nativeCapabilities.replay,
       replayPrivacy: nativeCapabilities.replayPrivacy,
+      launchTracker,
       onError,
       send(serializedEvent) {
-        if (transportFailure || !child.stdin?.writable) {
-          throw new Error("The Guance Electron Bridge EXE is not writable.");
-        }
-        if (backpressured) {
-          throw new Error("The Guance Electron Bridge EXE is applying backpressure.");
-        }
         const payload = browserBridgeEventToNativeInput(serializedEvent, trustedTags);
         if (payload.measurement === "log" && !normalized.loggingEnabled) {
           throw new Error("Browser Log collection is not enabled in the native settings.");
@@ -366,11 +418,11 @@ async function startFullMode({
         if (payload.measurement === "session_replay" && !nativeCapabilities.replay) {
           throw new Error("Browser Session Replay is not enabled in the native settings.");
         }
-        const accepted = child.stdin.write(payload.line, "utf8");
-        if (!accepted) backpressured = true;
+        sendNativeInput(payload.line);
       },
     });
   } catch (error) {
+    launchTracker?.dispose();
     await stopChild(child, stopLimit);
     throw error;
   }
@@ -396,19 +448,34 @@ async function connectMixedMode({
   pipeName,
   timeoutMs = 10_000,
   retryDelayMs = 100,
+  enableAppLaunch = true,
   onError,
 } = {}) {
+  const appLaunchEnabled = boolean(enableAppLaunch, true, "enableAppLaunch");
   const nativeBridge = await connectNativeOwnedBridge({
     pipeName,
     timeoutMs,
     retryDelayMs,
     onError: (error) => reportError(onError, error),
   });
+  const launchTracker = appLaunchEnabled
+    ? new ElectronApplicationLaunchTracker({
+        onError: (error) => reportError(onError, error),
+        sendLaunch: (launch, view) => {
+          if (!nativeBridge.sendNativeInput(
+            electronLaunchToNativeInput(launch, view),
+          )) {
+            throw new Error("The application-owned Native Bridge Server is not writable.");
+          }
+        },
+      })
+    : undefined;
   let ipc;
   try {
     ipc = registerTrustedIpc(ipcMain, {
       replayEnabled: nativeBridge.capabilities.replay,
       replayPrivacy: nativeBridge.capabilities.replayPrivacy,
+      launchTracker,
       onError,
       send(serializedEvent) {
         if (!nativeBridge.send(serializedEvent)) {
@@ -417,6 +484,7 @@ async function connectMixedMode({
       },
     });
   } catch (error) {
+    launchTracker?.dispose();
     await nativeBridge.disconnect();
     throw error;
   }

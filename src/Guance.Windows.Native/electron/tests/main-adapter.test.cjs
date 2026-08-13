@@ -78,6 +78,106 @@ function replayEvent() {
   });
 }
 
+function viewEvent() {
+  return JSON.stringify({
+    name: "rum",
+    data: {
+      measurement: "view",
+      time: 1_700_000_000_000,
+      tags: {
+        view_id: "mixed-launch-view",
+        view_name: "Mixed Launch",
+        view_referrer: "file:///splash.html",
+      },
+      fields: { time_spent: 1 },
+    },
+  });
+}
+
+function fakeBrowserWindow() {
+  const window = new EventEmitter();
+  window.focused = false;
+  window.isFocused = () => window.focused;
+  window.isVisible = () => false;
+  window.webContents = new EventEmitter();
+  window.webContents.mainFrame = {};
+  window.webContents.isDestroyed = () => false;
+  window.webContents.executeJavaScript = async () => {};
+  return window;
+}
+
+test("Mixed Mode sends automatic cold launch with its first trusted Browser View", async () => {
+  const name = pipeName("automatic-launch");
+  const server = net.createServer();
+  let received = "";
+  let resolveLaunch;
+  const launchReceived = new Promise((resolve) => { resolveLaunch = resolve; });
+  server.on("connection", (socket) => {
+    socket.write(VALID_HANDSHAKE);
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      received += chunk;
+      if (received.includes("@guance-launch")) resolveLaunch();
+    });
+  });
+  await listen(server, pipePath(name));
+
+  const ipcMain = new EventEmitter();
+  const bridge = await connectMixedMode({
+    ipcMain,
+    pipeName: name,
+    timeoutMs: 1_000,
+    retryDelayMs: 20,
+  });
+  const window = fakeBrowserWindow();
+  bridge.attachWindow(window);
+  ipcMain.emit(
+    BRIDGE_CHANNEL,
+    { sender: window.webContents, senderFrame: window.webContents.mainFrame },
+    viewEvent(),
+  );
+  window.emit("ready-to-show");
+  await launchReceived;
+
+  assert.match(received, /^view,/);
+  assert.match(received, /@guance-launch\ttype=cold\t/);
+  assert.match(received, /view_id=mixed-launch-view/);
+  await bridge.stop();
+  assert.equal(window.listenerCount("ready-to-show"), 0);
+  assert.equal(window.listenerCount("focus"), 0);
+  assert.equal(window.listenerCount("blur"), 0);
+  await close(server);
+});
+
+test("Mixed Mode enableAppLaunch=false leaves launch lifecycle listeners disabled", async () => {
+  const name = pipeName("launch-disabled");
+  const server = net.createServer();
+  let received = "";
+  server.on("connection", (socket) => {
+    socket.write(VALID_HANDSHAKE);
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => { received += chunk; });
+  });
+  await listen(server, pipePath(name));
+
+  const bridge = await connectMixedMode({
+    ipcMain: new EventEmitter(),
+    pipeName: name,
+    timeoutMs: 1_000,
+    retryDelayMs: 20,
+    enableAppLaunch: false,
+  });
+  const window = fakeBrowserWindow();
+  bridge.attachWindow(window);
+  window.emit("ready-to-show");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(received, "");
+  assert.equal(window.listenerCount("ready-to-show"), 0);
+  await bridge.stop();
+  await close(server);
+});
+
 test("Mixed Mode retries, validates the handshake, and uses the versioned IPC channel", async () => {
   const name = pipeName("retry");
   const server = net.createServer();

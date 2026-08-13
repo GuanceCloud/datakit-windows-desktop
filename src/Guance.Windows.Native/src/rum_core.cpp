@@ -1,5 +1,6 @@
 #include "rum_core.h"
 
+#include "application_launch_monitor.h"
 #include "guance_sdk_version.h"
 #include "native_monitoring.h"
 #include "transport.h"
@@ -737,11 +738,14 @@ Config from_c_config(const guance_sdk_config* c) {
     config.session_replay_segment_bytes_limit = c->session_replay_segment_bytes_limit <= 0 ? 1024 * 1024 : c->session_replay_segment_bytes_limit;
     config.compress_intake_requests = c->compress_intake_requests != 0;
     config.flush_interval_ms = c->flush_interval_ms <= 0 ? 15000 : c->flush_interval_ms;
+    config.enable_app_launch_tracking = c->enable_app_launch_tracking != 0;
     return config;
 }
 
 RumCore::RumCore(Config config)
     : config_(std::move(config)),
+      sdk_initialized_unix_ns_(unix_time_nanoseconds()),
+      sdk_initialized_monotonic_ns_(monotonic_time_nanoseconds()),
       session_id_(uuid32()),
       trace_config_(default_trace_config(config_.service_name)) {
     const auto largest_upload = std::max(
@@ -803,7 +807,23 @@ RumCore::RumCore(Config config)
     try {
         action_timeout_thread_ = std::thread([this] { action_timeout_loop(); });
         upload_worker_thread_ = std::thread([this] { upload_loop(); });
+        if (session_sampled_ && config_.enable_app_launch_tracking) {
+            auto monitor = std::make_unique<ApplicationLaunchMonitor>(
+                ApplicationLaunchTimestamp{
+                    sdk_initialized_unix_ns_,
+                    sdk_initialized_monotonic_ns_},
+                [this](const ApplicationLaunchDecision& launch) {
+                    add_automatic_launch_action(launch);
+                },
+                [this](const std::string& message) {
+                    log_native_monitoring(message);
+                });
+            if (monitor->start()) {
+                application_launch_monitor_ = std::move(monitor);
+            }
+        }
     } catch (...) {
+        disable_automatic_app_launch();
         {
             std::lock_guard lock(mutex_);
             action_timeout_stopping_ = true;
@@ -825,6 +845,7 @@ RumCore::RumCore(Config config)
 }
 
 RumCore::~RumCore() {
+    disable_automatic_app_launch();
     stop_upload_worker();
     {
         std::lock_guard lock(mutex_);
@@ -998,6 +1019,7 @@ void RumCore::stop_upload_worker() {
 }
 
 void RumCore::shutdown() {
+    disable_automatic_app_launch();
     disable_native_monitoring();
     stop_upload_worker();
     {
@@ -1030,6 +1052,17 @@ bool RumCore::enable_native_monitoring(const guance_sdk_native_monitoring_config
 void RumCore::disable_native_monitoring() {
     if (native_monitoring_) {
         native_monitoring_->disable();
+    }
+}
+
+void RumCore::disable_automatic_app_launch() {
+    std::unique_ptr<ApplicationLaunchMonitor> monitor;
+    {
+        std::lock_guard lock(application_launch_monitor_mutex_);
+        monitor = std::move(application_launch_monitor_);
+    }
+    if (monitor) {
+        monitor->stop();
     }
 }
 
@@ -1234,55 +1267,97 @@ void RumCore::add_launch_action(
     const char* view_id,
     const char* view_name,
     const char* view_referrer) {
-    std::lock_guard lock(mutex_);
-    const auto safe_duration_ns = non_negative_duration(launch.duration_ns);
+    add_launch_action_impl(
+        launch,
+        view_id,
+        view_name,
+        view_referrer,
+        false);
+}
+
+void RumCore::add_automatic_launch_action(
+    const ApplicationLaunchDecision& launch) {
+    guance_rum_launch native_launch{};
+    native_launch.type = launch.kind == ApplicationLaunchKind::hot
+        ? GUANCE_RUM_LAUNCH_HOT
+        : GUANCE_RUM_LAUNCH_COLD;
+    native_launch.start_time_ns = launch.start_time_ns;
+    native_launch.duration_ns = launch.duration_ns;
+    native_launch.pre_application_duration_ns =
+        launch.pre_application_duration_ns;
+    native_launch.application_duration_ns = launch.application_duration_ns;
+    native_launch.first_frame_duration_ns = launch.first_frame_duration_ns;
+    add_launch_action_impl(native_launch, nullptr, nullptr, nullptr, true);
+}
+
+void RumCore::add_launch_action_impl(
+    const guance_rum_launch& launch,
+    const char* view_id,
+    const char* view_name,
+    const char* view_referrer,
+    bool automatic) {
     const auto is_hot = launch.type == GUANCE_RUM_LAUNCH_HOT;
-    Action action{
-        uuid32(),
-        is_hot ? "app hot start" : "app cold start",
-        is_hot ? "launch_hot" : "launch_cold",
-        {},
-        {},
-        {},
-        launch.start_time_ns > 0
-            ? launch.start_time_ns
-            : unix_time_before(safe_duration_ns),
-        monotonic_time_nanoseconds()};
-    const auto explicit_view_id = str_or_empty(view_id);
-    if (!explicit_view_id.empty()) {
-        action.view_id = explicit_view_id;
-        action.view_name = str_or_empty(view_name);
-        action.view_referrer = str_or_empty(view_referrer);
-    } else if (active_view_) {
-        action.view_id = active_view_->id;
-        action.view_name = active_view_->name;
-        action.view_referrer = active_view_->referrer;
+    {
+        std::lock_guard lock(mutex_);
+        if (!is_hot) {
+            if (cold_launch_emitted_) {
+                return;
+            }
+            cold_launch_emitted_ = true;
+        }
+
+        const auto safe_duration_ns = non_negative_duration(launch.duration_ns);
+        Action action{
+            uuid32(),
+            is_hot ? "app hot start" : "app cold start",
+            is_hot ? "launch_hot" : "launch_cold",
+            {},
+            {},
+            {},
+            launch.start_time_ns > 0
+                ? launch.start_time_ns
+                : unix_time_before(safe_duration_ns),
+            monotonic_time_nanoseconds()};
+        const auto explicit_view_id = str_or_empty(view_id);
+        if (!explicit_view_id.empty()) {
+            action.view_id = explicit_view_id;
+            action.view_name = str_or_empty(view_name);
+            action.view_referrer = str_or_empty(view_referrer);
+        } else if (active_view_) {
+            action.view_id = active_view_->id;
+            action.view_name = active_view_->name;
+            action.view_referrer = active_view_->referrer;
+        }
+        if (!is_hot) {
+            const auto pre_application =
+                non_negative_duration(launch.pre_application_duration_ns);
+            const auto application =
+                non_negative_duration(launch.application_duration_ns);
+            const auto first_frame =
+                non_negative_duration(launch.first_frame_duration_ns);
+            const auto application_start = pre_application;
+            const auto first_frame_start =
+                application > std::numeric_limits<int64_t>::max() - application_start
+                    ? std::numeric_limits<int64_t>::max()
+                    : application_start + application;
+            action.fields["app_pre_application_init_time"] =
+                "{\"start\":0,\"duration\":" + std::to_string(pre_application) + "}";
+            action.fields["app_application_init_time"] =
+                "{\"start\":" + std::to_string(application_start) +
+                ",\"duration\":" + std::to_string(application) + "}";
+            action.fields["app_first_frame_init_time"] =
+                "{\"start\":" + std::to_string(first_frame_start) +
+                ",\"duration\":" + std::to_string(first_frame) + "}";
+        }
+        track_action(action, safe_duration_ns);
     }
-    if (!is_hot) {
-        const auto pre_application =
-            non_negative_duration(launch.pre_application_duration_ns);
-        const auto application =
-            non_negative_duration(launch.application_duration_ns);
-        const auto first_frame =
-            non_negative_duration(launch.first_frame_duration_ns);
-        const auto application_start =
-            pre_application > std::numeric_limits<int64_t>::max()
-                ? std::numeric_limits<int64_t>::max()
-                : pre_application;
-        const auto first_frame_start =
-            application > std::numeric_limits<int64_t>::max() - application_start
-                ? std::numeric_limits<int64_t>::max()
-                : application_start + application;
-        action.fields["app_pre_application_init_time"] =
-            "{\"start\":0,\"duration\":" + std::to_string(pre_application) + "}";
-        action.fields["app_application_init_time"] =
-            "{\"start\":" + std::to_string(application_start) +
-            ",\"duration\":" + std::to_string(application) + "}";
-        action.fields["app_first_frame_init_time"] =
-            "{\"start\":" + std::to_string(first_frame_start) +
-            ",\"duration\":" + std::to_string(first_frame) + "}";
+
+    if (!automatic && !is_hot) {
+        std::lock_guard lock(application_launch_monitor_mutex_);
+        if (application_launch_monitor_) {
+            application_launch_monitor_->complete_cold_without_event();
+        }
     }
-    track_action(action, safe_duration_ns);
 }
 
 std::string RumCore::start_action(const char* name, const char* type, bool need_wait) {

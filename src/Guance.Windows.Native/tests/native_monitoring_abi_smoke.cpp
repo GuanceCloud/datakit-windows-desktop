@@ -33,6 +33,7 @@ int main() {
 
     guance_sdk_config core_config{};
     guance_sdk_config_init(&core_config);
+    assert(core_config.enable_app_launch_tracking == 1);
     core_config.sample_rate = 1.0;
     const auto cache_directory = std::filesystem::temp_directory_path() /
         ("guance-native-monitoring-abi-" + std::to_string(

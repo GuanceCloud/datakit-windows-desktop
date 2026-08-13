@@ -106,6 +106,7 @@ app.whenReady().then(async () => {
     ipcMain,
     nativeDirectory: NATIVE_DIRECTORY,
     nativeSettings: readNativeSettings(),
+    enableAppLaunch: true,
     onNativeOutput(stream, chunk) {
       const output = String(chunk).trim();
       if (output) console[stream === "stderr" ? "error" : "log"](output);

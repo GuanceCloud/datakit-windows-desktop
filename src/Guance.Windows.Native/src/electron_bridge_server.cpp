@@ -1,4 +1,5 @@
 #include "guance_sdk.h"
+#include "rum_core.h"
 
 #if defined(_WIN32)
 
@@ -372,6 +373,8 @@ guance_electron_bridge_server_handle guance_electron_bridge_server_start(
     try {
         ServerConfiguration configuration;
         if (!copy_configuration(options, configuration)) return nullptr;
+
+        static_cast<guance::rum::RumCore*>(sdk)->disable_automatic_app_launch();
 
         auto server = std::make_shared<ElectronBridgeServer>(
             sdk, std::move(configuration));

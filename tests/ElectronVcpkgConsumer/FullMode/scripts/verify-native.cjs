@@ -41,7 +41,9 @@ async function main() {
       nativeOutput += chunk;
     },
   });
-  const webContents = { mainFrame: {}, isDestroyed: () => false };
+  const webContents = new EventEmitter();
+  webContents.mainFrame = {};
+  webContents.isDestroyed = () => false;
   bridge.attachWindow(webContents);
   assert.equal(bridge.capabilities.replay, true);
   assert.equal(bridge.capabilities.replayPrivacy, "mask-user-input");
@@ -62,11 +64,16 @@ async function main() {
       data: {
         measurement: "view",
         time: Date.now(),
-        tags: { view_name: "electron.full.native-smoke" },
+        tags: {
+          view_id: "electron-full-launch",
+          view_name: "electron.full.native-smoke",
+          view_referrer: "file:///full-splash.html",
+        },
         fields: { view_loading_time: 1 },
       },
     }),
   );
+  webContents.emit("did-finish-load");
   ipcMain.emit(
     "guance:electron-rum:browser-event:v1",
     { sender: webContents, senderFrame: webContents.mainFrame },
@@ -80,7 +87,8 @@ async function main() {
   assert.doesNotMatch(nativeOutput, /rejected invalid bridge input/);
   assert.match(nativeOutput, /@guance-capabilities\tprotocol=1\trum=1\tlog=0\treplay=1\treplay_privacy=mask-user-input/);
   assert.match(nativeOutput, /\[Guance\.RUM\.NativeBridge\] ready/);
-  assert.match(nativeOutput, /\benqueued=1\b/);
+  assert.match(nativeOutput, /\benqueued=2\b/);
+  assert.match(nativeOutput, /launch type=launch_cold/);
   console.log("PASS Full Mode native path: public adapter -> Bridge EXE -> owned SDK.");
 }
 

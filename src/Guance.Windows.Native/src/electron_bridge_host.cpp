@@ -934,6 +934,7 @@ int main() {
         config.upload_burst_bytes = host.upload_burst_bytes;
         config.max_upload_requests_per_second = host.max_upload_requests_per_second;
         config.max_upload_batches_per_cycle = host.max_upload_batches_per_cycle;
+        config.enable_app_launch_tracking = 0;
 
         guance_sdk_handle handle = guance_sdk_init(&config);
         if (handle == nullptr) {

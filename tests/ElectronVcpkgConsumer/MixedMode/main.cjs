@@ -79,6 +79,7 @@ app.whenReady().then(async () => {
   rumBridge = await connectMixedMode({
     ipcMain,
     pipeName: process.env.GUANCE_RUM_NATIVE_OWNED_PIPE_NAME,
+    enableAppLaunch: true,
   });
   createWindow();
   console.log("[rum-bridge] initialized path=mixed-mode");

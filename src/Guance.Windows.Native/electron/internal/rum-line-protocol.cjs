@@ -270,8 +270,89 @@ function browserBridgeEventToNativeInput(serializedEvent, trustedTags = {}) {
   };
 }
 
+function validLaunchViewValue(value, maximumBytes, allowEmpty) {
+  return typeof value === "string" &&
+    (allowEmpty || value.length > 0) &&
+    Buffer.byteLength(value, "utf8") <= maximumBytes &&
+    !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function validLaunchViewId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(value);
+}
+
+function browserRumViewContext(serializedEvent) {
+  const event = parseBridgeEvent(serializedEvent);
+  if (event.name !== "rum" || event.record.measurement !== "view") return undefined;
+  const id = event.record.tags.view_id;
+  const name = event.record.tags.view_name ?? "";
+  const referrer = event.record.tags.view_referrer ?? "";
+  if (!validLaunchViewId(id) ||
+      !validLaunchViewValue(name, 4096, true) ||
+      !validLaunchViewValue(referrer, 4096, true)) {
+    throw new Error("Browser View context is invalid for Electron launch association.");
+  }
+  return Object.freeze({ id, name, referrer });
+}
+
+function int64Text(value, label) {
+  let normalized;
+  try {
+    normalized = BigInt(value);
+  } catch {
+    throw new Error(`${label} must be an int64 value.`);
+  }
+  if (normalized < 0n || normalized > 9_223_372_036_854_775_807n) {
+    throw new Error(`${label} must be a non-negative int64 value.`);
+  }
+  return String(normalized);
+}
+
+function electronLaunchToNativeInput(launch, view) {
+  assertRecordObject(launch, "Electron application launch");
+  if (launch.type !== "cold" && launch.type !== "hot") {
+    throw new Error("Electron application launch type must be cold or hot.");
+  }
+  const parts = [
+    "@guance-launch",
+    `type=${launch.type}`,
+    `start_time_ns=${int64Text(launch.startTimeNanoseconds, "Launch start time")}`,
+    `duration_ns=${int64Text(launch.durationNanoseconds, "Launch duration")}`,
+    `pre_application_duration_ns=${int64Text(
+      launch.preApplicationDurationNanoseconds,
+      "Launch pre-application duration",
+    )}`,
+    `application_duration_ns=${int64Text(
+      launch.applicationDurationNanoseconds,
+      "Launch application duration",
+    )}`,
+    `first_frame_duration_ns=${int64Text(
+      launch.firstFrameDurationNanoseconds,
+      "Launch first-frame duration",
+    )}`,
+  ];
+  if (view !== undefined) {
+    assertRecordObject(view, "Electron launch Browser View");
+    if (!validLaunchViewId(view.id) ||
+        !validLaunchViewValue(view.name, 4096, true) ||
+        !validLaunchViewValue(view.referrer, 4096, true)) {
+      throw new Error("Electron launch Browser View is invalid.");
+    }
+    parts.push(`view_id=${encodeURIComponent(view.id)}`);
+    parts.push(`view_name=${encodeURIComponent(view.name)}`);
+    parts.push(`view_referrer=${encodeURIComponent(view.referrer)}`);
+  }
+  const line = `${parts.join("\t")}\n`;
+  if (Buffer.byteLength(line, "utf8") > MAX_BRIDGE_PAYLOAD_BYTES) {
+    throw new Error("Electron application launch command is too large.");
+  }
+  return line;
+}
+
 module.exports = {
   browserBridgeEventToNativeInput,
+  browserRumViewContext,
   browserRumEventToLine,
+  electronLaunchToNativeInput,
   parseBridgeEvent,
 };

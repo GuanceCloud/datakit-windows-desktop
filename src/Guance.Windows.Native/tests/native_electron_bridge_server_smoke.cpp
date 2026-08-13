@@ -10,6 +10,35 @@
 
 namespace {
 
+LRESULT CALLBACK bridge_window_proc(
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) {
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+HWND create_bridge_window() {
+    WNDCLASSW window_class{};
+    window_class.lpfnWndProc = bridge_window_proc;
+    window_class.hInstance = GetModuleHandleW(nullptr);
+    window_class.lpszClassName = L"GuanceElectronBridgeServerSmoke";
+    RegisterClassW(&window_class);
+    return CreateWindowExW(
+        0,
+        window_class.lpszClassName,
+        L"Electron helper host window",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        320,
+        240,
+        nullptr,
+        nullptr,
+        window_class.hInstance,
+        nullptr);
+}
+
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
@@ -122,6 +151,18 @@ int main() {
     require(
         guance_electron_bridge_server_start(sdk, &options) == nullptr,
         "Bridge Server allowed a second owner for the same pipe");
+
+    HWND helper_window = create_bridge_window();
+    require(helper_window != nullptr, "helper window fixture failed to initialize");
+    ShowWindow(helper_window, SW_SHOW);
+    UpdateWindow(helper_window);
+    Sleep(100);
+    guance_sdk_diagnostics helper_diagnostics{};
+    require(
+        guance_sdk_get_diagnostics(sdk, &helper_diagnostics) == 1 &&
+            helper_diagnostics.rum_events_enqueued == 0,
+        "Bridge Server did not disable Helper Host automatic window discovery");
+    DestroyWindow(helper_window);
 
     HANDLE pipe = connect_pipe(pipe_name);
     require(pipe != INVALID_HANDLE_VALUE, "failed to connect to Bridge Server");

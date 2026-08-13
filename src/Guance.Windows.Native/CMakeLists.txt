@@ -45,6 +45,8 @@ if(MSVC)
 endif()
 
 add_library(guance_windows_native
+    src/application_launch_monitor.cpp
+    src/application_launch_state.cpp
     src/data_modifier.cpp
     src/deflate.cpp
     src/electron_bridge_protocol.cpp
@@ -92,6 +94,7 @@ if(WIN32)
         _WIN32_WINNT=0x0601)
     target_link_libraries(guance_windows_native PRIVATE
         dbghelp
+        dwmapi
         winhttp
         ole32
         oleaut32
@@ -159,6 +162,16 @@ if(WIN32 AND GUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(native_application_launch_state_smoke
+        tests/native_application_launch_state_smoke.cpp
+        src/application_launch_state.cpp)
+    target_include_directories(native_application_launch_state_smoke PRIVATE src)
+    target_compile_features(native_application_launch_state_smoke PRIVATE cxx_std_17)
+    guance_enable_assertions(native_application_launch_state_smoke)
+    add_test(
+        NAME native_application_launch_state_smoke
+        COMMAND native_application_launch_state_smoke)
+
     add_executable(native_deflate_smoke
         tests/native_deflate_smoke.cpp
         src/deflate.cpp)
@@ -206,6 +219,7 @@ if(BUILD_TESTING)
     add_test(NAME native_batch_queue_smoke COMMAND native_batch_queue_smoke)
 
     list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+        native_application_launch_state_smoke
         native_deflate_smoke
         native_line_protocol_smoke
         native_monitoring_state_smoke
@@ -214,6 +228,23 @@ if(BUILD_TESTING)
         native_batch_queue_smoke)
 
     if(WIN32)
+        add_executable(
+            native_application_launch_auto_smoke
+            tests/native_application_launch_auto_smoke.cpp)
+        target_include_directories(
+            native_application_launch_auto_smoke
+            PRIVATE include)
+        target_compile_features(
+            native_application_launch_auto_smoke
+            PRIVATE cxx_std_17)
+        guance_enable_assertions(native_application_launch_auto_smoke)
+        target_link_libraries(
+            native_application_launch_auto_smoke
+            PRIVATE guance_windows_native user32)
+        add_test(
+            NAME native_application_launch_auto_smoke
+            COMMAND native_application_launch_auto_smoke)
+
         add_executable(
             native_electron_bridge_server_smoke
             tests/native_electron_bridge_server_smoke.cpp)
@@ -301,6 +332,7 @@ if(BUILD_TESTING)
             guance_windows_native)
 
         list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+            native_application_launch_auto_smoke
             native_electron_bridge_server_smoke
             native_browser_bridge_smoke
             native_monitoring_abi_smoke

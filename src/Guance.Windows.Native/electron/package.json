@@ -11,7 +11,7 @@
     "./preload/standalone": "./preload/standalone.cjs"
   },
   "scripts": {
-    "check": "node --check main/index.cjs && node --check preload/install.cjs && node --check preload/standalone.cjs && node --check internal/constants.cjs && node --check internal/rum-line-protocol.cjs && node --check internal/native-owned-bridge.cjs && node --test tests/*.test.cjs"
+    "check": "node --check main/index.cjs && node --check preload/install.cjs && node --check preload/standalone.cjs && node --check internal/constants.cjs && node --check internal/application-launch.cjs && node --check internal/rum-line-protocol.cjs && node --check internal/native-owned-bridge.cjs && node --test tests/*.test.cjs"
   },
   "engines": {
     "node": ">=22.12"

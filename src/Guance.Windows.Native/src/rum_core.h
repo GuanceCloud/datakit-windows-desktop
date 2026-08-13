@@ -26,6 +26,8 @@
 namespace guance::rum {
 
 class NativeMonitoring;
+class ApplicationLaunchMonitor;
+struct ApplicationLaunchDecision;
 
 struct Config {
     std::string dataway_url;
@@ -57,6 +59,7 @@ struct Config {
     int64_t session_replay_segment_bytes_limit = 1024 * 1024;
     bool compress_intake_requests = true;
     int flush_interval_ms = 15000;
+    bool enable_app_launch_tracking = true;
 };
 
 struct NativeDiagnostics {
@@ -160,6 +163,7 @@ public:
     void set_session_replay_hidden(uintptr_t hwnd, bool hidden);
     bool enable_native_monitoring(const guance_sdk_native_monitoring_config& config);
     void disable_native_monitoring();
+    void disable_automatic_app_launch();
     void add_ui_hang_event(const HangEvent& event, const std::string& stack);
     bool add_recovered_crash(
         const CrashEnvelope& envelope,
@@ -168,6 +172,14 @@ public:
     void log_native_monitoring(const std::string& message) const;
 
 private:
+    void add_launch_action_impl(
+        const guance_rum_launch& launch,
+        const char* view_id,
+        const char* view_name,
+        const char* view_referrer,
+        bool automatic);
+    void add_automatic_launch_action(const ApplicationLaunchDecision& launch);
+
     struct View {
         std::string id;
         std::string name;
@@ -252,6 +264,8 @@ private:
     std::string start_resource_impl(const char* url, const char* method, bool automatic);
 
     Config config_;
+    int64_t sdk_initialized_unix_ns_ = 0;
+    int64_t sdk_initialized_monotonic_ns_ = 0;
     std::string session_id_;
     Tags global_context_;
     Tags rum_context_;
@@ -264,6 +278,8 @@ private:
     std::unique_ptr<QueueStore> log_queue_;
     std::shared_ptr<CacheQuota> cache_quota_;
     std::unique_ptr<NativeMonitoring> native_monitoring_;
+    std::unique_ptr<ApplicationLaunchMonitor> application_launch_monitor_;
+    std::mutex application_launch_monitor_mutex_;
     ResourceCollectionConfig resource_collection_config_ = default_resource_collection_config();
     ResourceCollectionConfig modifier_privacy_config_ = default_resource_collection_config();
     DataModifierConfig data_modifier_config_;
@@ -292,6 +308,7 @@ private:
     bool session_replay_sampled_ = false;
     bool session_replay_error_sampled_ = false;
     bool session_replay_recording_ = false;
+    bool cold_launch_emitted_ = false;
     int replay_index_in_view_ = 0;
     std::string replay_segment_view_id_;
     std::string replay_pending_view_id_;

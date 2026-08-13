@@ -48,6 +48,7 @@ typedef struct guance_sdk_config {
     int64_t session_replay_segment_bytes_limit; /**< Maximum uncompressed bytes per Replay segment. */
     int compress_intake_requests; /**< Non-zero to deflate RUM and log request bodies; enabled by default. */
     int flush_interval_ms; /**< Maximum delay before a partial RUM or log batch is uploaded; defaults to 15000 ms. */
+    int enable_app_launch_tracking; /**< Non-zero to automatically collect native cold and hot application launches; enabled by default. */
 } guance_sdk_config;
 
 /** @brief Snapshot of native RUM, Replay, cache, and upload diagnostics. */
