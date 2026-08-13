@@ -34,6 +34,7 @@ int main() {
     guance_sdk_config config{};
     guance_sdk_config_init(&config);
     config.sample_rate = 1.0;
+    config.enable_app_launch_tracking = 0;
 
     const auto cache_directory = std::filesystem::temp_directory_path() /
         ("guance-native-action-lifecycle-" + std::to_string(

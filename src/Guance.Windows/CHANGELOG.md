@@ -2,7 +2,21 @@
 
 All notable changes to the managed `Guance.Windows` NuGet package are recorded here.
 
+## [0.1.0-alpha.6]
+
+### Added
+
+- Persistent anonymous user identifiers scoped by RUM application ID for unsigned RUM events and RUM-linked Logs, preserving identity across process restarts.
+- The bundled Native runtime now records application launch Actions automatically and compresses RUM and Log intake uploads with Deflate.
+
+### Fixed
+
+- The bundled Native Session Replay runtime no longer uploads segments without an associated View ID.
+- Native release validation now isolates Action lifecycle event counts from automatic application launch collection.
+
 ## [0.1.0-alpha.5]
+
+This version was tagged but not published because its Native x64 release validation failed.
 
 ### Added
 
