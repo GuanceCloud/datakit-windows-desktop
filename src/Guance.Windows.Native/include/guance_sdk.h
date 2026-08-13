@@ -46,6 +46,8 @@ typedef struct guance_sdk_config {
     const char* proxy_url; /**< Optional HTTP proxy URL. */
     int session_replay_segment_record_limit; /**< Maximum records per Replay segment. */
     int64_t session_replay_segment_bytes_limit; /**< Maximum uncompressed bytes per Replay segment. */
+    int compress_intake_requests; /**< Non-zero to deflate RUM and log request bodies; enabled by default. */
+    int flush_interval_ms; /**< Maximum delay before a partial RUM or log batch is uploaded; defaults to 15000 ms. */
 } guance_sdk_config;
 
 /** @brief Snapshot of native RUM, Replay, cache, and upload diagnostics. */

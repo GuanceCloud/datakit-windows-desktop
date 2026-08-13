@@ -16,6 +16,8 @@ int main(void) {
 
     return sdk_config.max_cache_bytes > 0 &&
             sdk_config.max_batch_items > 0 &&
+            sdk_config.compress_intake_requests == 1 &&
+            sdk_config.flush_interval_ms == 15000 &&
             log_config.struct_size == sizeof(log_config) &&
             trace_config.struct_size == sizeof(trace_config) &&
             rum_config.struct_size == sizeof(rum_config)

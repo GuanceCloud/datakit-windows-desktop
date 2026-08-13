@@ -1,3 +1,4 @@
+#include "deflate_test_utils.h"
 #include "guance_sdk.h"
 
 #include <winsock2.h>
@@ -371,13 +372,15 @@ int main() {
     assert(contains(browser_segment, "\"view\":{\"id\":\"browser-native-view\"}"));
     assert(contains(browser_segment, browser_record));
     assert(contains(requests[3], "POST /v1/write/rum"));
-    assert(contains(requests[3], "sdk_name=df_windows_rum_sdk"));
-    assert(!contains(requests[3], "df_android_rum_sdk"));
-    assert(contains(requests[3], "resource_request_size=64i"));
-    assert(contains(requests[3], "resource_type=http"));
-    assert(contains(requests[3], "trace_id=trace-native"));
-    assert(contains(requests[3], "span_id=span-native"));
-    assert(contains(requests[3], "action_resource_count=1i"));
+    assert(contains(requests[3], "Content-Encoding: deflate"));
+    const auto rum_body = guance::test::inflate_http_request_body(requests[3]);
+    assert(contains(rum_body, "sdk_name=df_windows_rum_sdk"));
+    assert(!contains(rum_body, "df_android_rum_sdk"));
+    assert(contains(rum_body, "resource_request_size=64i"));
+    assert(contains(rum_body, "resource_type=http"));
+    assert(contains(rum_body, "trace_id=trace-native"));
+    assert(contains(rum_body, "span_id=span-native"));
+    assert(contains(rum_body, "action_resource_count=1i"));
 
     guance_sdk_diagnostics diagnostics{};
     assert(guance_sdk_get_diagnostics(handle, &diagnostics) == 1);

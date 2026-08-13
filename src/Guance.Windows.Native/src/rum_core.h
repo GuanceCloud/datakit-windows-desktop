@@ -55,6 +55,8 @@ struct Config {
     std::string proxy_url;
     int session_replay_segment_record_limit = 500;
     int64_t session_replay_segment_bytes_limit = 1024 * 1024;
+    bool compress_intake_requests = true;
+    int flush_interval_ms = 15000;
 };
 
 struct NativeDiagnostics {
@@ -239,6 +241,10 @@ private:
     bool close_current_action_locked(int64_t now_monotonic_ns);
     bool close_current_action_if_needed_locked(int64_t now_monotonic_ns, bool allow_normal_timeout);
     void action_timeout_loop();
+    void run_upload_cycle(bool force_seal);
+    void upload_loop();
+    void notify_upload_worker();
+    void stop_upload_worker();
     void record_rum_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     void record_replay_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
     void record_log_transport_result(bool delete_from_queue, bool retry_later, int status_code, int error_code, int64_t latency_ms);
@@ -276,6 +282,11 @@ private:
     mutable std::mutex log_mutex_;
     mutable std::shared_mutex data_modifier_mutex_;
     mutable std::mutex upload_mutex_;
+    std::mutex upload_worker_mutex_;
+    std::condition_variable upload_worker_cv_;
+    std::thread upload_worker_thread_;
+    bool upload_worker_stopping_ = false;
+    bool upload_wake_requested_ = false;
     bool session_sampled_ = true;
     bool session_error_sampled_ = false;
     bool session_replay_sampled_ = false;

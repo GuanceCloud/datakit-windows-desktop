@@ -14,6 +14,8 @@ int main(void) {
     assert(sdk.max_cache_files == 1024);
     assert(sdk.max_cache_age_seconds == 7LL * 24 * 60 * 60);
     assert(sdk.max_batch_items == 50);
+    assert(sdk.compress_intake_requests == 1);
+    assert(sdk.flush_interval_ms == 15000);
     assert(sdk.max_upload_bytes_per_second == 256LL * 1024);
     assert(sdk.upload_burst_bytes == 2LL * 1024 * 1024);
     assert(sdk.max_upload_requests_per_second == 2.0);

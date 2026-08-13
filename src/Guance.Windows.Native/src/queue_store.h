@@ -72,6 +72,7 @@ public:
 
     bool enqueue(const std::string& line);
     bool seal();
+    bool seal_if_older(int64_t maximum_age_ms);
     QueuedBatch acquire();
     void complete(const std::string& lease_id);
     void abandon(const std::string& lease_id);

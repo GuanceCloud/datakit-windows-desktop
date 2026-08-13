@@ -735,6 +735,8 @@ Config from_c_config(const guance_sdk_config* c) {
     config.proxy_url = str_or_empty(c->proxy_url);
     config.session_replay_segment_record_limit = c->session_replay_segment_record_limit <= 0 ? 500 : c->session_replay_segment_record_limit;
     config.session_replay_segment_bytes_limit = c->session_replay_segment_bytes_limit <= 0 ? 1024 * 1024 : c->session_replay_segment_bytes_limit;
+    config.compress_intake_requests = c->compress_intake_requests != 0;
+    config.flush_interval_ms = c->flush_interval_ms <= 0 ? 15000 : c->flush_interval_ms;
     return config;
 }
 
@@ -798,10 +800,32 @@ RumCore::RumCore(Config config)
     upload_byte_tokens_ = static_cast<double>(config_.upload_burst_bytes);
     upload_request_tokens_ = std::max(1.0, config_.max_upload_requests_per_second);
     native_monitoring_ = std::make_unique<NativeMonitoring>(*this);
-    action_timeout_thread_ = std::thread([this] { action_timeout_loop(); });
+    try {
+        action_timeout_thread_ = std::thread([this] { action_timeout_loop(); });
+        upload_worker_thread_ = std::thread([this] { upload_loop(); });
+    } catch (...) {
+        {
+            std::lock_guard lock(mutex_);
+            action_timeout_stopping_ = true;
+        }
+        action_timeout_cv_.notify_all();
+        if (action_timeout_thread_.joinable()) {
+            action_timeout_thread_.join();
+        }
+        {
+            std::lock_guard lock(upload_worker_mutex_);
+            upload_worker_stopping_ = true;
+        }
+        upload_worker_cv_.notify_all();
+        if (upload_worker_thread_.joinable()) {
+            upload_worker_thread_.join();
+        }
+        throw;
+    }
 }
 
 RumCore::~RumCore() {
+    stop_upload_worker();
     {
         std::lock_guard lock(mutex_);
         action_timeout_stopping_ = true;
@@ -814,13 +838,26 @@ RumCore::~RumCore() {
 }
 
 void RumCore::flush() {
+    run_upload_cycle(true);
+}
+
+void RumCore::run_upload_cycle(bool force_seal) {
     std::lock_guard upload_lock(upload_mutex_);
     {
         std::lock_guard lock(mutex_);
-        flush_replay_pending_locked();
+        const bool replay_due = replay_pending_start_ms_ > 0 &&
+            unix_time_milliseconds() - replay_pending_start_ms_ >= config_.flush_interval_ms;
+        if (force_seal || replay_due) {
+            flush_replay_pending_locked();
+        }
     }
-    queue_->seal();
-    log_queue_->seal();
+    if (force_seal) {
+        queue_->seal();
+        log_queue_->seal();
+    } else {
+        queue_->seal_if_older(config_.flush_interval_ms);
+        log_queue_->seal_if_older(config_.flush_interval_ms);
+    }
 
     enum class UploadStream { rum, log, replay };
     static constexpr std::array<UploadStream, 7> schedule{
@@ -915,8 +952,54 @@ void RumCore::flush() {
     }
 }
 
+void RumCore::upload_loop() {
+    std::unique_lock lock(upload_worker_mutex_);
+    while (!upload_worker_stopping_) {
+        upload_worker_cv_.wait_for(
+            lock,
+            std::chrono::seconds(1),
+            [this] { return upload_worker_stopping_ || upload_wake_requested_; });
+        if (upload_worker_stopping_) {
+            return;
+        }
+        upload_wake_requested_ = false;
+        lock.unlock();
+        try {
+            run_upload_cycle(false);
+        } catch (...) {
+            if (config_.debug) {
+                std::cerr << "[Guance.RUM.Native] automatic upload cycle failed" << std::endl;
+            }
+        }
+        lock.lock();
+    }
+}
+
+void RumCore::notify_upload_worker() {
+    {
+        std::lock_guard lock(upload_worker_mutex_);
+        if (upload_worker_stopping_) {
+            return;
+        }
+        upload_wake_requested_ = true;
+    }
+    upload_worker_cv_.notify_one();
+}
+
+void RumCore::stop_upload_worker() {
+    {
+        std::lock_guard lock(upload_worker_mutex_);
+        upload_worker_stopping_ = true;
+    }
+    upload_worker_cv_.notify_all();
+    if (upload_worker_thread_.joinable()) {
+        upload_worker_thread_.join();
+    }
+}
+
 void RumCore::shutdown() {
     disable_native_monitoring();
+    stop_upload_worker();
     {
         std::lock_guard lock(mutex_);
         close_current_action_locked(monotonic_time_nanoseconds());
@@ -1029,6 +1112,7 @@ bool RumCore::write_line(const char* line, std::size_t length) {
     const bool persisted = queue_->enqueue(modified_line);
     if (!persisted) return false;
     rum_events_enqueued_.fetch_add(1);
+    notify_upload_worker();
     if (config_.debug) {
         std::cout << "[Guance.RUM.Native.BrowserBridge] enqueued "
                   << *measurement
@@ -1541,6 +1625,7 @@ bool RumCore::add_log(
         return false;
     }
     logs_enqueued_.fetch_add(1);
+    notify_upload_worker();
     return true;
 }
 
@@ -1642,10 +1727,14 @@ void RumCore::add_error(const char* stack, const char* message, const char* erro
         flush_replay_pending_locked();
         session_replay_sampled_ = true;
         session_replay_recording_ = true;
+        bool replay_queued = false;
         for (const auto& segment : replay_error_buffer_) {
-            replay_queue_->enqueue(segment.content_type + "\n" + segment.body);
+            replay_queued = replay_queue_->enqueue(segment.content_type + "\n" + segment.body) || replay_queued;
         }
         replay_error_buffer_.clear();
+        if (replay_queued) {
+            notify_upload_worker();
+        }
         capture_session_replay_snapshot();
     }
 }
@@ -2155,7 +2244,9 @@ void RumCore::enqueue_replay_segment(std::string content_type, std::string body)
     }
 
     if (session_replay_sampled_) {
-        replay_queue_->enqueue(content_type + "\n" + body);
+        if (replay_queue_->enqueue(content_type + "\n" + body)) {
+            notify_upload_worker();
+        }
         return;
     }
 
@@ -2201,7 +2292,10 @@ bool RumCore::enqueue(RumEvent event) {
     }
     apply_modifiers(event);
     const bool persisted = queue_->enqueue(format_line_protocol(event));
-    if (persisted) rum_events_enqueued_.fetch_add(1);
+    if (persisted) {
+        rum_events_enqueued_.fetch_add(1);
+        notify_upload_worker();
+    }
     return persisted;
 }
 

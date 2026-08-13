@@ -44,6 +44,18 @@ int main() {
     }
 
     {
+        QueueStore queue(root, "timed", QueueStreamKind::rum, quota, 50, 4096, 3600);
+        assert(queue.enqueue("timed-seal\n"));
+        assert(!queue.acquire());
+        assert(!queue.seal_if_older(60'000));
+        assert(queue.seal_if_older(0));
+        const auto lease = queue.acquire();
+        assert(lease);
+        assert(lease.lines.front() == "timed-seal\n");
+        queue.complete(lease.lease_id);
+    }
+
+    {
         QueueStore queue(root, "rum", QueueStreamKind::rum, quota, 1, 4096, 3600);
         assert(queue.enqueue("recover-after-crash\n"));
         const auto interrupted_lease = queue.acquire();

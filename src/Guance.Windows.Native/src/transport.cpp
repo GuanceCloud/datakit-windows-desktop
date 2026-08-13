@@ -1,4 +1,5 @@
 #include "transport.h"
+#include "deflate.h"
 #include "resource_collection.h"
 
 #include <cctype>
@@ -84,10 +85,17 @@ TransportResult retry_result(int status_code, std::string message, int error_cod
     return {false, true, status_code, error_code, latency_ms, 0, std::move(message)};
 }
 
-TransportResult post_body(const Config& config, const std::string& path, const std::string& content_type, const std::string& body) {
+TransportResult post_body(
+    const Config& config,
+    const std::string& path,
+    const std::string& content_type,
+    const std::string& body,
+    bool allow_compression) {
     ResourceCollectionSuppressionScope resource_suppression;
     const auto started = std::chrono::steady_clock::now();
 #if defined(GUANCE_WINDOWS_NATIVE_WINDOWS)
+    const bool compressed = allow_compression && config.compress_intake_requests;
+    const auto request_body = compressed ? deflate_compress(body) : body;
     const auto url = widen(build_url(config, path));
     URL_COMPONENTS components{};
     components.dwStructSize = sizeof(components);
@@ -140,13 +148,17 @@ TransportResult post_body(const Config& config, const std::string& path, const s
         return retry_result(0, "WinHttpOpenRequest failed", error, elapsed_milliseconds(started));
     }
 
-    const auto headers = widen("Content-Type: " + content_type + "\r\n");
+    auto header_text = "Content-Type: " + content_type + "\r\n";
+    if (compressed) {
+        header_text += "Content-Encoding: deflate\r\n";
+    }
+    const auto headers = widen(header_text);
     const BOOL sent = WinHttpSendRequest(request,
                                          headers.c_str(),
                                          static_cast<DWORD>(-1),
-                                         const_cast<char*>(body.data()),
-                                         static_cast<DWORD>(body.size()),
-                                         static_cast<DWORD>(body.size()),
+                                         const_cast<char*>(request_body.data()),
+                                         static_cast<DWORD>(request_body.size()),
+                                         static_cast<DWORD>(request_body.size()),
                                          0);
     TransportResult result;
     if (!sent) {
@@ -205,7 +217,7 @@ TransportResult send_to_dataway(const Config& config, const std::vector<std::str
         return success_result(204);
     }
 
-    return post_body(config, "v1/write/rum", "text/plain", join_lines(lines));
+    return post_body(config, "v1/write/rum", "text/plain", join_lines(lines), true);
 }
 
 TransportResult send_logging_to_dataway(const Config& config, const std::vector<std::string>& lines) {
@@ -213,14 +225,14 @@ TransportResult send_logging_to_dataway(const Config& config, const std::vector<
         return success_result(204);
     }
 
-    return post_body(config, "v1/write/logging", "text/plain", join_lines(lines));
+    return post_body(config, "v1/write/logging", "text/plain", join_lines(lines), true);
 }
 
 TransportResult send_session_replay_to_dataway(const Config& config, const std::string& content_type, const std::string& body) {
     if (body.empty()) {
         return success_result(204);
     }
-    return post_body(config, "v1/write/rum/replay", content_type, body);
+    return post_body(config, "v1/write/rum/replay", content_type, body, false);
 }
 
 } // namespace guance::rum

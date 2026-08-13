@@ -46,6 +46,7 @@ endif()
 
 add_library(guance_windows_native
     src/data_modifier.cpp
+    src/deflate.cpp
     src/electron_bridge_protocol.cpp
     src/electron_bridge_server.cpp
     src/guance_sdk.cpp
@@ -158,6 +159,14 @@ if(WIN32 AND GUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(native_deflate_smoke
+        tests/native_deflate_smoke.cpp
+        src/deflate.cpp)
+    target_include_directories(native_deflate_smoke PRIVATE src tests)
+    target_compile_features(native_deflate_smoke PRIVATE cxx_std_17)
+    guance_enable_assertions(native_deflate_smoke)
+    add_test(NAME native_deflate_smoke COMMAND native_deflate_smoke)
+
     add_executable(native_line_protocol_smoke
         tests/native_line_protocol_smoke.cpp
         src/line_protocol.cpp)
@@ -197,6 +206,7 @@ if(BUILD_TESTING)
     add_test(NAME native_batch_queue_smoke COMMAND native_batch_queue_smoke)
 
     list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+        native_deflate_smoke
         native_line_protocol_smoke
         native_monitoring_state_smoke
         native_resource_collection_state_smoke
@@ -283,6 +293,13 @@ if(BUILD_TESTING)
             guance_windows_native
             winhttp)
 
+        add_executable(native_compression_live_acceptance EXCLUDE_FROM_ALL
+            tests/native_compression_live_acceptance.cpp)
+        target_include_directories(native_compression_live_acceptance PRIVATE include)
+        target_compile_features(native_compression_live_acceptance PRIVATE cxx_std_17)
+        target_link_libraries(native_compression_live_acceptance PRIVATE
+            guance_windows_native)
+
         list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
             native_electron_bridge_server_smoke
             native_browser_bridge_smoke
@@ -293,6 +310,7 @@ if(BUILD_TESTING)
             native_crash_recovery_smoke
             native_win32_replay_smoke
             native_winhttp_resource_smoke
+            native_compression_live_acceptance
             native_trace_live_acceptance)
     endif()
 endif()

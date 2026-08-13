@@ -364,6 +364,16 @@ bool QueueStore::seal() {
     return seal_locked();
 }
 
+bool QueueStore::seal_if_older(int64_t maximum_age_ms) {
+    std::lock_guard lock(mutex_);
+    if (!active_stream_.is_open() || active_record_count_ <= 0) return false;
+    if (maximum_age_ms > 0 &&
+        unix_time_milliseconds() - active_created_ms_ < maximum_age_ms) {
+        return false;
+    }
+    return seal_locked();
+}
+
 QueuedBatch QueueStore::acquire() {
     std::lock_guard lock(mutex_);
     std::vector<std::filesystem::path> files;

@@ -1,5 +1,6 @@
 #include <winsock2.h>
 
+#include "deflate_test_utils.h"
 #include "guance_rum_winhttp.hpp"
 
 #include <cassert>
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -48,8 +50,11 @@ std::string read_request(SOCKET client) {
 
 class SmokeServer final {
 public:
-    explicit SmokeServer(int expected_requests)
-        : expected_requests_(expected_requests) {
+    explicit SmokeServer(
+        int expected_requests,
+        std::vector<int> response_status_codes = {})
+        : expected_requests_(expected_requests),
+          response_status_codes_(std::move(response_status_codes)) {
         WSADATA data{};
         if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
             throw std::runtime_error("WSAStartup failed");
@@ -101,12 +106,15 @@ public:
                     return;
                 }
                 requests.push_back(read_request(client));
-                const char response[] =
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Length: 0\r\n"
+                const auto status = index < static_cast<int>(response_status_codes_.size())
+                    ? response_status_codes_[static_cast<std::size_t>(index)]
+                    : 200;
+                const auto response = std::string{"HTTP/1.1 "} +
+                    (status == 200 ? "200 OK" : "500 Internal Server Error") +
+                    "\r\nContent-Length: 0\r\n"
                     "Set-Cookie: response-secret\r\n"
                     "Connection: close\r\n\r\n";
-                send(client, response, static_cast<int>(sizeof(response) - 1), 0);
+                send(client, response.data(), static_cast<int>(response.size()), 0);
                 closesocket(client);
             }
             promise.set_value(std::move(requests));
@@ -128,6 +136,9 @@ public:
     }
 
     std::vector<std::string> wait() {
+        if (requests_.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
+            throw std::runtime_error("timed out waiting for intake requests");
+        }
         return requests_.get();
     }
 
@@ -135,6 +146,7 @@ private:
     SOCKET listen_socket_ = INVALID_SOCKET;
     int port_ = 0;
     int expected_requests_ = 0;
+    std::vector<int> response_status_codes_;
     std::thread worker_;
     std::future<std::vector<std::string>> requests_;
 };
@@ -227,10 +239,13 @@ int main() {
 
     guance_sdk_config config{};
     guance_sdk_config_init(&config);
+    assert(config.compress_intake_requests == 1);
+    assert(config.flush_interval_ms == 15000);
     config.datakit_url = datakit_url.c_str();
     config.rum_app_id = "native-winhttp-smoke";
     config.cache_path = cache_path.c_str();
     config.sample_rate = 1.0;
+    config.flush_interval_ms = 100;
     const auto handle = guance_sdk_init(&config);
     assert(handle != nullptr);
 
@@ -353,7 +368,6 @@ int main() {
     guance_rum_stop_action(handle, action_id);
     guance_rum_stop_view(handle);
 
-    guance_sdk_flush(handle);
     const auto requests = server.wait();
     assert(requests.size() == 4);
     assert(contains(requests[0], "GET /ignored"));
@@ -365,49 +379,118 @@ int main() {
     assert(trace_id != "00000000000000000000000000000001");
     assert(header_value(requests[1], "X-B3-Sampled") == "1");
     assert(contains(requests[2], "POST /v1/write/rum"));
+    assert(contains(requests[2], "Content-Encoding: deflate"));
+    const auto rum_body = guance::test::inflate_http_request_body(requests[2]);
+    assert(guance::test::http_request_body(requests[2]).size() < rum_body.size());
     assert(contains(
-        requests[2],
+        rum_body,
         std::string("sdk_version=") + guance_sdk_get_version()));
-    assert(contains(requests[2], "resource_status=200"));
-    assert(contains(requests[2], "resource_type=http"));
-    assert(contains(requests[2], "resource_http_protocol=HTTP/1.1"));
-    assert(contains(requests[2], "resource_size=0i"));
-    assert(contains(requests[2], "resource_request_size=0i"));
-    assert(contains(requests[2], "trace_id=" + trace_id));
-    assert(contains(requests[2], "span_id=" + span_id));
-    assert(contains(requests[2], "token\\=%3Credacted%3E&keep\\=1"));
-    assert(!contains(requests[2], "token\\=secret"));
-    assert(contains(requests[2], "Authorization: <redacted>"));
-    assert(contains(requests[2], "Set-Cookie: <redacted>"));
-    assert(!contains(requests[2], "request-secret"));
-    assert(!contains(requests[2], "response-secret"));
-    assert(!contains(requests[2], "/ignored"));
+    assert(contains(rum_body, "resource_status=200"));
+    assert(contains(rum_body, "resource_type=http"));
+    assert(contains(rum_body, "resource_http_protocol=HTTP/1.1"));
+    assert(contains(rum_body, "resource_size=0i"));
+    assert(contains(rum_body, "resource_request_size=0i"));
+    assert(contains(rum_body, "trace_id=" + trace_id));
+    assert(contains(rum_body, "span_id=" + span_id));
+    assert(contains(rum_body, "token\\=%3Credacted%3E&keep\\=1"));
+    assert(!contains(rum_body, "token\\=secret"));
+    assert(contains(rum_body, "Authorization: <redacted>"));
+    assert(contains(rum_body, "Set-Cookie: <redacted>"));
+    assert(!contains(rum_body, "request-secret"));
+    assert(!contains(rum_body, "response-secret"));
+    assert(!contains(rum_body, "/ignored"));
     assert(contains(requests[3], "POST /v1/write/logging"));
-    assert(contains(requests[3], "df_rum_windows_log,"));
+    assert(contains(requests[3], "Content-Encoding: deflate"));
+    const auto log_body = guance::test::inflate_http_request_body(requests[3]);
+    assert(contains(log_body, "df_rum_windows_log,"));
     assert(contains(
-        requests[3],
+        log_body,
         std::string("sdk_version=") + guance_sdk_get_version()));
-    const auto rum_session_id = line_tag_value(requests[2], "session_id");
-    const auto log_session_id = line_tag_value(requests[3], "session_id");
+    const auto rum_session_id = line_tag_value(rum_body, "session_id");
+    const auto log_session_id = line_tag_value(log_body, "session_id");
     assert(!rum_session_id.empty());
     assert(log_session_id == rum_session_id);
-    assert(contains(requests[3], "view_name=NativeLogView"));
-    assert(contains(requests[3], "action_name=NativeLogAction"));
-    assert(contains(requests[3], "message=\"native log message\""));
-    assert(contains(requests[3], "status=\"warning\""));
-    assert(contains(requests[3], "operation=\"line-modified\""));
+    assert(contains(log_body, "view_name=NativeLogView"));
+    assert(contains(log_body, "action_name=NativeLogAction"));
+    assert(contains(log_body, "message=\"native log message\""));
+    assert(contains(log_body, "status=\"warning\""));
+    assert(contains(log_body, "operation=\"line-modified\""));
     assert(saw_raw_url);
 
     guance_sdk_diagnostics diagnostics{};
-    const int has_diagnostics = guance_sdk_get_diagnostics(handle, &diagnostics);
-    assert(has_diagnostics == 1);
-    assert(diagnostics.rum_upload_success_count == 1);
     guance_log_diagnostics log_diagnostics{};
     guance_log_diagnostics_init(&log_diagnostics);
-    assert(guance_log_get_diagnostics(handle, &log_diagnostics) == 1);
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        assert(guance_sdk_get_diagnostics(handle, &diagnostics) == 1);
+        assert(guance_log_get_diagnostics(handle, &log_diagnostics) == 1);
+        if (diagnostics.rum_upload_success_count >= 1 &&
+            log_diagnostics.upload_success_count >= 1) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    assert(diagnostics.rum_upload_success_count == 1);
     assert(log_diagnostics.logs_enqueued == 1);
     assert(log_diagnostics.upload_success_count == 1);
     guance_sdk_shutdown(handle);
+
+    SmokeServer uncompressed_server(1);
+    const auto uncompressed_datakit_url =
+        "http://127.0.0.1:" + std::to_string(uncompressed_server.port());
+    const auto uncompressed_cache_path = (cache_directory / "uncompressed-cache").string();
+    guance_sdk_config uncompressed_config{};
+    guance_sdk_config_init(&uncompressed_config);
+    uncompressed_config.datakit_url = uncompressed_datakit_url.c_str();
+    uncompressed_config.rum_app_id = "native-uncompressed-smoke";
+    uncompressed_config.cache_path = uncompressed_cache_path.c_str();
+    uncompressed_config.compress_intake_requests = 0;
+    const auto uncompressed_handle = guance_sdk_init(&uncompressed_config);
+    assert(uncompressed_handle != nullptr);
+    guance_rum_start_view(uncompressed_handle, "UncompressedView");
+    guance_rum_stop_view(uncompressed_handle);
+    guance_sdk_flush(uncompressed_handle);
+    const auto uncompressed_requests = uncompressed_server.wait();
+    assert(uncompressed_requests.size() == 1);
+    assert(contains(uncompressed_requests[0], "POST /v1/write/rum"));
+    assert(!contains(uncompressed_requests[0], "Content-Encoding:"));
+    assert(contains(
+        guance::test::http_request_body(uncompressed_requests[0]),
+        "view_name=UncompressedView"));
+    guance_sdk_shutdown(uncompressed_handle);
+
+    SmokeServer retry_server(2, {500, 200});
+    const auto retry_datakit_url =
+        "http://127.0.0.1:" + std::to_string(retry_server.port());
+    const auto retry_cache_path = (cache_directory / "retry-cache").string();
+    guance_sdk_config retry_config{};
+    guance_sdk_config_init(&retry_config);
+    retry_config.datakit_url = retry_datakit_url.c_str();
+    retry_config.rum_app_id = "native-auto-retry-smoke";
+    retry_config.cache_path = retry_cache_path.c_str();
+    retry_config.flush_interval_ms = 50;
+    const auto retry_handle = guance_sdk_init(&retry_config);
+    assert(retry_handle != nullptr);
+    guance_rum_start_view(retry_handle, "AutoRetryView");
+    guance_rum_stop_view(retry_handle);
+    const auto retry_requests = retry_server.wait();
+    assert(retry_requests.size() == 2);
+    assert(contains(retry_requests[0], "POST /v1/write/rum"));
+    assert(contains(retry_requests[1], "POST /v1/write/rum"));
+    assert(contains(retry_requests[0], "Content-Encoding: deflate"));
+    assert(guance::test::inflate_http_request_body(retry_requests[0]) ==
+           guance::test::inflate_http_request_body(retry_requests[1]));
+    guance_sdk_diagnostics retry_diagnostics{};
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        assert(guance_sdk_get_diagnostics(retry_handle, &retry_diagnostics) == 1);
+        if (retry_diagnostics.rum_upload_retry_count >= 1 &&
+            retry_diagnostics.rum_upload_success_count >= 1) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    assert(retry_diagnostics.rum_upload_retry_count >= 1);
+    assert(retry_diagnostics.rum_upload_success_count >= 1);
+    guance_sdk_shutdown(retry_handle);
 
     std::error_code cleanup_error;
     std::filesystem::remove_all(cache_directory, cleanup_error);
