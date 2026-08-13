@@ -1,5 +1,6 @@
 #include "rum_core.h"
 
+#include "anonymous_user_id.h"
 #include "guance_sdk_version.h"
 #include "native_monitoring.h"
 #include "transport.h"
@@ -763,6 +764,16 @@ RumCore::RumCore(Config config)
         hit_rate(config_.session_replay_on_error_sample_rate);
     session_replay_recording_ = session_replay_sampled_ || session_replay_error_sampled_;
     const auto cache_root = cache_root_path(config_.cache_path);
+    const auto anonymous_identity = load_or_create_anonymous_user_id(
+        cache_root,
+        config_.rum_app_id);
+    anonymous_user_id_ = anonymous_identity.value;
+    if (!anonymous_identity.persistence_error.empty()) {
+        std::cerr << "[Guance.RUM.Native.Identity] "
+                  << anonymous_identity.persistence_error
+                  << "; using an ephemeral anonymous user identifier"
+                  << std::endl;
+    }
     cache_quota_ = std::make_shared<CacheQuota>(
         cache_root,
         config_.max_cache_bytes,
@@ -1020,9 +1031,7 @@ bool RumCore::write_line(const char* line, std::size_t length) {
         for (const auto& [key, value] : rum_context_) {
             event.tags[key] = value;
         }
-        for (const auto& [key, value] : user_tags_) {
-            event.tags[key] = value;
-        }
+        apply_user_identity(event, true, true);
     }
     apply_modifiers(event);
     const auto modified_line = format_line_protocol(event);
@@ -1041,7 +1050,10 @@ bool RumCore::write_line(const char* line, std::size_t length) {
 void RumCore::set_user(const char* id, const char* name, const char* email) {
     std::lock_guard lock(mutex_);
     user_tags_.clear();
-    user_tags_["is_signin"] = "true";
+    if (id == nullptr || id[0] == '\0') {
+        return;
+    }
+    user_tags_["is_signin"] = "T";
     user_tags_["userid"] = str_or_empty(id);
     user_tags_["user_name"] = str_or_empty(name);
     user_tags_["user_email"] = str_or_empty(email);
@@ -1502,18 +1514,10 @@ bool RumCore::add_log(
         for (const auto& [key, value] : log_config_.global_context) {
             event.tags.emplace(key, value);
         }
-        for (const auto& [key, value] : user_tags_) {
-            event.tags.emplace(key, value);
-        }
-        if (user_tags_.empty()) {
-            event.tags["is_signin"] = "F";
-        }
+        apply_user_identity(event, false, log_config_.enable_link_rum_data);
         if (log_config_.enable_link_rum_data) {
             event.tags["session_id"] = session_id_;
             event.tags["session_type"] = "user";
-            if (user_tags_.find("userid") == user_tags_.end()) {
-                event.tags["userid"] = session_id_;
-            }
             if (active_view_) {
                 event.tags["view_id"] = active_view_->id;
                 event.tags["view_name"] = active_view_->name;
@@ -2187,10 +2191,35 @@ RumEvent RumCore::base_event(const std::string& measurement, int64_t timestamp_n
     for (const auto& [key, value] : rum_context_) {
         event.tags[key] = value;
     }
-    for (const auto& [key, value] : user_tags_) {
-        event.tags[key] = value;
-    }
+    apply_user_identity(event, false, true);
     return event;
+}
+
+void RumCore::apply_user_identity(
+    RumEvent& event,
+    bool preserve_existing_user,
+    bool include_anonymous) const {
+    if (!user_tags_.empty()) {
+        for (const auto& [key, value] : user_tags_) {
+            event.tags[key] = value;
+        }
+        return;
+    }
+
+    const auto existing_user = event.tags.find("userid");
+    if (preserve_existing_user &&
+        existing_user != event.tags.end() &&
+        !existing_user->second.empty()) {
+        if (event.tags.find("is_signin") == event.tags.end()) {
+            event.tags["is_signin"] = "T";
+        }
+        return;
+    }
+
+    event.tags["is_signin"] = "F";
+    if (include_anonymous) {
+        event.tags["userid"] = anonymous_user_id_;
+    }
 }
 
 bool RumCore::enqueue(RumEvent event) {

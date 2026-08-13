@@ -65,6 +65,8 @@ int main() {
     require(
         guance_configure_data_modifiers(handle, &modifiers) == 1,
         "native browser modifiers failed to configure");
+    guance_sdk_set_user(handle, "native-user-before-empty", nullptr, nullptr);
+    guance_sdk_set_user(handle, "", nullptr, nullptr);
 
     const std::array<const char*, 5> measurements{
         "view",
@@ -82,11 +84,14 @@ int main() {
             ? ",view_id=browser-view-id,view_name=ControlRoom,"
               "view_referrer=https://ref.example.test/?token\\=secret"
             : "";
+        const std::string browser_user = std::string(measurement) == "error"
+            ? ",userid=renderer-user,is_signin=T"
+            : "";
         valid = std::string(measurement) +
             ",app_id=renderer-app,browser_numeric_tag=raw,env=renderer-env," +
             "service=renderer-service,version=renderer-app-version,sdk_name=renderer-sdk," +
             "sdk_version=renderer-sdk-version,session_id=renderer-session" +
-            resource_url + view_referrer + " "
+            resource_url + view_referrer + browser_user + " "
             "is_active=false,time_spent=1i 1722300000000000000";
         require(
             guance_sdk_write_electron_bridge_line(handle, valid.data(), valid.size()) == 1,
@@ -133,6 +138,9 @@ int main() {
             1722300000123,
             1) == 0,
         "invalid Browser Session Replay view id was accepted");
+
+    guance_sdk_set_user(handle, "native-user-before-null", nullptr, nullptr);
+    guance_sdk_set_user(handle, nullptr, nullptr, nullptr);
 
     const guance_rum_launch cold_launch{
         GUANCE_RUM_LAUNCH_COLD,
@@ -221,6 +229,18 @@ int main() {
             queued_lines.find(std::string("sdk_version=") + guance_sdk_get_version()) !=
                 std::string::npos,
             "browser bridge did not use the compiled native SDK version");
+        require(
+            queued_lines.find("userid=renderer-user") != std::string::npos,
+            "browser bridge discarded an explicit Browser user identifier");
+        require(
+            queued_lines.find("native-user-before-empty") == std::string::npos &&
+                queued_lines.find("native-user-before-null") == std::string::npos,
+            "an empty Native user identifier did not restore anonymous identity");
+        require(
+            std::regex_search(
+                queued_lines,
+                std::regex("userid=ft\\.rd_[0-9a-f]{32}")),
+            "anonymous Browser and Native events did not use the persistent anonymous identifier");
         std::set<std::string> session_ids;
         const std::regex session_pattern("session_id=([^, \\r\\n]+)");
         for (std::sregex_iterator it(queued_lines.begin(), queued_lines.end(), session_pattern), end;
