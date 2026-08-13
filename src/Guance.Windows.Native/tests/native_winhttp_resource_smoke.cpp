@@ -9,6 +9,7 @@
 #include <chrono>
 #include <filesystem>
 #include <future>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -408,8 +409,13 @@ int main() {
         std::string("sdk_version=") + guance_sdk_get_version()));
     const auto rum_session_id = line_tag_value(rum_body, "session_id");
     const auto log_session_id = line_tag_value(log_body, "session_id");
+    const auto rum_user_id = line_tag_value(rum_body, "userid");
+    const auto log_user_id = line_tag_value(log_body, "userid");
     assert(!rum_session_id.empty());
     assert(log_session_id == rum_session_id);
+    assert(std::regex_match(rum_user_id, std::regex("ft\\.rd_[0-9a-f]{32}")));
+    assert(log_user_id == rum_user_id);
+    assert(rum_user_id != rum_session_id);
     assert(contains(log_body, "view_name=NativeLogView"));
     assert(contains(log_body, "action_name=NativeLogAction"));
     assert(contains(log_body, "message=\"native log message\""));

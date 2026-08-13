@@ -45,6 +45,7 @@ if(MSVC)
 endif()
 
 add_library(guance_windows_native
+    src/anonymous_user_id.cpp
     src/application_launch_monitor.cpp
     src/application_launch_state.cpp
     src/data_modifier.cpp
@@ -162,6 +163,16 @@ if(WIN32 AND GUANCE_WINDOWS_NATIVE_BUILD_ELECTRON_BRIDGE)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(native_anonymous_user_id_smoke
+        tests/native_anonymous_user_id_smoke.cpp
+        src/anonymous_user_id.cpp
+        src/line_protocol.cpp
+        src/queue_store.cpp)
+    target_include_directories(native_anonymous_user_id_smoke PRIVATE include src)
+    target_compile_features(native_anonymous_user_id_smoke PRIVATE cxx_std_17)
+    guance_enable_assertions(native_anonymous_user_id_smoke)
+    add_test(NAME native_anonymous_user_id_smoke COMMAND native_anonymous_user_id_smoke)
+
     add_executable(native_application_launch_state_smoke
         tests/native_application_launch_state_smoke.cpp
         src/application_launch_state.cpp)
@@ -219,6 +230,7 @@ if(BUILD_TESTING)
     add_test(NAME native_batch_queue_smoke COMMAND native_batch_queue_smoke)
 
     list(APPEND GUANCE_WINDOWS_NATIVE_LOCAL_TARGETS
+        native_anonymous_user_id_smoke
         native_application_launch_state_smoke
         native_deflate_smoke
         native_line_protocol_smoke

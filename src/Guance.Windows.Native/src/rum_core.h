@@ -233,6 +233,7 @@ private:
     };
 
     RumEvent base_event(const std::string& measurement, int64_t timestamp_ns);
+    void apply_user_identity(RumEvent& event, bool preserve_existing_user, bool include_anonymous) const;
     bool enqueue(RumEvent event);
     void apply_modifiers(RumEvent& event);
     bool sampled_for(const std::string& measurement) const;
@@ -267,6 +268,7 @@ private:
     int64_t sdk_initialized_unix_ns_ = 0;
     int64_t sdk_initialized_monotonic_ns_ = 0;
     std::string session_id_;
+    std::string anonymous_user_id_;
     Tags global_context_;
     Tags rum_context_;
     Tags user_tags_;

@@ -519,7 +519,7 @@ GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_disable_native_monitoring(guance_sd
 /** Records a C++ terminate crash envelope for recovery during the next initialization. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_capture_cpp_terminate(void);
 
-/** Sets user identity for telemetry created after this call. Strings are copied. */
+/** Sets user identity for telemetry created after this call. Strings are copied. A null or empty id clears the identity. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_set_user(guance_sdk_handle handle, const char* id, const char* name, const char* email);
 /** Clears user identity for telemetry created after this call. */
 GUANCE_WINDOWS_NATIVE_EXPORT void guance_sdk_clear_user(guance_sdk_handle handle);

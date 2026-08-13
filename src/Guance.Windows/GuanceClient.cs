@@ -48,6 +48,7 @@ public sealed class GuanceClient : IAsyncDisposable
     private readonly SessionReplayManager sessionReplay;
     private readonly SamplingController sampling;
     private readonly SessionManager session;
+    private readonly string anonymousUserId;
     private readonly RumPlatformInfo platformInfo;
     private readonly WebViewInstrumentationManager webViewInstrumentation;
     private readonly ApplicationLaunchTracker applicationLaunch;
@@ -144,6 +145,8 @@ public sealed class GuanceClient : IAsyncDisposable
         this.actionTiming = (actionTiming ?? ActionTrackingTiming.Default).Validate();
         sampling = new SamplingController(config);
         session = new SessionManager(sampling);
+        var anonymousIdentity = AnonymousUserIdStore.LoadOrCreate(config);
+        anonymousUserId = anonymousIdentity.Value;
         platformInfo = RumPlatformInfo.Capture();
         webViewInstrumentation = new WebViewInstrumentationManager(this);
         applicationLaunch = new ApplicationLaunchTracker(TrackApplicationLaunch, applicationLaunchClock);
@@ -172,6 +175,14 @@ public sealed class GuanceClient : IAsyncDisposable
             },
             shutdown.Token);
         uploadScheduler = scheduler;
+        if (anonymousIdentity.PersistenceError is not null)
+        {
+            EmitDiagnostic(
+                RumDiagnosticLevel.Warning,
+                "identity",
+                "Anonymous user identity could not be persisted; this process will use an ephemeral identifier.",
+                exception: anonymousIdentity.PersistenceError);
+        }
     }
 
     /// <summary>Gets the configuration used to create this client.</summary>
@@ -1062,7 +1073,7 @@ public sealed class GuanceClient : IAsyncDisposable
             .WithTag(RumConstants.SessionId, session.SessionId)
             .WithTag(RumConstants.SessionType, "user")
             .WithTag(RumConstants.IsSignIn, user is null ? "F" : "T")
-            .WithTag(RumConstants.UserId, user?.Id ?? session.SessionId)
+            .WithTag(RumConstants.UserId, user?.Id ?? anonymousUserId)
             .WithField(RumConstants.SessionHasReplay, sessionReplay.HasReplay(session.SessionId))
             .WithField(RumConstants.SessionSampleRate, config.SampleRate)
             .WithField(RumConstants.SessionOnErrorSampleRate, config.SessionErrorSampleRate);
@@ -1122,7 +1133,7 @@ public sealed class GuanceClient : IAsyncDisposable
             .WithTag(RumConstants.IsSignIn, user is null ? "F" : "T")
             .WithTag(
                 RumConstants.UserId,
-                user?.Id ?? (config.Logging.EnableLinkRumData ? session.SessionId : null))
+                user?.Id ?? (config.Logging.EnableLinkRumData ? anonymousUserId : null))
             .WithTag(RumConstants.UserName, user?.Name)
             .WithTag(RumConstants.UserEmail, user?.Email)
             .WithTag(RumConstants.SessionId, config.Logging.EnableLinkRumData ? session.SessionId : null)

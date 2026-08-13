@@ -120,6 +120,44 @@ public sealed class LogInputTests
     }
 
     [Fact]
+    public async Task AddLog_WhenRumLinkIsEnabled_ReusesPersistentAnonymousUserId()
+    {
+        var cacheDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "guance-rum-anonymous-log-tests",
+            Guid.NewGuid().ToString("N"));
+        var logging = new LogConfig
+        {
+            EnableCustomLog = true,
+            EnableLinkRumData = true
+        };
+
+        var firstRequests = new List<CapturedRequest>();
+        await using (var firstClient = CreateClient(firstRequests, logging, cacheDirectory, HttpStatusCode.Accepted))
+        {
+            firstClient.AddLog("first", LogStatus.Info);
+            await firstClient.FlushAsync();
+        }
+
+        var secondRequests = new List<CapturedRequest>();
+        await using (var secondClient = CreateClient(secondRequests, logging, cacheDirectory, HttpStatusCode.Accepted))
+        {
+            secondClient.AddLog("second", LogStatus.Info);
+            await secondClient.FlushAsync();
+        }
+
+        var firstBody = Assert.Single(firstRequests, item => item.Uri.AbsolutePath == "/v1/write/logging").Body;
+        var secondBody = Assert.Single(secondRequests, item => item.Uri.AbsolutePath == "/v1/write/logging").Body;
+        var firstUserId = Regex.Match(firstBody, "(?:^|,)userid=(?<value>[^, ]+)").Groups["value"].Value;
+        var secondUserId = Regex.Match(secondBody, "(?:^|,)userid=(?<value>[^, ]+)").Groups["value"].Value;
+        var firstSessionId = Regex.Match(firstBody, "(?:^|,)session_id=(?<value>[^, ]+)").Groups["value"].Value;
+
+        Assert.Matches("^ft\\.rd_[0-9a-f]{32}$", firstUserId);
+        Assert.Equal(firstUserId, secondUserId);
+        Assert.NotEqual(firstSessionId, firstUserId);
+    }
+
+    [Fact]
     public async Task AddLog_TruncatesMessageToThirtyKilobytesAtUtf8Boundary()
     {
         var requests = new List<CapturedRequest>();
