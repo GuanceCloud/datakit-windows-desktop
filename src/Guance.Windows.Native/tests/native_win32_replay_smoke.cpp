@@ -304,12 +304,7 @@ int main() {
     guance_sdk_handle handle = guance_sdk_init(&config);
     assert(handle != nullptr);
 
-    guance_rum_register_replay_window(handle, reinterpret_cast<uintptr_t>(window));
-    guance_rum_start_view(handle, "NativeWin32Smoke");
-    guance_sdk_flush(handle);
-    guance_rum_capture_replay_click(handle, reinterpret_cast<uintptr_t>(button), "Smoke Button", 32, 120);
-    guance_rum_capture_replay_input(handle, reinterpret_cast<uintptr_t>(edit), "Smoke Edit");
-    guance_rum_capture_replay_resize(handle, reinterpret_cast<uintptr_t>(window), "Native RUM Smoke", 480, 280);
+    guance_rum_start_session_replay(handle);
     guance_sdk_flush(handle);
 
     const std::string browser_record =
@@ -322,6 +317,13 @@ int main() {
                browser_record.size(),
                1722300000123,
                1) == 1);
+
+    guance_rum_register_replay_window(handle, reinterpret_cast<uintptr_t>(window));
+    guance_rum_start_view(handle, "NativeWin32Smoke");
+    guance_sdk_flush(handle);
+    guance_rum_capture_replay_click(handle, reinterpret_cast<uintptr_t>(button), "Smoke Button", 32, 120);
+    guance_rum_capture_replay_input(handle, reinterpret_cast<uintptr_t>(edit), "Smoke Edit");
+    guance_rum_capture_replay_resize(handle, reinterpret_cast<uintptr_t>(window), "Native RUM Smoke", 480, 280);
     guance_sdk_flush(handle);
 
     const char* action_id = guance_rum_start_action_ext(handle, "Native Action", "click", 1);
@@ -336,7 +338,26 @@ int main() {
 
     const auto requests = server.wait_for_requests();
     assert(requests.size() == 4);
-    const auto request = requests.front();
+    for (const auto& replay_request : requests) {
+        if (contains(replay_request, "POST /v1/write/rum/replay")) {
+            if (!contains(replay_request, "name=\"view_id\"\r\n\r\n") ||
+                contains(replay_request, "name=\"view_id\"\r\n\r\n\r\n")) {
+                std::cerr << "Replay request contains an empty view_id\n";
+                return 1;
+            }
+        }
+    }
+
+    assert(contains(requests[0], "POST /v1/write/rum/replay"));
+    assert(!contains(requests[0], "browser-native-session"));
+    assert(contains(requests[0], "name=\"session_id\"\r\n\r\n"));
+    assert(contains(requests[0], "name=\"view_id\"\r\n\r\nbrowser-native-view\r\n"));
+    const auto browser_segment = inflate_stored_zlib(multipart_segment(requests[0]));
+    assert(!contains(browser_segment, "browser-native-session"));
+    assert(contains(browser_segment, "\"view\":{\"id\":\"browser-native-view\"}"));
+    assert(contains(browser_segment, browser_record));
+
+    const auto& request = requests[1];
     assert(contains(request, "POST /v1/write/rum/replay"));
     assert(contains(request, "token=token%20value%2Bplus"));
     assert(contains(request, "Content-Type: multipart/form-data; boundary="));
@@ -353,8 +374,8 @@ int main() {
     assert(contains(initial_segment, "\"wireframes\":["));
     assert(contains(initial_segment, "\"label\":\"Window\""));
     assert(!contains(initial_segment, "secret-value"));
-    assert(contains(requests[1], "name=\"records_count\"\r\n\r\n3\r\n"));
-    const auto interaction_segment = inflate_stored_zlib(multipart_segment(requests[1]));
+    assert(contains(requests[2], "name=\"records_count\"\r\n\r\n3\r\n"));
+    const auto interaction_segment = inflate_stored_zlib(multipart_segment(requests[2]));
     assert(contains(interaction_segment, "\"source\":2"));
     assert(contains(interaction_segment, "Smoke Button"));
     assert(contains(interaction_segment, "\"event_type\":\"input\""));
@@ -362,14 +383,6 @@ int main() {
     assert(!contains(interaction_segment, "secret-value"));
     assert(contains(interaction_segment, "\"source\":4"));
     assert(contains(interaction_segment, "Native RUM Smoke"));
-    assert(contains(requests[2], "POST /v1/write/rum/replay"));
-    assert(!contains(requests[2], "browser-native-session"));
-    assert(contains(requests[2], "name=\"session_id\"\r\n\r\n"));
-    assert(contains(requests[2], "name=\"view_id\"\r\n\r\nbrowser-native-view\r\n"));
-    const auto browser_segment = inflate_stored_zlib(multipart_segment(requests[2]));
-    assert(!contains(browser_segment, "browser-native-session"));
-    assert(contains(browser_segment, "\"view\":{\"id\":\"browser-native-view\"}"));
-    assert(contains(browser_segment, browser_record));
     assert(contains(requests[3], "POST /v1/write/rum"));
     assert(contains(requests[3], "sdk_name=df_windows_rum_sdk"));
     assert(!contains(requests[3], "df_android_rum_sdk"));

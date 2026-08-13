@@ -1068,17 +1068,7 @@ void RumCore::start_view(const char* name) {
     {
         std::lock_guard lock(mutex_);
         action_closed = close_current_action_locked(monotonic_time_nanoseconds());
-        if (active_view_) {
-            flush_replay_pending_locked();
-        } else {
-            replay_pending_records_.clear();
-            replay_pending_view_id_.clear();
-            replay_pending_has_full_snapshot_ = false;
-            replay_pending_creation_reason_ = "incremental";
-            replay_pending_start_ms_ = 0;
-            replay_pending_end_ms_ = 0;
-            replay_pending_bytes_ = 0;
-        }
+        flush_replay_pending_locked();
         previous = active_view_;
         active_view_ = View{uuid32(), str_or_empty(name), previous ? previous->name : std::string{}, unix_time_nanoseconds(), monotonic_time_nanoseconds()};
         replay_index_in_view_ = 0;
@@ -1945,7 +1935,7 @@ void RumCore::set_session_replay_hidden(uintptr_t hwnd, bool hidden) {
 }
 
 void RumCore::capture_session_replay_snapshot() {
-    if (!session_replay_recording_) {
+    if (!session_replay_recording_ || !active_view_) {
         return;
     }
     const auto timestamp_ms = unix_time_milliseconds();
@@ -2012,6 +2002,9 @@ std::pair<std::string, std::string> RumCore::build_session_replay_segment(
     const auto view_id = !view_id_override.empty()
         ? view_id_override
         : (active_view_ ? active_view_->id : std::string{});
+    if (view_id.empty()) {
+        return {};
+    }
     if (replay_segment_view_id_ != view_id) {
         replay_segment_view_id_ = view_id;
         replay_index_in_view_ = 0;
@@ -2067,6 +2060,10 @@ void RumCore::add_replay_record(
     }
 
     if (record_json.empty()) {
+        return;
+    }
+
+    if (view_id_override.empty() && !active_view_) {
         return;
     }
 
