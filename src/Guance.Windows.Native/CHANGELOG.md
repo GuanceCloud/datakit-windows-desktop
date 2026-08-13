@@ -3,6 +3,18 @@
 All notable changes to `Guance.Windows.Native`, distributed through the
 `guance-windows-native` vcpkg port, are recorded here.
 
+## [0.1.0-alpha.6]
+
+### Added
+
+- Automatic Deflate compression for Native RUM and Log intake uploads, with a configurable partial-batch flush interval.
+- Persistent anonymous user identifiers scoped by RUM application ID and shared across Native and Electron telemetry.
+- Automatic application launch Actions for Native and Electron integrations.
+
+### Fixed
+
+- Session Replay no longer uploads segments without an associated View ID.
+
 ## [0.1.0-alpha.5]
 
 ### Added
