@@ -20,7 +20,7 @@ export function buildRumConfig(
   if (!bridgeEnabled || !rum.enabled) {
     return {
       enabled: false,
-      reason: "Windows 原生 RUM Bridge 未启用，请检查原生端应用 ID 和上报地址。",
+      reason: "Windows native RUM Bridge is disabled. Check the native application ID and intake URL.",
     };
   }
 

@@ -70,7 +70,7 @@ describe("loadDesktopBootstrap", () => {
         { href: "http://127.0.0.1:5173/", pathname: "/", protocol: "http:" },
         fetchBootstrap,
       ),
-    ).rejects.toThrow("Electron 窗口");
+    ).rejects.toThrow("Electron window");
 
     expect(fetchBootstrap).not.toHaveBeenCalled();
   });

@@ -37,7 +37,7 @@ describe("buildRumConfig", () => {
     const result = build(monitoring({ bridgeEnabled: false }));
 
     expect(result.enabled).toBe(false);
-    expect(result.reason).toContain("Windows 原生 RUM Bridge");
+    expect(result.reason).toContain("Windows native RUM Bridge");
   });
 
   it("builds a collector-only Browser RUM configuration for native bridge mode", () => {

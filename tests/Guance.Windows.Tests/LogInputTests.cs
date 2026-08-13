@@ -166,7 +166,7 @@ public sealed class LogInputTests
             EnableCustomLog = true
         });
 
-        client.AddLog(string.Concat(Enumerable.Repeat("汉", 12_000)), LogStatus.Info);
+        client.AddLog(string.Concat(Enumerable.Repeat("€", 12_000)), LogStatus.Info);
         await client.FlushAsync();
 
         var body = Assert.Single(requests, item => item.Uri.AbsolutePath == "/v1/write/logging").Body;

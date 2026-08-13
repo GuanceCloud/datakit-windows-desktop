@@ -25,7 +25,7 @@ export async function loadDesktopBootstrap(
 
   if (!isBuiltInRemoteRenderer(location)) {
     throw new Error(
-      "未检测到 Electron preload bridge。请使用 npm run dev 打开的 Electron 窗口，不要直接在浏览器中打开 Vite 地址。",
+      "Electron preload bridge was not detected. Open the Electron window with npm run dev instead of opening the Vite URL directly in a browser.",
     );
   }
 

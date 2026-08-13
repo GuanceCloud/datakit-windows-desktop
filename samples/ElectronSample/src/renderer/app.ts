@@ -22,17 +22,17 @@ const EVENT_TONES: Record<string, RumEventPreview["tone"]> = {
 };
 
 const EVENT_LABELS: Record<string, string> = {
-  view: "View 已采集",
-  action: "Action 已采集",
-  resource: "Resource 已采集",
-  error: "Error 已采集",
-  long_task: "Long Task 已采集",
+  view: "View captured",
+  action: "Action captured",
+  resource: "Resource captured",
+  error: "Error captured",
+  long_task: "Long Task captured",
 };
 
 const INITIAL_EVENTS: RumEventPreview[] = [
-  { type: "view", label: "等待 RUM 初始化", time: "--:--:--", tone: "blue" },
-  { type: "action", label: "等待界面交互", time: "--:--:--", tone: "mint" },
-  { type: "resource", label: "本地 API 已就绪", time: "--:--:--", tone: "amber" },
+  { type: "view", label: "Waiting for RUM initialization", time: "--:--:--", tone: "blue" },
+  { type: "action", label: "Waiting for user interaction", time: "--:--:--", tone: "mint" },
+  { type: "resource", label: "Local API ready", time: "--:--:--", tone: "amber" },
 ];
 
 const appRootCandidate = document.querySelector<HTMLDivElement>("#app");
@@ -62,12 +62,12 @@ function nowLabel(): string {
 function renderShell(bootstrap: DesktopBootstrap): void {
   document.body.classList.toggle("remote-renderer", bootstrap.hybrid.isRemoteRenderer);
   const isWindows = bootstrap.app.platform === "win32";
-  const remoteState = bootstrap.hybrid.remoteUrl ? "外部 RUM 页面已配置" : "内置 RUM 页面已就绪";
+  const remoteState = bootstrap.hybrid.remoteUrl ? "External RUM page configured" : "Built-in RUM page ready";
   const rendererMode = bootstrap.app.rendererMode === "vite-dev-server"
-    ? "Vite 热更新"
+    ? "Vite hot reload"
     : bootstrap.app.rendererMode === "remote-http"
-      ? "HTTP 隔离页面"
-      : "file:// 生产页面";
+      ? "Isolated HTTP page"
+      : "file:// production page";
   const rendererLabel = bootstrap.hybrid.isRemoteRenderer ? "REMOTE RENDERER" : "LOCAL RENDERER";
   const replayState = bootstrap.monitoring.rum.sessionReplay.enabled
     ? "EXPERIMENTAL REPLAY ON"
@@ -88,10 +88,10 @@ function renderShell(bootstrap: DesktopBootstrap): void {
           <span class="pulse-dot"></span>
           <span>WINDOWS NATIVE BRIDGE · RUM + REPLAY</span>
         </div>
-        <div class="window-controls" aria-label="窗口控制">
-          <button type="button" data-window-action="minimize" aria-label="最小化">—</button>
-          <button type="button" data-window-action="maximize" aria-label="最大化">□</button>
-          <button type="button" class="window-close" data-window-action="close" aria-label="关闭">×</button>
+        <div class="window-controls" aria-label="Window controls">
+          <button type="button" data-window-action="minimize" aria-label="Minimize">—</button>
+          <button type="button" data-window-action="maximize" aria-label="Maximize">□</button>
+          <button type="button" class="window-close" data-window-action="close" aria-label="Close">×</button>
         </div>
       </header>
 
@@ -105,7 +105,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
           <span class="chevron">⌄</span>
         </div>
 
-        <nav class="nav-stack" aria-label="主导航">
+        <nav class="nav-stack" aria-label="Main navigation">
           <p class="nav-label">WORKSPACE</p>
           <button class="nav-item active" type="button" data-route="operations">
             <span class="nav-icon">◫</span>
@@ -162,21 +162,21 @@ function renderShell(bootstrap: DesktopBootstrap): void {
           <div>
             <p class="eyebrow">LIVE ACCEPTANCE WORKSPACE</p>
             <h1>Operations pulse</h1>
-            <p class="hero-copy">在一个真实 Electron 工作台中验证 View、Action、Resource、Error 与 Long Task。</p>
+            <p class="hero-copy">Validate View, Action, Resource, Error, and Long Task in a real Electron workspace.</p>
           </div>
           <div class="hero-actions">
             <button class="button button-secondary" type="button" id="choose-workspace" data-guance-action-name="select_native_workspace">
               <span>⌘</span>
-              选择本地工作区
+              Select local workspace
             </button>
             <button class="button button-primary" type="button" id="open-remote" data-guance-action-name="open_hybrid_remote">
               <span>↗</span>
-              打开混合页面
+              Open hybrid page
             </button>
           </div>
         </section>
 
-        <section class="runtime-strip" aria-label="运行时状态">
+        <section class="runtime-strip" aria-label="Runtime status">
           <div class="runtime-block">
             <span class="status-orb status-orb-live"></span>
             <span>
@@ -199,7 +199,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
           </div>
         </section>
 
-        <section class="metrics-grid" aria-label="RUM 指标概览">
+        <section class="metrics-grid" aria-label="RUM metrics overview">
           <article class="metric-card">
             <div class="metric-head"><span>ACTIVE VIEWS</span><span class="metric-icon mint">◎</span></div>
             <div class="metric-value"><strong id="metric-views">01</strong><small>window</small></div>
@@ -229,7 +229,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
                 <span class="panel-kicker">WINDOW PERFORMANCE</span>
                 <h2>Interaction latency</h2>
               </div>
-              <div class="segmented-control" aria-label="时间范围">
+              <div class="segmented-control" aria-label="Time range">
                 <button type="button">1H</button>
                 <button class="active" type="button">6H</button>
                 <button type="button">24H</button>
@@ -240,7 +240,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
               <span><i class="legend-blue"></i>Native bridge</span>
               <strong>P75 184ms</strong>
             </div>
-            <div class="line-chart" role="img" aria-label="交互延迟趋势图">
+            <div class="line-chart" role="img" aria-label="Interaction latency trend chart">
               <div class="chart-axis"><span>300</span><span>200</span><span>100</span><span>0</span></div>
               <svg viewBox="0 0 760 220" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
@@ -293,8 +293,8 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <div class="deferred-note">
               <span class="deferred-icon">Ⅱ</span>
               <span>
-                <strong>Session Replay（实验性）</strong>
-                <small>默认关闭；由原生配置决定采样、会话、持久化和上传。</small>
+                <strong>Session Replay (Experimental)</strong>
+                <small>Disabled by default; native configuration controls sampling, sessions, persistence, and uploads.</small>
               </span>
             </div>
           </article>
@@ -312,32 +312,32 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <div class="lab-controls">
               <button class="lab-action" type="button" id="run-success" data-guance-action-name="load_orders_success">
                 <span class="lab-action-icon mint">↗</span>
-                <span><strong>成功请求</strong><small>GET /api/orders · 200</small></span>
+                <span><strong>Successful request</strong><small>GET /api/orders · 200</small></span>
                 <span class="lab-arrow">→</span>
               </button>
               <button class="lab-action" type="button" id="run-failure" data-guance-action-name="load_orders_failure">
                 <span class="lab-action-icon amber">↗</span>
-                <span><strong>失败请求</strong><small>GET /api/failure · 503</small></span>
+                <span><strong>Failed request</strong><small>GET /api/failure · 503</small></span>
                 <span class="lab-arrow">→</span>
               </button>
               <button class="lab-action" type="button" id="emit-error" data-guance-action-name="emit_synthetic_error">
                 <span class="lab-action-icon red">!</span>
-                <span><strong>前端错误</strong><small>Handled exception</small></span>
+                <span><strong>Frontend error</strong><small>Handled exception</small></span>
                 <span class="lab-arrow">→</span>
               </button>
               <button class="lab-action" type="button" id="block-thread" data-guance-action-name="block_renderer_thread">
                 <span class="lab-action-icon blue">⌁</span>
-                <span><strong>长任务</strong><small>Renderer block · 240ms</small></span>
+                <span><strong>Long task</strong><small>Renderer block · 240ms</small></span>
                 <span class="lab-arrow">→</span>
               </button>
               <button class="lab-action lab-action-native" type="button" id="run-native-scenario" data-guance-action-name="run_complete_native_scenario">
                 <span class="lab-action-icon mint">N</span>
-                <span><strong>完整 Native 场景</strong><small>View · Action · Resource · Error · Long Task · Log · Replay</small></span>
+                <span><strong>Complete native scenario</strong><small>View · Action · Resource · Error · Long Task · Log · Replay</small></span>
                 <span class="lab-arrow">→</span>
               </button>
               <button class="lab-action lab-action-native lab-action-crash" type="button" id="crash-native-bridge" data-guance-action-name="crash_native_bridge">
                 <span class="lab-action-icon red">!</span>
-                <span><strong>Native 崩溃恢复</strong><small>Access violation · Minidump · automatic recovery</small></span>
+                <span><strong>Native crash recovery</strong><small>Access violation · Minidump · automatic recovery</small></span>
                 <span class="lab-arrow">→</span>
               </button>
             </div>
@@ -367,14 +367,14 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             </div>
           </div>
           <p class="replay-intro">
-            用真实表单、动态 DOM、弹层、拖放、滚动和 Canvas 验证实验性 Session Replay；默认关闭，开启后记录通过原生 Bridge 持久化并上传。
+            Validate experimental Session Replay with real forms, dynamic DOM, overlays, drag and drop, scrolling, and Canvas. It is disabled by default; when enabled, recordings are persisted and uploaded through the native Bridge.
           </p>
 
           <div class="replay-grid">
             <section class="replay-zone replay-form-zone" aria-labelledby="replay-form-title">
               <div class="replay-zone-head">
                 <span>01</span>
-                <div><strong id="replay-form-title">Form & privacy states</strong><small>输入、选择与敏感字段</small></div>
+                <div><strong id="replay-form-title">Form & privacy states</strong><small>Input, selection, and sensitive fields</small></div>
               </div>
               <div class="replay-form-grid">
                 <label class="replay-field">
@@ -424,7 +424,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <section class="replay-zone" aria-labelledby="replay-dynamic-title">
               <div class="replay-zone-head">
                 <span>02</span>
-                <div><strong id="replay-dynamic-title">Dynamic DOM</strong><small>新增、删除与折叠状态</small></div>
+                <div><strong id="replay-dynamic-title">Dynamic DOM</strong><small>Add, remove, and collapse states</small></div>
               </div>
               <div class="replay-dynamic-list" id="replay-dynamic-list" aria-live="polite">
                 <div class="replay-dynamic-row"><i>A1</i><span>Renderer bootstrap</span><b>READY</b></div>
@@ -454,7 +454,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <section class="replay-zone" aria-labelledby="replay-overlay-title">
               <div class="replay-zone-head">
                 <span>03</span>
-                <div><strong id="replay-overlay-title">Overlay & pointer</strong><small>弹层、提示和拖放轨迹</small></div>
+                <div><strong id="replay-overlay-title">Overlay & pointer</strong><small>Overlay, tooltip, and drag paths</small></div>
               </div>
               <div class="replay-button-row replay-overlay-actions">
                 <button id="replay-dialog-open" data-replay-fixture="overlay" data-guance-action-name="open_replay_dialog" type="button">Open dialog</button>
@@ -484,7 +484,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <section class="replay-zone replay-canvas-zone" aria-labelledby="replay-canvas-title">
               <div class="replay-zone-head">
                 <span>04</span>
-                <div><strong id="replay-canvas-title">Canvas trace pad</strong><small>实验性 Canvas 录制验证</small></div>
+                <div><strong id="replay-canvas-title">Canvas trace pad</strong><small>Experimental Canvas recording validation</small></div>
               </div>
               <canvas id="replay-canvas" data-replay-fixture="canvas" width="560" height="180" aria-label="Replay pointer drawing canvas"></canvas>
               <div class="replay-canvas-foot">
@@ -498,7 +498,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <div class="replay-dialog-icon">R</div>
             <p class="panel-kicker">MODAL SNAPSHOT</p>
             <h3 id="replay-dialog-title">Overlay state captured</h3>
-            <p>验证打开、聚焦、表单编辑和关闭弹层时的连续 DOM 状态。</p>
+            <p>Validate continuous DOM state while opening, focusing, editing forms, and closing the overlay.</p>
             <label class="replay-field">
               <span>Dialog annotation</span>
               <input data-replay-fixture="input" type="text" placeholder="Add a modal note" />
@@ -512,7 +512,7 @@ function renderShell(bootstrap: DesktopBootstrap): void {
             <span class="status-orb" id="rum-orb"></span>
             <span>
               <small>RUM TRANSPORT</small>
-              <strong data-testid="rum-status" id="rum-status">正在初始化…</strong>
+              <strong data-testid="rum-status" id="rum-status">Initializing…</strong>
             </span>
           </div>
           <div class="status-details">
@@ -614,7 +614,7 @@ function initializeReplayPlayground(onOfflineAction: () => void): void {
   document.querySelector("#replay-add-row")?.addEventListener("click", addDynamicRow);
   document.querySelector("#replay-remove-row")?.addEventListener("click", () => {
     if (!dynamicList || dynamicList.children.length <= 1) {
-      showToast("至少保留一个动态节点。", "warning");
+      showToast("Keep at least one dynamic node.", "warning");
       return;
     }
     dynamicList.lastElementChild?.remove();
@@ -653,7 +653,7 @@ function initializeReplayPlayground(onOfflineAction: () => void): void {
     onOfflineAction();
   });
   document.querySelector("#replay-toast")?.addEventListener("click", () => {
-    showToast("Replay overlay fixture 已显示。");
+    showToast("Replay overlay fixture is visible.");
     markInteraction("toast");
     onOfflineAction();
   });
@@ -824,7 +824,7 @@ async function initialize(): Promise<void> {
 
     capturedEvents.unshift({
       type,
-      label: EVENT_LABELS[type] || `${type} 已采集`,
+      label: EVENT_LABELS[type] || `${type} captured`,
       time: nowLabel(),
       tone: EVENT_TONES[type] || "mint",
     });
@@ -848,7 +848,7 @@ async function initialize(): Promise<void> {
       appRoot.dataset.logInitialized = "true";
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown initialization error";
-      showToast(`Log 初始化失败 · ${message}`, "danger");
+      showToast(`Log initialization failed · ${message}`, "danger");
     }
   }
 
@@ -884,18 +884,18 @@ async function initialize(): Promise<void> {
       appRoot.dataset.rumInitialized = "true";
       appRoot.dataset.traceEnabled = String(bootstrap.monitoring.trace.enabled);
       setRumStatus(
-        `Windows Native Bridge · RUM${bootstrap.monitoring.log.enabled ? " + Log" : ""}${bootstrap.monitoring.trace.enabled ? " + Trace" : ""}${bootstrap.monitoring.rum.sessionReplay.enabled ? " + 实验性 Replay" : ""}`,
+        `Windows Native Bridge · RUM${bootstrap.monitoring.log.enabled ? " + Log" : ""}${bootstrap.monitoring.trace.enabled ? " + Trace" : ""}${bootstrap.monitoring.rum.sessionReplay.enabled ? " + Experimental Replay" : ""}`,
         true,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown initialization error";
-      setRumStatus(`初始化失败 · ${message}`, false);
-      showToast("RUM 初始化失败，请检查配置。", "danger");
+      setRumStatus(`Initialization failed · ${message}`, false);
+      showToast("RUM initialization failed. Check the configuration.", "danger");
     }
   } else {
     const logInitialized = appRoot.dataset.logInitialized === "true";
     setRumStatus(
-      logInitialized ? "Windows Native Bridge · Log" : result.reason || "监控能力未配置",
+      logInitialized ? "Windows Native Bridge · Log" : result.reason || "Monitoring is not configured",
       logInitialized,
     );
   }
@@ -934,37 +934,37 @@ async function initialize(): Promise<void> {
         recordPreview("view");
       }
       recordProgrammaticAcceptanceAction(event, `navigate_${route}`);
-      showToast(`已切换到 ${button.textContent?.trim().replace(/\s+/g, " ") || route}`);
+      showToast(`Switched to ${button.textContent?.trim().replace(/\s+/g, " ") || route}`);
     });
   });
 
   document.querySelector("#choose-workspace")?.addEventListener("click", async () => {
     if (!bridge) {
-      showToast("远程 renderer 不具备本地文件访问权限。", "warning");
+      showToast("The remote renderer cannot access local files.", "warning");
       return;
     }
     const workspace = await bridge.selectWorkspace();
     if (!workspace) {
-      showToast("已取消工作区选择。", "warning");
+      showToast("Workspace selection canceled.", "warning");
       return;
     }
     previewActionWhenOffline();
-    showToast(`本地工作区 ${workspace.name} 已连接`);
+    showToast(`Local workspace ${workspace.name} connected`);
   });
 
   document.querySelector("#open-remote")?.addEventListener("click", async () => {
     if (!bridge) {
-      showToast("当前已经是隔离的远程 renderer。", "warning");
+      showToast("Already running in an isolated remote renderer.", "warning");
       return;
     }
     const response = await bridge.openRemoteWorkspace();
     if (!response.opened) {
-      showToast(response.reason || "未能打开远程工作区。", "warning");
+      showToast(response.reason || "Failed to open the remote workspace.", "warning");
       return;
     }
     previewActionWhenOffline();
-    const source = response.instrumentation === "built-in" ? "内置 RUM" : "外部自接入";
-    showToast(response.reused ? "已聚焦远程工作区。" : `${source} 远程工作区已打开。`);
+    const source = response.instrumentation === "built-in" ? "Built-in RUM" : "External integration";
+    showToast(response.reused ? "Remote workspace focused." : `${source} remote workspace opened.`);
   });
 
   document.querySelector("#run-success")?.addEventListener("click", async () => {
@@ -980,10 +980,10 @@ async function initialize(): Promise<void> {
       if (!rumEnabled) recordPreview("resource");
       document.querySelector("#metric-resource")!.textContent = String(elapsed);
       document.querySelector("#resource-delta")!.textContent = "HTTP 200";
-      showToast(`Resource 成功，耗时 ${elapsed}ms`);
+      showToast(`Resource succeeded in ${elapsed}ms`);
     } catch (error) {
       if (rumEnabled) datafluxRum.addError(error instanceof Error ? error : new Error(String(error)));
-      showToast("Resource 请求失败。", "danger");
+      showToast("Resource request failed.", "danger");
     }
   });
 
@@ -996,7 +996,7 @@ async function initialize(): Promise<void> {
     if (!rumEnabled) recordPreview("resource");
     document.querySelector("#metric-resource")!.textContent = String(elapsed);
     document.querySelector("#resource-delta")!.textContent = `HTTP ${response.status}`;
-    showToast(`已生成 HTTP ${response.status} Resource`, "warning");
+    showToast(`Generated HTTP ${response.status} Resource`, "warning");
   });
 
   document.querySelector("#emit-error")?.addEventListener("click", () => {
@@ -1010,7 +1010,7 @@ async function initialize(): Promise<void> {
     } else {
       recordPreview("error");
     }
-    showToast("已生成可控前端错误。", "danger");
+    showToast("Generated a controlled frontend error.", "danger");
   });
 
   document.querySelector("#block-thread")?.addEventListener("click", () => {
@@ -1023,14 +1023,14 @@ async function initialize(): Promise<void> {
       recordPreview("long_task");
     }
     if (bridge) {
-      void bridge.showNotification("240ms renderer Long Task 已完成。");
+      void bridge.showNotification("240ms renderer Long Task completed.");
     }
-    showToast("Long Task 已完成，等待 PerformanceObserver 采集。");
+    showToast("Long Task completed; waiting for PerformanceObserver collection.");
   });
 
   document.querySelector<HTMLButtonElement>("#run-native-scenario")?.addEventListener("click", async (event) => {
     if (!bridge) {
-      showToast("Native Host 不可用。", "danger");
+      showToast("Native Host unavailable.", "danger");
       return;
     }
     const button = event.currentTarget as HTMLButtonElement;
@@ -1038,14 +1038,14 @@ async function initialize(): Promise<void> {
     try {
       const result = await bridge.runNativeAcceptanceScenario();
       if (!result.accepted) {
-        showToast(result.reason || "Native 场景命令被拒绝。", "danger");
+        showToast(result.reason || "Native scenario command was rejected.", "danger");
         return;
       }
       appRoot.dataset.nativeScenarioId = result.scenarioId || "";
       for (const signal of ["view", "action", "resource", "error", "long_task"]) {
         markCoverage(signal);
       }
-      showToast(`Native 全场景已提交 · ${result.scenarioId}`);
+      showToast(`Complete native scenario submitted · ${result.scenarioId}`);
     } finally {
       button.disabled = false;
     }
@@ -1053,7 +1053,7 @@ async function initialize(): Promise<void> {
 
   document.querySelector<HTMLButtonElement>("#crash-native-bridge")?.addEventListener("click", async (event) => {
     if (!bridge) {
-      showToast("Native Host 不可用。", "danger");
+      showToast("Native Host unavailable.", "danger");
       return;
     }
     const button = event.currentTarget as HTMLButtonElement;
@@ -1061,11 +1061,11 @@ async function initialize(): Promise<void> {
     try {
       const result = await bridge.crashNativeBridge();
       if (!result.accepted) {
-        showToast(result.reason || "Native 崩溃命令被拒绝。", "danger");
+        showToast(result.reason || "Native crash command was rejected.", "danger");
         return;
       }
       appRoot.dataset.nativeCrashRecovery = result.recoveryFilter || "";
-      showToast("Native Bridge 已崩溃，正在自动重启并恢复上报。", "danger");
+      showToast("Native Bridge crashed and is restarting automatically to resume reporting.", "danger");
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
     } finally {
       button.disabled = false;
@@ -1093,7 +1093,7 @@ initialize().catch((error) => {
   appRoot.innerHTML = `
     <main class="fatal-state">
       <span>!</span>
-      <h1>Electron renderer 启动失败</h1>
+      <h1>Electron renderer failed to start</h1>
       <p>${escapeHtml(error instanceof Error ? error.message : error)}</p>
     </main>
   `;
