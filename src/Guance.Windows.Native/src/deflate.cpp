@@ -125,6 +125,17 @@ std::size_t hash_at(std::string_view input, std::size_t position) {
     return ((static_cast<std::size_t>(first) * 251u + second) * 251u + third) & 0xffffu;
 }
 
+uint32_t adler32(std::string_view input) {
+    constexpr uint32_t modulus = 65521;
+    uint32_t first = 1;
+    uint32_t second = 0;
+    for (const unsigned char byte : input) {
+        first = (first + byte) % modulus;
+        second = (second + first) % modulus;
+    }
+    return (second << 16u) | first;
+}
+
 } // namespace
 
 std::string deflate_compress(std::string_view input) {
@@ -199,7 +210,20 @@ std::string deflate_compress(std::string_view input) {
     }
 
     write_fixed_symbol(writer, 256);
-    return writer.finish();
+    auto raw_deflate = writer.finish();
+
+    std::string output;
+    output.reserve(raw_deflate.size() + 6);
+    output.push_back(static_cast<char>(0x78)); // DEFLATE with a 32 KiB window.
+    output.push_back(static_cast<char>(0x01)); // Fastest compression, no dictionary.
+    output += raw_deflate;
+
+    const auto checksum = adler32(input);
+    output.push_back(static_cast<char>((checksum >> 24u) & 0xffu));
+    output.push_back(static_cast<char>((checksum >> 16u) & 0xffu));
+    output.push_back(static_cast<char>((checksum >> 8u) & 0xffu));
+    output.push_back(static_cast<char>(checksum & 0xffu));
+    return output;
 }
 
 } // namespace guance::rum

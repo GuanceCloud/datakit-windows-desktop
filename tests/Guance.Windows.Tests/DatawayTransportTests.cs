@@ -148,7 +148,7 @@ public sealed class DatawayTransportTests
         Assert.NotNull(handler.BodyBytes);
         Assert.True(handler.BodyBytes!.LongLength <= UploadSizeEstimator.EstimateDeflateUpperBound(14));
         await using var input = new MemoryStream(handler.BodyBytes);
-        await using var deflate = new DeflateStream(input, CompressionMode.Decompress);
+        await using var deflate = new ZLibStream(input, CompressionMode.Decompress);
         using var reader = new StreamReader(deflate, Encoding.UTF8);
         Assert.Equal("view a=1i 1\n", await reader.ReadToEndAsync());
     }

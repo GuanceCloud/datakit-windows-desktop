@@ -109,7 +109,7 @@ internal sealed class LineProtocolTransport : IDisposable
         }
 
         await using var output = new MemoryStream();
-        await using (var deflate = new DeflateStream(output, CompressionLevel.Fastest, leaveOpen: true))
+        await using (var deflate = new ZLibStream(output, CompressionLevel.Fastest, leaveOpen: true))
         {
             var bytes = Encoding.UTF8.GetBytes(body);
             await deflate.WriteAsync(bytes.AsMemory(0, bytes.Length), cancellationToken).ConfigureAwait(false);

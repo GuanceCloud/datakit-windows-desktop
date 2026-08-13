@@ -138,6 +138,37 @@ inline std::string inflate_raw_deflate(std::string_view input) {
     return output;
 }
 
+inline uint32_t adler32(std::string_view input) {
+    constexpr uint32_t modulus = 65521;
+    uint32_t first = 1;
+    uint32_t second = 0;
+    for (const unsigned char byte : input) {
+        first = (first + byte) % modulus;
+        second = (second + first) % modulus;
+    }
+    return (second << 16u) | first;
+}
+
+inline std::string inflate_zlib_deflate(std::string_view input) {
+    assert(input.size() >= 6);
+    const auto compression_method = static_cast<unsigned char>(input[0]);
+    const auto flags = static_cast<unsigned char>(input[1]);
+    assert((compression_method & 0x0fu) == 8u);
+    assert((compression_method >> 4u) <= 7u);
+    assert(((static_cast<uint32_t>(compression_method) << 8u) | flags) % 31u == 0u);
+    assert((flags & 0x20u) == 0u);
+
+    const auto output = inflate_raw_deflate(input.substr(2, input.size() - 6));
+    const auto checksum_offset = input.size() - 4;
+    const auto expected_checksum =
+        (static_cast<uint32_t>(static_cast<unsigned char>(input[checksum_offset])) << 24u) |
+        (static_cast<uint32_t>(static_cast<unsigned char>(input[checksum_offset + 1])) << 16u) |
+        (static_cast<uint32_t>(static_cast<unsigned char>(input[checksum_offset + 2])) << 8u) |
+        static_cast<uint32_t>(static_cast<unsigned char>(input[checksum_offset + 3]));
+    assert(adler32(output) == expected_checksum);
+    return output;
+}
+
 inline std::string http_request_body(const std::string& request) {
     const auto body_start = request.find("\r\n\r\n");
     assert(body_start != std::string::npos);
@@ -146,7 +177,7 @@ inline std::string http_request_body(const std::string& request) {
 
 inline std::string inflate_http_request_body(const std::string& request) {
     assert(request.find("Content-Encoding: deflate\r\n") != std::string::npos);
-    return inflate_raw_deflate(http_request_body(request));
+    return inflate_zlib_deflate(http_request_body(request));
 }
 
 } // namespace guance::test
