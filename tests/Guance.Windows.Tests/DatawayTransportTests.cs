@@ -12,6 +12,12 @@ namespace Guance.Windows.Tests;
 public sealed class DatawayTransportTests
 {
     [Fact]
+    public void GuanceConfig_EnablesIntakeCompressionByDefault()
+    {
+        Assert.True(new GuanceConfig().CompressIntakeRequests);
+    }
+
+    [Fact]
     public void HttpHeaderRedactor_MasksSensitiveHeaders()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://example.com");
@@ -72,6 +78,7 @@ public sealed class DatawayTransportTests
             DatawayUrl = "https://openway.guance.com",
             ClientToken = "token value",
             RumAppId = "app",
+            CompressIntakeRequests = false,
             HttpMessageHandlerFactory = () => handler
         });
 
@@ -131,14 +138,13 @@ public sealed class DatawayTransportTests
     }
 
     [Fact]
-    public async Task SendAsync_CompressesDeflateBodyWhenEnabled()
+    public async Task SendAsync_CompressesZlibBodyByDefault()
     {
         var handler = new CaptureHandler(new HttpResponseMessage(HttpStatusCode.Accepted));
         using var transport = new DatawayTransport(new GuanceConfig
         {
             DatakitUrl = "http://127.0.0.1:9529",
             RumAppId = "app",
-            CompressIntakeRequests = true,
             HttpMessageHandlerFactory = () => handler
         });
 

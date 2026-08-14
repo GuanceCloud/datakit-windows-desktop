@@ -52,8 +52,8 @@ public sealed class GuanceConfig
     public TimeSpan FlushInterval { get; init; } = TimeSpan.FromSeconds(15);
     /// <summary>Gets the timeout applied to intake HTTP requests.</summary>
     public TimeSpan HttpTimeout { get; init; } = TimeSpan.FromSeconds(10);
-    /// <summary>Enables compression of intake request bodies.</summary>
-    public bool CompressIntakeRequests { get; init; }
+    /// <summary>Enables compression of intake request bodies; enabled by default.</summary>
+    public bool CompressIntakeRequests { get; init; } = true;
     /// <summary>Gets an optional directory for persistent telemetry queues.</summary>
     public string? CacheDirectory { get; init; }
     /// <summary>Gets an optional factory for the HTTP handler used by intake transports.</summary>
