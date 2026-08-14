@@ -23,6 +23,7 @@ public sealed class LogInputTests
             Version = "2.0.0",
             CacheDirectory = cacheDirectory,
             FlushInterval = TimeSpan.FromHours(1),
+            CompressIntakeRequests = false,
             HttpMessageHandlerFactory = () => new CaptureHandler(requests),
             Logging = new LogConfig
             {
@@ -269,6 +270,7 @@ public sealed class LogInputTests
             Env = "local",
             CacheDirectory = cacheDirectory,
             FlushInterval = TimeSpan.FromHours(1),
+            CompressIntakeRequests = false,
             HttpMessageHandlerFactory = () => new CaptureHandler(requests, statusCode),
             Logging = logging
         });

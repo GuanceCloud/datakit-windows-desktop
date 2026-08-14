@@ -2,6 +2,16 @@
 
 All notable changes to the managed `Guance.Windows` NuGet package are recorded here.
 
+## [0.1.0-alpha.7]
+
+### Changed
+
+- Intake request compression is now enabled by default; applications can still disable it through `CompressIntakeRequests`.
+
+### Fixed
+
+- Managed and bundled Native RUM and Log uploads now emit zlib-wrapped Deflate bodies compatible with `Content-Encoding: deflate` receivers.
+
 ## [0.1.0-alpha.6]
 
 ### Added

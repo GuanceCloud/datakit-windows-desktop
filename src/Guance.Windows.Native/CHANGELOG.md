@@ -3,6 +3,12 @@
 All notable changes to `Guance.Windows.Native`, distributed through the
 `guance-windows-native` vcpkg port, are recorded here.
 
+## [0.1.0-alpha.7]
+
+### Fixed
+
+- Native RUM and Log uploads now emit zlib-wrapped Deflate bodies compatible with `Content-Encoding: deflate` receivers.
+
 ## [0.1.0-alpha.6]
 
 ### Added

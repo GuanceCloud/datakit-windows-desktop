@@ -7,7 +7,7 @@
     <Version>0.1.0</Version>
     <Description>Guance Windows observability SDK for RUM, tracing, logging, Session Replay, and native desktop integrations.</Description>
     <PackageProjectUrl>https://github.com/GuanceCloud/datakit-windows-desktop</PackageProjectUrl>
-    <PackageReleaseNotes>0.1.0-alpha.6 adds persistent anonymous user identifiers, automatic Native application launch tracking, Deflate-compressed Native RUM and Log uploads, protection against Session Replay segments without a View ID, and deterministic Native release validation.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.1.0-alpha.7 enables managed intake compression by default and fixes managed and bundled Native uploads to emit zlib-wrapped Deflate bodies compatible with HTTP receivers.</PackageReleaseNotes>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>Guance;Observability;RUM;Tracing;Logging;SessionReplay;Dataway;DataKit;Windows;WPF;WinForms;WinUI</PackageTags>

@@ -16,6 +16,7 @@ GuanceSdk.Init(new GuanceConfig
     Cache = new CacheOptions { MaxBatchItems = 1 },
     FlushInterval = TimeSpan.FromMinutes(5),
     HttpTimeout = TimeSpan.FromSeconds(2),
+    CompressIntakeRequests = false,
     DiagnosticListener = item => Console.Error.WriteLine($"[crash-smoke] {item.Source} status={item.StatusCode}: {item.Message}"),
     SessionReplay = new RumSessionReplayConfig { Enabled = false }
 });
